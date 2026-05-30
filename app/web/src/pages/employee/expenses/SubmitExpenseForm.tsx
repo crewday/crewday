@@ -1,4 +1,4 @@
-import { useCallback, useState } from "react";
+import { useCallback, useRef } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { fetchJson } from "@/lib/api";
 import { qk } from "@/lib/queryKeys";
@@ -7,6 +7,7 @@ import {
   fetchActiveEngagementId,
   type ExpenseClaimCreatePayload,
 } from "@/lib/expenses";
+import { usePatchReducer } from "@/lib/usePatchReducer";
 import type {
   Expense,
   ExpenseScanResult,
@@ -37,7 +38,7 @@ import { SubmitExpenseFields } from "./SubmitExpenseFields";
 //
 // Lifecycle: the parent unmounts this component on every transition out
 // of the `review` phase (Back, Submitted, manual entry → review with a
-// new scan). That guarantees a fresh `useState` initialiser on every
+// new scan). That guarantees a fresh local reducer initialiser on every
 // re-entry, so we deliberately do NOT mirror `initialScan` into local
 // state via `useEffect` — that would clobber a partially-typed value if
 // a future parent ever swapped the scan reference mid-review (and would
@@ -56,6 +57,13 @@ interface Props {
   initialScan: ExpenseScanResult | null;
   onSubmitted: () => void;
   onBack: () => void;
+}
+
+interface SubmitExpenseState {
+  values: FieldValues;
+  agentReply: string;
+  questionDismissed: boolean;
+  submitError: string | null;
 }
 
 /**
@@ -78,11 +86,16 @@ export default function SubmitExpenseForm({
   const qc = useQueryClient();
   const isScanned = initialScan !== null;
 
-  const [values, setValues] = useState<FieldValues>(() => deriveValues(initialScan));
-  const [conf] = useState<FieldConfidences>(() => deriveConfidences(initialScan));
-  const [agentReply, setAgentReply] = useState("");
-  const [questionDismissed, setQuestionDismissed] = useState(false);
-  const [submitError, setSubmitError] = useState<string | null>(null);
+  const [formState, setFormState] = usePatchReducer<SubmitExpenseState>(() => ({
+    values: deriveValues(initialScan),
+    agentReply: "",
+    questionDismissed: false,
+    submitError: null,
+  }));
+  const { values, agentReply, questionDismissed, submitError } = formState;
+  const confRef = useRef<FieldConfidences | null>(null);
+  if (confRef.current === null) confRef.current = deriveConfidences(initialScan);
+  const conf = confRef.current;
 
   // The wire contract requires `work_engagement_id`. The `/me`
   // payload deliberately omits it (a user with multiple workspaces
@@ -124,7 +137,7 @@ export default function SubmitExpenseForm({
       onSubmitted();
     },
     onError: (err: Error) => {
-      setSubmitError(err.message);
+      setFormState({ submitError: err.message });
     },
   });
 
@@ -132,22 +145,28 @@ export default function SubmitExpenseForm({
     key: K,
     value: FieldValues[K],
   ) => {
-    setValues((prev) => ({ ...prev, [key]: value }));
+    setFormState((current) => ({
+      ...current,
+      values: { ...current.values, [key]: value },
+    }));
   }, []);
 
   const dismissQuestion = useCallback(() => {
-    setValues((prev) => ({ ...prev, note_md: foldReply(prev.note_md, agentReply) }));
-    setQuestionDismissed(true);
+    setFormState((current) => ({
+      ...current,
+      values: { ...current.values, note_md: foldReply(current.values.note_md, agentReply) },
+      questionDismissed: true,
+    }));
   }, [agentReply]);
 
   const handleSubmit = useCallback(
     (e: React.FormEvent) => {
       e.preventDefault();
-      setSubmitError(null);
+      setFormState({ submitError: null });
       if (!workEngagementId) {
-        setSubmitError(
-          "No active work engagement — ask a manager to seed one before submitting expenses.",
-        );
+        setFormState({
+          submitError: "No active work engagement — ask a manager to seed one before submitting expenses.",
+        });
         return;
       }
       // Fold an outstanding agent-question reply into the note before
@@ -169,7 +188,7 @@ export default function SubmitExpenseForm({
           note_md: finalNote,
         });
       } catch (err) {
-        setSubmitError(err instanceof Error ? err.message : String(err));
+        setFormState({ submitError: err instanceof Error ? err.message : String(err) });
         return;
       }
       create.mutate(payload);
@@ -194,7 +213,7 @@ export default function SubmitExpenseForm({
         <AgentQuestionPrompt
           question={agentQuestion}
           reply={agentReply}
-          onReplyChange={setAgentReply}
+          onReplyChange={(value) => setFormState({ agentReply: value })}
           onDismiss={dismissQuestion}
         />
       )}

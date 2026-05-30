@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { fetchJson } from "@/lib/api";
 import { qk } from "@/lib/queryKeys";
@@ -49,31 +49,34 @@ export function OverrideDialog({
   employeeId: string | null;
   onClose: () => void;
 }) {
+  if (!iso) return null;
+  return (
+    <OverrideDialogForm
+      key={iso}
+      iso={iso}
+      pattern={pattern}
+      employeeId={employeeId}
+      onClose={onClose}
+    />
+  );
+}
+
+function OverrideDialogForm({
+  iso,
+  pattern,
+  employeeId,
+  onClose,
+}: {
+  iso: string;
+  pattern: SelfWeeklyAvailabilitySlot | null;
+  employeeId: string | null;
+  onClose: () => void;
+}) {
   const qc = useQueryClient();
   const [available, setAvailable] = useState(true);
-  const [starts, setStarts] = useState<string>("09:00");
-  const [ends, setEnds] = useState<string>("17:00");
+  const [starts, setStarts] = useState<string>(() => pattern?.starts_local ?? "09:00");
+  const [ends, setEnds] = useState<string>(() => pattern?.ends_local ?? "17:00");
   const [reason, setReason] = useState("");
-
-  // Re-init only when the dialog OPENS (iso flips from null to a date).
-  // We deliberately don't depend on `pattern`: once the dialog is open,
-  // an SSE-driven `qk.mySchedulePrefix()` invalidation regenerates the
-  // merged weekly_availability payload (and hence the `pattern`
-  // reference) on every event — depending on it would clobber the
-  // worker's half-typed hours mid-edit. The pattern is read via a ref
-  // so the seed values come from whatever was current when the dialog
-  // opened, and the live `pattern` prop is still used at render time
-  // for `wouldNarrow`.
-  const patternRef = useRef(pattern);
-  patternRef.current = pattern;
-  useEffect(() => {
-    if (iso === null) return;
-    const seed = patternRef.current;
-    setAvailable(true);
-    setStarts(seed?.starts_local ?? "09:00");
-    setEnds(seed?.ends_local ?? "17:00");
-    setReason("");
-  }, [iso]);
 
   const m = useMutation({
     mutationFn: (body: unknown) =>
@@ -96,8 +99,6 @@ export function OverrideDialog({
     const pe = toMin(pattern.ends_local!);
     return toMin(starts) > pm || toMin(ends) < pe;
   })();
-
-  if (!iso) return null;
 
   return (
     <FormModal
@@ -191,23 +192,24 @@ export function LeaveDialog({
   employeeId: string | null;
   onClose: () => void;
 }) {
+  if (!iso) return null;
+  return <LeaveDialogForm key={iso} iso={iso} employeeId={employeeId} onClose={onClose} />;
+}
+
+function LeaveDialogForm({
+  iso,
+  employeeId,
+  onClose,
+}: {
+  iso: string;
+  employeeId: string | null;
+  onClose: () => void;
+}) {
   const qc = useQueryClient();
-  const [starts, setStarts] = useState<string>("");
-  const [ends, setEnds] = useState<string>("");
+  const [dates, setDates] = useState(() => ({ starts: iso, ends: iso }));
+  const { starts, ends } = dates;
   const [category, setCategory] = useState<Leave["category"]>("vacation");
   const [note, setNote] = useState("");
-
-  // Re-init only when the dialog OPENS (iso flips). The seed values are
-  // derived from `iso` itself plus static defaults; no data-derived
-  // prop drives this effect, so an SSE-driven `qk.mySchedulePrefix()`
-  // invalidation can't clobber a half-typed leave request.
-  useEffect(() => {
-    if (iso === null) return;
-    setStarts(iso);
-    setEnds(iso);
-    setCategory("vacation");
-    setNote("");
-  }, [iso]);
 
   const m = useMutation({
     mutationFn: (body: unknown) =>
@@ -217,8 +219,6 @@ export function LeaveDialog({
       onClose();
     },
   });
-
-  if (!iso) return null;
 
   return (
     <FormModal
@@ -244,10 +244,22 @@ export function LeaveDialog({
     >
       <FormModalGrid className="leave-request-form__grid">
         <FormModalField label="From" requirement="required" className="leave-request-form__field">
-          <input type="date" value={starts} required onChange={(e) => setStarts(e.target.value)}  aria-label="From"/>
+          <input
+            type="date"
+            value={starts}
+            required
+            onChange={(e) => setDates((current) => ({ ...current, starts: e.target.value }))}
+            aria-label="From"
+          />
         </FormModalField>
         <FormModalField label="Until" requirement="required" className="leave-request-form__field">
-          <input type="date" value={ends} required onChange={(e) => setEnds(e.target.value)}  aria-label="Until"/>
+          <input
+            type="date"
+            value={ends}
+            required
+            onChange={(e) => setDates((current) => ({ ...current, ends: e.target.value }))}
+            aria-label="Until"
+          />
         </FormModalField>
       </FormModalGrid>
 

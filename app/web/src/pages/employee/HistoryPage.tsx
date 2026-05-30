@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import type { ReactNode } from "react";
@@ -69,39 +69,26 @@ type HistoryContentState = {
 };
 
 export default function HistoryPage() {
-  const location = useLocation();
+  const { hash, pathname, search } = useLocation();
   const navigate = useNavigate();
-  const routeTab = useMemo(() => tabFromLocation(location), [location]);
-  const [tab, setTab] = useState<Tab>(routeTab);
+  const routeTab = useMemo(() => tabFromLocation({ hash, search }), [hash, search]);
+  const tab = routeTab;
 
   useEffect(() => {
-    setTab(routeTab);
-  }, [routeTab]);
-
-  useEffect(() => {
-    const queryTab = tabFromSearch(location.search);
-    if (!queryTab || tabFromHash(location.hash)) return;
-    const params = new URLSearchParams(location.search);
+    const queryTab = tabFromSearch(search);
+    if (!queryTab || tabFromHash(hash)) return;
+    const params = new URLSearchParams(search);
     params.delete("tab");
     const nextSearch = params.toString();
     navigate(
       {
-        pathname: location.pathname,
+        pathname,
         search: nextSearch ? `?${nextSearch}` : "",
         hash: `#${queryTab}`,
       },
       { replace: true },
     );
-  }, [location.hash, location.pathname, location.search, navigate]);
-
-  useEffect(() => {
-    const syncFromWindowHash = () => {
-      const hashTab = tabFromHash(window.location.hash);
-      if (hashTab) setTab(hashTab);
-    };
-    window.addEventListener("hashchange", syncFromWindowHash);
-    return () => window.removeEventListener("hashchange", syncFromWindowHash);
-  }, []);
+  }, [hash, pathname, search, navigate]);
 
   const queries: HistoryQueries = {
     tasks: useHistoryTabQuery("tasks", tab === "tasks"),
@@ -137,7 +124,9 @@ export default function HistoryPage() {
           defaultKey="tasks"
           selectedKey={tab}
           onSelect={(key) => {
-            if (isTab(key)) setTab(key);
+            if (isTab(key)) {
+              navigate({ pathname, search, hash: `#${key}` });
+            }
           }}
         />
         <div id={`history-${tab}-panel`} role="tabpanel">

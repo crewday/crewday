@@ -26,16 +26,30 @@ interface Props {
   userName: string;
 }
 
+interface AvatarEditorState {
+  file: File | null;
+  imgUrl: string | null;
+  natural: { w: number; h: number } | null;
+  scale: number;
+  pan: { x: number; y: number };
+  error: string | null;
+}
+
+const INITIAL_AVATAR_STATE: AvatarEditorState = {
+  file: null,
+  imgUrl: null,
+  natural: null,
+  scale: 1,
+  pan: { x: 0, y: 0 },
+  error: null,
+};
+
 export default function AvatarEditor({ open, onClose, currentUrl, userName }: Props) {
   const ref = useRef<HTMLDialogElement>(null);
   const stageRef = useRef<HTMLDivElement>(null);
   const qc = useQueryClient();
-  const [file, setFile] = useState<File | null>(null);
-  const [imgUrl, setImgUrl] = useState<string | null>(null);
-  const [natural, setNatural] = useState<{ w: number; h: number } | null>(null);
-  const [scale, setScale] = useState(1);
-  const [pan, setPan] = useState({ x: 0, y: 0 });
-  const [error, setError] = useState<string | null>(null);
+  const [editor, setEditor] = useState<AvatarEditorState>(INITIAL_AVATAR_STATE);
+  const { file, imgUrl, natural, scale, pan, error } = editor;
   const drag = useRef<{ startX: number; startY: number; origX: number; origY: number } | null>(null);
 
   useEffect(() => {
@@ -51,12 +65,7 @@ export default function AvatarEditor({ open, onClose, currentUrl, userName }: Pr
 
   const reset = () => {
     if (imgUrl) URL.revokeObjectURL(imgUrl);
-    setFile(null);
-    setImgUrl(null);
-    setNatural(null);
-    setScale(1);
-    setPan({ x: 0, y: 0 });
-    setError(null);
+    setEditor(INITIAL_AVATAR_STATE);
   };
 
   const stageSize = (): number => {
@@ -67,27 +76,24 @@ export default function AvatarEditor({ open, onClose, currentUrl, userName }: Pr
   const onFile = (f: File | null) => {
     if (!f) return;
     if (!f.type.startsWith("image/")) {
-      setError("Pick an image file.");
+      setEditor((current) => ({ ...current, error: "Pick an image file." }));
       return;
     }
     const url = URL.createObjectURL(f);
     const img = new Image();
-    img.onload = () => setNatural({ w: img.naturalWidth, h: img.naturalHeight });
-    img.onerror = () => setError("Couldn't read that image.");
+    img.onload = () => {
+      const naturalSize = { w: img.naturalWidth, h: img.naturalHeight };
+      setEditor((current) => ({
+        ...current,
+        natural: naturalSize,
+        scale: stageSize() / Math.min(naturalSize.w, naturalSize.h),
+        pan: { x: 0, y: 0 },
+      }));
+    };
+    img.onerror = () => setEditor((current) => ({ ...current, error: "Couldn't read that image." }));
     img.src = url;
-    setFile(f);
-    setImgUrl(url);
-    setError(null);
+    setEditor({ file: f, imgUrl: url, natural: null, scale: 1, pan: { x: 0, y: 0 }, error: null });
   };
-
-  // Once the stage has mounted and the image has loaded, pick a
-  // starting scale that just covers the circular viewport.
-  useEffect(() => {
-    if (!natural || !stageRef.current) return;
-    const view = stageSize();
-    setScale(view / Math.min(natural.w, natural.h));
-    setPan({ x: 0, y: 0 });
-  }, [natural]);
 
   const onPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
     if (!natural) return;
@@ -96,10 +102,13 @@ export default function AvatarEditor({ open, onClose, currentUrl, userName }: Pr
   };
   const onPointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
     if (!drag.current || !natural) return;
-    setPan({
-      x: drag.current.origX + (e.clientX - drag.current.startX),
-      y: drag.current.origY + (e.clientY - drag.current.startY),
-    });
+    setEditor((current) => ({
+      ...current,
+      pan: {
+        x: drag.current!.origX + (e.clientX - drag.current!.startX),
+        y: drag.current!.origY + (e.clientY - drag.current!.startY),
+      },
+    }));
   };
   const onPointerUp = () => {
     // code-health: ignore[ccn nloc] Lizard misattributes the adjacent avatar canvas mutation body to this tiny pointer cleanup.
@@ -153,7 +162,10 @@ export default function AvatarEditor({ open, onClose, currentUrl, userName }: Pr
       reset();
       onClose();
     },
-    onError: (e) => setError(e instanceof Error ? e.message : "upload_failed"),
+    onError: (e) => setEditor((current) => ({
+      ...current,
+      error: e instanceof Error ? e.message : "upload_failed",
+    })),
   });
 
   const remove = useMutation({
@@ -209,7 +221,7 @@ export default function AvatarEditor({ open, onClose, currentUrl, userName }: Pr
                 max={maxScale}
                 step={0.01}
                 value={scale}
-                onChange={(e) => setScale(parseFloat(e.target.value))}
+                onChange={(e) => setEditor((current) => ({ ...current, scale: parseFloat(e.target.value) }))}
                 aria-label="Zoom"
               />
               <span aria-hidden="true">+</span>

@@ -63,7 +63,8 @@ export default function ClientLayout() {
     select: (r) => r.user,
   });
   const { pathname } = useLocation();
-  const [navOpen, setNavOpen] = useState(false);
+  const [navState, setNavState] = useState(() => ({ pathname, open: false }));
+  const navOpen = navState.pathname === pathname && navState.open;
   const [navCollapsed, setNavCollapsed] = useState<boolean>(() => initialNavCollapsed());
   const toggleNavCollapsed = useCallback(() => {
     setNavCollapsed((c) => {
@@ -82,15 +83,16 @@ export default function ClientLayout() {
       ),
     [pathname],
   );
-  const toggleNav = useCallback(() => setNavOpen((v) => !v), []);
+  const toggleNav = useCallback(() => {
+    setNavState((current) => ({ pathname, open: current.pathname === pathname ? !current.open : true }));
+  }, [pathname]);
 
-  useEffect(() => { setNavOpen(false); }, [pathname]);
   useEffect(() => {
     if (!navOpen) return;
-    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setNavOpen(false); };
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setNavState({ pathname, open: false }); };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [navOpen]);
+  }, [navOpen, pathname]);
 
   const displayName = userQ.data?.display_name ?? "Client";
   const initials = initialsOf(displayName);
@@ -104,7 +106,12 @@ export default function ClientLayout() {
         data-agent-collapsed="true"
       >
         {navOpen && (
-          <div className="desk__scrim" onClick={() => setNavOpen(false)} role="presentation" aria-hidden="true" />
+          <div
+            className="desk__scrim"
+            onClick={() => setNavState({ pathname, open: false })}
+            role="presentation"
+            aria-hidden="true"
+          />
         )}
 
         <SideNav

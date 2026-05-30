@@ -307,6 +307,7 @@ export const ASSET_ICON_REGISTRY = EAGER_ASSET_ICON_REGISTRY;
 export type AssetIconName = keyof typeof ASSET_ICON_LOADERS;
 
 const loadedLazyIcons = new Map<AssetIconName, LucideIcon>();
+type LoadedLazyIcon = { name: AssetIconName; icon: LucideIcon };
 
 export const ASSET_ICON_NAMES: readonly AssetIconName[] = Object.freeze(
   (Object.keys(ASSET_ICON_LOADERS) as AssetIconName[]).sort(),
@@ -327,29 +328,26 @@ export function AssetIcon({
 }) {
   const iconName = isAssetIconName(name) ? name : null;
   const eagerIcon = iconName ? getEagerIcon(iconName) : undefined;
-  const [lazyIcon, setLazyIcon] = useState<LucideIcon | null>(null);
+  const [lazyIcon, setLazyIcon] = useState<LoadedLazyIcon | null>(null);
   const cachedLazyIcon = iconName ? loadedLazyIcons.get(iconName) : undefined;
-  const Icon = eagerIcon ?? cachedLazyIcon ?? lazyIcon ?? Package;
+  const activeLazyIcon = lazyIcon?.name === iconName ? lazyIcon.icon : null;
+  const Icon = eagerIcon ?? cachedLazyIcon ?? activeLazyIcon ?? Package;
 
   useEffect(() => {
     if (!iconName || eagerIcon || cachedLazyIcon) {
-      setLazyIcon(null);
       return;
     }
 
     let cancelled = false;
-    setLazyIcon(null);
     void ASSET_ICON_LOADERS[iconName]()
       .then((module) => {
         loadedLazyIcons.set(iconName, module.default);
         if (!cancelled) {
-          setLazyIcon(() => module.default);
+          setLazyIcon({ name: iconName, icon: module.default });
         }
       })
       .catch(() => {
-        if (!cancelled) {
-          setLazyIcon(null);
-        }
+        // Failed lazy icon imports fall back to the package icon.
       });
 
     return () => {

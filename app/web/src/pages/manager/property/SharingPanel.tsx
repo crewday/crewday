@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useLayoutEffect, useRef, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { fetchJson } from "@/lib/api";
 import { qk } from "@/lib/queryKeys";
@@ -45,7 +45,7 @@ export default function SharingPanel({
   >(null);
   const [shareTarget, setShareTarget] = useState<string>("");
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     const el = dialogRef.current;
     if (!el) return;
     if (confirm && !el.open) el.showModal();

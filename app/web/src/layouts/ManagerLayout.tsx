@@ -257,7 +257,8 @@ export default function ManagerLayout() {
   const collapsed = initialAgentCollapsed();
   const { pathname } = useLocation();
   const relativePathname = workspaceRelativePathname(pathname);
-  const [navOpen, setNavOpen] = useState(false);
+  const [navState, setNavState] = useState(() => ({ pathname, open: false }));
+  const navOpen = navState.pathname === pathname && navState.open;
   const [navCollapsed, setNavCollapsed] = useState<boolean>(() => initialNavCollapsed());
   const toggleNavCollapsed = useCallback(() => {
     setNavCollapsed((c) => {
@@ -288,20 +289,18 @@ export default function ManagerLayout() {
       : item
   );
   const hasDrawer = hasDrawerItems(routedNavItems);
-  const toggleNav = useCallback(() => setNavOpen((v) => !v), []);
-
-  useEffect(() => {
-    setNavOpen(false);
+  const toggleNav = useCallback(() => {
+    setNavState((current) => ({ pathname, open: current.pathname === pathname ? !current.open : true }));
   }, [pathname]);
 
   useEffect(() => {
     if (!navOpen) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setNavOpen(false);
+      if (e.key === "Escape") setNavState({ pathname, open: false });
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [navOpen]);
+  }, [navOpen, pathname]);
 
   return (
     <ShellNavProvider hasDrawer={hasDrawer} isOpen={navOpen} toggle={toggleNav}>
@@ -314,7 +313,7 @@ export default function ManagerLayout() {
         {navOpen && (
           <div
             className="desk__scrim"
-            onClick={() => setNavOpen(false)}
+            onClick={() => setNavState({ pathname, open: false })}
             role="presentation"
             aria-hidden="true"
           />

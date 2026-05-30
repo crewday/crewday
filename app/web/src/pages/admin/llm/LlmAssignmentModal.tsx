@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useEffectEvent, useMemo, useRef, useState } from "react";
 import type { DragEvent, FormEvent, KeyboardEvent, ReactNode } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { GripVertical, Plus, Trash2 } from "lucide-react";
@@ -222,6 +222,31 @@ function nextAssignmentPriority(chain: LlmAssignment[]): number {
   );
 }
 
+interface AssignmentModalState {
+  capabilityKey: string | null;
+  explicitParent: string | undefined;
+  inheritParent: string;
+  draggedProviderModelId: string | null;
+  replacementParent: string | null;
+  clientErr: string | null;
+  serverErr: DisplayError | null;
+}
+
+function initialAssignmentModalState(
+  capabilityKey: string | null,
+  explicitParent: string | undefined,
+): AssignmentModalState {
+  return {
+    capabilityKey,
+    explicitParent,
+    inheritParent: explicitParent ?? "",
+    draggedProviderModelId: null,
+    replacementParent: null,
+    clientErr: null,
+    serverErr: null,
+  };
+}
+
 export default function LlmAssignmentModal({
   capabilityKey,
   graph,
@@ -242,21 +267,30 @@ export default function LlmAssignmentModal({
   const inheritedChildren = capabilityKey
     ? (indexes.childrenByParent.get(capabilityKey) ?? [])
     : [];
-  const [inheritParent, setInheritParent] = useState("");
-  const [draggedProviderModelId, setDraggedProviderModelId] = useState<string | null>(
-    null,
-  );
-  const [replacementParent, setReplacementParent] = useState<string | null>(null);
-  const [clientErr, setClientErr] = useState<string | null>(null);
-  const [serverErr, setServerErr] = useState<DisplayError | null>(null);
-
-  useEffect(() => {
-    setInheritParent(explicitParent ?? "");
-    setDraggedProviderModelId(null);
-    setReplacementParent(null);
-    setClientErr(null);
-    setServerErr(null);
-  }, [capabilityKey, explicitParent]);
+  const [modalState, setModalState] = useState(() => initialAssignmentModalState(capabilityKey, explicitParent));
+  const currentModalState = modalState.capabilityKey === capabilityKey && modalState.explicitParent === explicitParent
+    ? modalState
+    : initialAssignmentModalState(capabilityKey, explicitParent);
+  const {
+    inheritParent,
+    draggedProviderModelId,
+    replacementParent,
+    clientErr,
+    serverErr,
+  } = currentModalState;
+  const patchModalState = (patch: Partial<Omit<AssignmentModalState, "capabilityKey" | "explicitParent">>) => {
+    setModalState((current) => {
+      const base = current.capabilityKey === capabilityKey && current.explicitParent === explicitParent
+        ? current
+        : initialAssignmentModalState(capabilityKey, explicitParent);
+      return { ...base, ...patch };
+    });
+  };
+  const setInheritParent = (next: string) => patchModalState({ inheritParent: next });
+  const setDraggedProviderModelId = (next: string | null) => patchModalState({ draggedProviderModelId: next });
+  const setReplacementParent = (next: string | null) => patchModalState({ replacementParent: next });
+  const setClientErr = (next: string | null) => patchModalState({ clientErr: next });
+  const setServerErr = (next: DisplayError | null) => patchModalState({ serverErr: next });
 
   const invalidate = async () => {
     await qc.invalidateQueries({ queryKey: qk.adminLlmGraph() });
@@ -1038,18 +1072,18 @@ function ProviderModelRow({
 }) {
   const label = providerModelLabelOrUnknown(providerModel, indexes);
   const cardRef = useRef<HTMLElement>(null);
+  const handleDragStart = useEffectEvent((event: globalThis.DragEvent) => {
+    onDragStart(event as unknown as DragEvent<HTMLElement>);
+  });
+  const handleDragEnd = useEffectEvent((event: globalThis.DragEvent) => {
+    onDragEnd(event as unknown as DragEvent<HTMLElement>);
+  });
+  const handleKeyDown = useEffectEvent((event: globalThis.KeyboardEvent) => {
+    onKeyDown?.(event as unknown as KeyboardEvent<HTMLElement>);
+  });
   useEffect(() => {
     const card = cardRef.current;
     if (!card) return undefined;
-    const handleDragStart = (event: globalThis.DragEvent) => {
-      onDragStart(event as unknown as DragEvent<HTMLElement>);
-    };
-    const handleDragEnd = (event: globalThis.DragEvent) => {
-      onDragEnd(event as unknown as DragEvent<HTMLElement>);
-    };
-    const handleKeyDown = (event: globalThis.KeyboardEvent) => {
-      onKeyDown?.(event as unknown as KeyboardEvent<HTMLElement>);
-    };
     card.addEventListener("dragstart", handleDragStart);
     card.addEventListener("dragend", handleDragEnd);
     card.addEventListener("keydown", handleKeyDown);
@@ -1058,7 +1092,7 @@ function ProviderModelRow({
       card.removeEventListener("dragend", handleDragEnd);
       card.removeEventListener("keydown", handleKeyDown);
     };
-  }, [onDragEnd, onDragStart, onKeyDown]);
+  }, []);
   return (
     <article
       ref={cardRef}

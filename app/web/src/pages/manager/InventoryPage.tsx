@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useReducer, useRef, useState } from "react";
 import type { FormEvent } from "react";
 import {
   useInfiniteQuery,
@@ -89,6 +89,50 @@ interface InventoryItemCreateBody {
   barcode_ean13: string | null;
 }
 
+interface NewInventoryItemDraft {
+  propertyId: string;
+  name: string;
+  unit: string;
+  sku: string;
+  barcode: string;
+  reorderPoint: string;
+  reorderTarget: string;
+}
+
+interface NewInventoryItemState {
+  draft: NewInventoryItemDraft;
+  clientErr: string | null;
+  serverErr: string | null;
+}
+
+type NewInventoryItemAction =
+  | { type: "patch"; patch: Partial<NewInventoryItemDraft> }
+  | { type: "clientError"; error: string | null }
+  | { type: "serverError"; error: string | null }
+  | { type: "reset"; properties: Property[] };
+
+interface InventoryDrawerState {
+  itemId: string;
+  itemOnHand: number;
+  itemPar: number;
+  itemReorderTarget: number | null;
+  observed: string;
+  reason: InventoryMovementReason;
+  note: string;
+  err: string | null;
+  reorderPoint: string;
+  reorderTarget: string;
+  reorderErr: string | null;
+}
+
+type InventoryDrawerAction =
+  | { type: "syncItem"; item: InventoryItem }
+  | { type: "patch"; patch: Partial<Pick<InventoryDrawerState, "observed" | "reason" | "note" | "reorderPoint" | "reorderTarget">> }
+  | { type: "adjustError"; error: string | null }
+  | { type: "reorderError"; error: string | null }
+  | { type: "adjustSuccess" }
+  | { type: "reorderSuccess" };
+
 interface ListEnvelope<T> {
   data: T[];
 }
@@ -122,6 +166,100 @@ function propertySelectOption(property: Property): SearchableSelectOption {
     secondaryText: property.city,
     searchText: `${property.name} ${property.city} ${property.timezone}`,
   };
+}
+
+function initialNewInventoryItemState(properties: Property[]): NewInventoryItemState {
+  return {
+    draft: {
+      propertyId: properties[0]?.id ?? "",
+      name: "",
+      unit: "each",
+      sku: "",
+      barcode: "",
+      reorderPoint: "0",
+      reorderTarget: "",
+    },
+    clientErr: null,
+    serverErr: null,
+  };
+}
+
+function newInventoryItemReducer(
+  state: NewInventoryItemState,
+  action: NewInventoryItemAction,
+): NewInventoryItemState {
+  switch (action.type) {
+    case "patch":
+      return {
+        ...state,
+        draft: { ...state.draft, ...action.patch },
+      };
+    case "clientError":
+      return { ...state, clientErr: action.error };
+    case "serverError":
+      return { ...state, serverErr: action.error };
+    case "reset":
+      return initialNewInventoryItemState(action.properties);
+  }
+}
+
+function initialInventoryDrawerState(item: InventoryItem): InventoryDrawerState {
+  return {
+    itemId: item.id,
+    itemOnHand: item.on_hand,
+    itemPar: item.par,
+    itemReorderTarget: item.reorder_target,
+    observed: String(item.on_hand),
+    reason: "audit_correction",
+    note: "",
+    err: null,
+    reorderPoint: String(item.par),
+    reorderTarget: String(item.reorder_target ?? item.par),
+    reorderErr: null,
+  };
+}
+
+function syncInventoryDrawerState(state: InventoryDrawerState, item: InventoryItem): InventoryDrawerState {
+  if (
+    state.itemId === item.id &&
+    state.itemOnHand === item.on_hand &&
+    state.itemPar === item.par &&
+    state.itemReorderTarget === item.reorder_target
+  ) {
+    return state;
+  }
+  return {
+    ...state,
+    itemId: item.id,
+    itemOnHand: item.on_hand,
+    itemPar: item.par,
+    itemReorderTarget: item.reorder_target,
+    observed: String(item.on_hand),
+    reorderPoint: String(item.par),
+    reorderTarget: String(item.reorder_target ?? item.par),
+    err: null,
+    reorderErr: null,
+  };
+}
+
+function inventoryDrawerReducer(
+  state: InventoryDrawerState,
+  action: InventoryDrawerAction,
+): InventoryDrawerState {
+  switch (action.type) {
+    case "syncItem":
+      return syncInventoryDrawerState(state, action.item);
+    case "patch":
+      return { ...state, ...action.patch };
+    case "adjustError":
+      return { ...state, err: action.error };
+    case "reorderError":
+      return { ...state, reorderErr: action.error };
+    case "adjustSuccess":
+      return { ...state, err: null, note: "" };
+    case "reorderSuccess":
+      return { ...state, reorderErr: null };
+  }
 }
 
 async function fetchInventoryForProperties(properties: Property[]): Promise<InventoryItem[]> {
@@ -416,35 +554,31 @@ export default function InventoryPage() {
         )}
       </dialog>
 
-      <NewInventoryItemForm
-        open={creating}
-        properties={propsQ.data}
-        onClose={() => setCreating(false)}
-      />
+      {creating ? (
+        <NewInventoryItemForm
+          properties={propsQ.data}
+          onClose={() => setCreating(false)}
+        />
+      ) : null}
     </DeskPage>
   );
 }
 
 function NewInventoryItemForm({
-  open,
   properties,
   onClose,
 }: {
-  open: boolean;
   properties: Property[];
   onClose: () => void;
 }) {
   const qc = useQueryClient();
-  const [propertyId, setPropertyId] = useState(properties[0]?.id ?? "");
-  const [name, setName] = useState("");
-  const [unit, setUnit] = useState("each");
-  const [sku, setSku] = useState("");
-  const [barcode, setBarcode] = useState("");
-  const [reorderPoint, setReorderPoint] = useState("0");
-  const [reorderTarget, setReorderTarget] = useState("");
-  const [clientErr, setClientErr] = useState<string | null>(null);
-  const [serverErr, setServerErr] = useState<string | null>(null);
-  const wasOpenRef = useRef(false);
+  const [state, dispatch] = useReducer(
+    newInventoryItemReducer,
+    properties,
+    initialNewInventoryItemState,
+  );
+  const { draft, clientErr, serverErr } = state;
+  const { propertyId, name, unit, sku, barcode, reorderPoint, reorderTarget } = draft;
 
   const create = useMutation({
     mutationFn: (body: InventoryItemCreateBody) =>
@@ -456,35 +590,18 @@ function NewInventoryItemForm({
         },
       ),
     onSuccess: async () => {
-      setServerErr(null);
+      dispatch({ type: "serverError", error: null });
       await qc.invalidateQueries({ queryKey: qk.inventory() });
       resetDraft();
       onClose();
     },
     onError: (error: Error) => {
-      setServerErr(errorCopy(error, "Item creation failed"));
+      dispatch({ type: "serverError", error: errorCopy(error, "Item creation failed") });
     },
   });
 
-  useEffect(() => {
-    if (open && !wasOpenRef.current) resetFields();
-    wasOpenRef.current = open;
-  }, [open]);
-
-  function resetFields() {
-    setPropertyId(properties[0]?.id ?? "");
-    setName("");
-    setUnit("each");
-    setSku("");
-    setBarcode("");
-    setReorderPoint("0");
-    setReorderTarget("");
-    setClientErr(null);
-    setServerErr(null);
-  }
-
   function resetDraft() {
-    resetFields();
+    dispatch({ type: "reset", properties });
     create.reset();
   }
 
@@ -517,32 +634,32 @@ function NewInventoryItemForm({
       reorderTarget.trim() === "" ? null : Number.parseFloat(reorderTarget);
 
     if (!propertyId) {
-      setClientErr("Choose a property.");
+      dispatch({ type: "clientError", error: "Choose a property." });
       return;
     }
     if (!trimmedName) {
-      setClientErr("Name is required.");
+      dispatch({ type: "clientError", error: "Name is required." });
       return;
     }
     if (!trimmedUnit) {
-      setClientErr("Unit is required.");
+      dispatch({ type: "clientError", error: "Unit is required." });
       return;
     }
     if (!Number.isFinite(point) || point < 0) {
-      setClientErr("Reorder point must be zero or more.");
+      dispatch({ type: "clientError", error: "Reorder point must be zero or more." });
       return;
     }
     if (target !== null && (!Number.isFinite(target) || target < 0)) {
-      setClientErr("Reorder target must be zero or more.");
+      dispatch({ type: "clientError", error: "Reorder target must be zero or more." });
       return;
     }
     if (target !== null && target < point) {
-      setClientErr("Reorder target must be at least the reorder point.");
+      dispatch({ type: "clientError", error: "Reorder target must be at least the reorder point." });
       return;
     }
 
-    setClientErr(null);
-    setServerErr(null);
+    dispatch({ type: "clientError", error: null });
+    dispatch({ type: "serverError", error: null });
     create.mutate({
       name: trimmedName,
       unit: trimmedUnit,
@@ -555,7 +672,7 @@ function NewInventoryItemForm({
 
   return (
     <FormModal
-      open={open}
+      open
       title="Create item"
       titleId="inventory-create-title"
       eyebrow="New inventory item"
@@ -582,7 +699,7 @@ function NewInventoryItemForm({
           className="form-modal__field"
           value={propertyId}
           options={properties.map(propertySelectOption)}
-          onChange={setPropertyId}
+          onChange={(propertyId) => dispatch({ type: "patch", patch: { propertyId } })}
           required
           aria-invalid={clientErr === "Choose a property."}
           aria-describedby={errId}
@@ -591,7 +708,7 @@ function NewInventoryItemForm({
       <FormModalField label="Name" requirement="required">
         <input
           value={name}
-          onChange={(e) => setName(e.target.value)}
+          onChange={(e) => dispatch({ type: "patch", patch: { name: e.target.value } })}
           required
           aria-invalid={clientErr === "Name is required."}
           aria-describedby={errId}
@@ -601,7 +718,7 @@ function NewInventoryItemForm({
         <FormModalField label="Unit" requirement="required">
           <input
             value={unit}
-            onChange={(e) => setUnit(e.target.value)}
+            onChange={(e) => dispatch({ type: "patch", patch: { unit: e.target.value } })}
             required
             list="inventory-unit-options"
             aria-invalid={clientErr === "Unit is required."}
@@ -619,7 +736,7 @@ function NewInventoryItemForm({
         <FormModalField label="SKU" requirement="optional">
           <input
             value={sku}
-            onChange={(e) => setSku(e.target.value)}
+            onChange={(e) => dispatch({ type: "patch", patch: { sku: e.target.value } })}
             aria-invalid={serverErr === "SKU already exists for this property."}
             aria-describedby={errId}
            aria-label="SKU"/>
@@ -628,7 +745,7 @@ function NewInventoryItemForm({
       <FormModalField label="Barcode" requirement="optional">
         <input
           value={barcode}
-          onChange={(e) => setBarcode(e.target.value)}
+          onChange={(e) => dispatch({ type: "patch", patch: { barcode: e.target.value } })}
           aria-invalid={serverErr === "Barcode already exists for this property."}
           aria-describedby={errId}
          aria-label="Barcode"/>
@@ -646,7 +763,7 @@ function NewInventoryItemForm({
             step="0.01"
             min="0"
             value={reorderPoint}
-            onChange={(e) => setReorderPoint(e.target.value)}
+            onChange={(e) => dispatch({ type: "patch", patch: { reorderPoint: e.target.value } })}
             required
             aria-invalid={clientErr === "Reorder point must be zero or more."}
             aria-describedby={describedBy(reorderPointHelpId, errId)}
@@ -664,7 +781,7 @@ function NewInventoryItemForm({
             step="0.01"
             min="0"
             value={reorderTarget}
-            onChange={(e) => setReorderTarget(e.target.value)}
+            onChange={(e) => dispatch({ type: "patch", patch: { reorderTarget: e.target.value } })}
             aria-invalid={
               clientErr === "Reorder target must be zero or more." ||
               clientErr === "Reorder target must be at least the reorder point."
@@ -739,12 +856,18 @@ function InventoryDrawer({ item, onClose }: { item: InventoryItem; onClose: () =
     return () => io.disconnect();
   }, [movementsQ]);
 
-  const [observed, setObserved] = useState<string>(String(item.on_hand));
-  const [reason, setReason] = useState<InventoryMovementReason>(
-    "audit_correction",
+  const [drawerState, dispatchDrawer] = useReducer(
+    inventoryDrawerReducer,
+    item,
+    initialInventoryDrawerState,
   );
-  const [note, setNote] = useState("");
-  const [err, setErr] = useState<string | null>(null);
+  let activeDrawerState = drawerState;
+  const syncedDrawerState = syncInventoryDrawerState(drawerState, item);
+  if (syncedDrawerState !== drawerState) {
+    activeDrawerState = syncedDrawerState;
+    dispatchDrawer({ type: "syncItem", item });
+  }
+  const { observed, reason, note, err, reorderPoint, reorderTarget, reorderErr } = activeDrawerState;
 
   const adjust = useMutation({
     mutationFn: (body: {
@@ -757,12 +880,11 @@ function InventoryDrawer({ item, onClose }: { item: InventoryItem; onClose: () =
         body,
       }),
     onSuccess: () => {
-      setErr(null);
-      setNote("");
+      dispatchDrawer({ type: "adjustSuccess" });
       qc.invalidateQueries({ queryKey: qk.inventory() });
       qc.invalidateQueries({ queryKey: qk.inventoryMovements(item.id) });
     },
-    onError: (e: Error) => setErr(e.message || "Adjust failed"),
+    onError: (e: Error) => dispatchDrawer({ type: "adjustError", error: e.message || "Adjust failed" }),
   });
 
   const observedNum = Number.parseFloat(observed);
@@ -775,20 +897,6 @@ function InventoryDrawer({ item, onClose }: { item: InventoryItem; onClose: () =
     item.on_hand <= 0 ? "out of stock" : item.on_hand < item.par ? "below par" : "in stock";
   const statusTone: "rust" | "sand" | "moss" =
     item.on_hand <= 0 ? "rust" : item.on_hand < item.par ? "sand" : "moss";
-  const [reorderPoint, setReorderPoint] = useState(String(item.par));
-  const [reorderTarget, setReorderTarget] = useState(
-    String(item.reorder_target ?? item.par),
-  );
-  const [reorderErr, setReorderErr] = useState<string | null>(null);
-
-  useEffect(() => {
-    setObserved(String(item.on_hand));
-    setReorderPoint(String(item.par));
-    setReorderTarget(String(item.reorder_target ?? item.par));
-    setErr(null);
-    setReorderErr(null);
-  }, [item.id, item.on_hand, item.par, item.reorder_target]);
-
   const reorder = useMutation({
     mutationFn: (body: { reorder_point: number; reorder_target: number }) =>
       fetchJson<WireInventoryItem>(
@@ -799,10 +907,10 @@ function InventoryDrawer({ item, onClose }: { item: InventoryItem; onClose: () =
         },
       ),
     onSuccess: () => {
-      setReorderErr(null);
+      dispatchDrawer({ type: "reorderSuccess" });
       qc.invalidateQueries({ queryKey: qk.inventory() });
     },
-    onError: (e: Error) => setReorderErr(e.message || "Reorder update failed"),
+    onError: (e: Error) => dispatchDrawer({ type: "reorderError", error: e.message || "Reorder update failed" }),
   });
 
   const reorderPointNum = Number.parseFloat(reorderPoint);
@@ -880,15 +988,15 @@ function InventoryDrawer({ item, onClose }: { item: InventoryItem; onClose: () =
                 !Number.isFinite(reorderPointNum) ||
                 !Number.isFinite(reorderTargetNum)
               ) {
-                setReorderErr("Par and target must be numbers.");
+                dispatchDrawer({ type: "reorderError", error: "Par and target must be numbers." });
                 return;
               }
               if (reorderPointNum < 0 || reorderTargetNum < 0) {
-                setReorderErr("Par and target cannot be negative.");
+                dispatchDrawer({ type: "reorderError", error: "Par and target cannot be negative." });
                 return;
               }
               if (reorderTargetNum < reorderPointNum) {
-                setReorderErr("Target must be at least par.");
+                dispatchDrawer({ type: "reorderError", error: "Target must be at least par." });
                 return;
               }
               if (
@@ -916,7 +1024,7 @@ function InventoryDrawer({ item, onClose }: { item: InventoryItem; onClose: () =
                     step="0.01"
                     min="0"
                     value={reorderPoint}
-                    onChange={(e) => setReorderPoint(e.target.value)}
+                    onChange={(e) => dispatchDrawer({ type: "patch", patch: { reorderPoint: e.target.value } })}
                     required
                    aria-label="field inv-adjust__field Par inv-adjust__input-row inv-adjust__input mono number 0.01 0 inv-adjust__unit"/>
                   <span className="inv-adjust__unit">{item.unit}</span>
@@ -931,7 +1039,7 @@ function InventoryDrawer({ item, onClose }: { item: InventoryItem; onClose: () =
                     step="0.01"
                     min="0"
                     value={reorderTarget}
-                    onChange={(e) => setReorderTarget(e.target.value)}
+                    onChange={(e) => dispatchDrawer({ type: "patch", patch: { reorderTarget: e.target.value } })}
                     required
                    aria-label="field inv-adjust__field Target inv-adjust__input-row inv-adjust__input mono number 0.01 0 inv-adjust__unit"/>
                   <span className="inv-adjust__unit">{item.unit}</span>
@@ -961,7 +1069,7 @@ function InventoryDrawer({ item, onClose }: { item: InventoryItem; onClose: () =
             onSubmit={(e) => {
               e.preventDefault();
               if (delta === null || delta === 0) {
-                setErr("Observed must differ from current on-hand.");
+                dispatchDrawer({ type: "adjustError", error: "Observed must differ from current on-hand." });
                 return;
               }
               adjust.mutate({
@@ -981,7 +1089,7 @@ function InventoryDrawer({ item, onClose }: { item: InventoryItem; onClose: () =
                     step="0.01"
                     min="0"
                     value={observed}
-                    onChange={(e) => setObserved(e.target.value)}
+                    onChange={(e) => dispatchDrawer({ type: "patch", patch: { observed: e.target.value } })}
                     required
                    aria-label="field inv-adjust__field Observed count inv-adjust__input-row inv-adjust__input mono number 0.01 0 inv-adjust__unit"/>
                   <span className="inv-adjust__unit">{item.unit}</span>
@@ -993,7 +1101,7 @@ function InventoryDrawer({ item, onClose }: { item: InventoryItem; onClose: () =
                   className="inv-adjust__select"
                   value={reason}
                   onChange={(e) =>
-                    setReason(e.target.value as InventoryMovementReason)
+                    dispatchDrawer({ type: "patch", patch: { reason: e.target.value as InventoryMovementReason } })
                   }
                 >
                   {ADJUST_REASONS.map((r) => (
@@ -1011,7 +1119,7 @@ function InventoryDrawer({ item, onClose }: { item: InventoryItem; onClose: () =
                 aria-label="Note (optional)"
                 placeholder="e.g. Found in garage, soaked in rain."
                 value={note}
-                onChange={(e) => setNote(e.target.value)}
+                onChange={(e) => dispatchDrawer({ type: "patch", patch: { note: e.target.value } })}
               />
             </div>
             <div className="inv-adjust__footer">
@@ -1157,6 +1265,20 @@ function initialStocktakeLines(items: InventoryItem[]): Record<string, Stocktake
   );
 }
 
+function syncStocktakeLines(
+  current: Record<string, StocktakeLine>,
+  items: InventoryItem[],
+): Record<string, StocktakeLine> {
+  let changed = Object.keys(current).length !== items.length;
+  const next: Record<string, StocktakeLine> = {};
+  for (const item of items) {
+    const existing = current[item.id];
+    next[item.id] = existing ?? initialStocktakeLine(item);
+    if (!existing) changed = true;
+  }
+  return changed ? next : current;
+}
+
 function parseStocktakeObserved(value: string): number | null {
   const trimmed = value.trim();
   if (!trimmed) return null;
@@ -1215,19 +1337,12 @@ function StocktakeSheet({
     initialStocktakeLines(items),
   );
   const [err, setErr] = useState<string | null>(null);
-
-  useEffect(() => {
-    setLines((prev) => {
-      let changed = Object.keys(prev).length !== items.length;
-      const next: Record<string, StocktakeLine> = {};
-      for (const item of items) {
-        const existing = prev[item.id];
-        next[item.id] = existing ?? initialStocktakeLine(item);
-        if (!existing) changed = true;
-      }
-      return changed ? next : prev;
-    });
-  }, [items]);
+  let activeLines = lines;
+  const syncedLines = syncStocktakeLines(lines, items);
+  if (syncedLines !== lines) {
+    activeLines = syncedLines;
+    setLines(syncedLines);
+  }
 
   const open = useMutation({
     mutationFn: () =>
@@ -1257,16 +1372,16 @@ function StocktakeSheet({
   const commitCandidates = useMemo(
     () =>
       items.filter((i) => {
-        const l = lines[i.id];
+        const l = activeLines[i.id];
         if (!l) return false;
         return isStocktakeCommitCandidate(l, i);
       }),
-    [items, lines],
+    [items, activeLines],
   );
   const stocktakeRows = useMemo<InlineTableRow<StocktakeLine>[]>(
     () =>
       items.map((item) => {
-        const draft = lines[item.id] ?? initialStocktakeLine(item);
+        const draft = activeLines[item.id] ?? initialStocktakeLine(item);
         return {
           id: item.id,
           label: item.name,
@@ -1282,7 +1397,7 @@ function StocktakeSheet({
           ),
         };
       }),
-    [items, lines],
+    [items, activeLines],
   );
   const stocktakeColumns = useMemo<InlineTableColumn<StocktakeLine>[]>(
     () => [
@@ -1404,7 +1519,7 @@ function StocktakeSheet({
         lines: commitCandidates.flatMap((i) => {
           // ``commitCandidates`` is filtered to items whose line exists;
           // re-narrow here because ``lines`` is an open Record.
-          const l = lines[i.id];
+          const l = activeLines[i.id];
           if (!l) return [];
           if (!isStocktakeCommitCandidate(l, i)) return [];
           const observed_on_hand = parseStocktakeObserved(l.observed);

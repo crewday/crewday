@@ -1,4 +1,3 @@
-import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { fetchJson } from "@/lib/api";
 import { qk } from "@/lib/queryKeys";
@@ -6,6 +5,7 @@ import AutoGrowTextarea from "@/components/AutoGrowTextarea";
 import DeskPage from "@/components/DeskPage";
 import DateTime from "@/components/DateTime";
 import { Checkbox, Chip, Loading } from "@/components/common";
+import { usePatchReducer } from "@/lib/usePatchReducer";
 import type {
   AdminDeploymentSetting,
   AdminDeploymentSettingsResponse,
@@ -18,6 +18,14 @@ type SettingDraft = string | number | boolean;
 type ParsedSetting =
   | { ok: true; value: string | number | boolean | JsonValue }
   | { ok: false; message: string };
+
+interface AdminSettingsDraftState {
+  drafts: Record<string, SettingDraft>;
+  signupDraft: Partial<AdminSignupSettings>;
+  throttleDraft: string | null;
+  saveError: string | null;
+  signupError: string | null;
+}
 
 function prettyJson(value: unknown): string {
   // code-health: ignore[ccn] Tiny JSON formatter is mis-scored by the TS parser after surrounding setting unions.
@@ -141,8 +149,7 @@ export default function AdminSettingsPage() {
     },
     onSuccess: (saved) => {
       qc.setQueryData(qk.adminSignup(), saved);
-      setSignupDraft({});
-      setThrottleDraft(null);
+      setDraftState({ signupDraft: {}, throttleDraft: null });
     },
     onSettled: () => {
       qc.invalidateQueries({ queryKey: qk.adminSignup() });
@@ -150,11 +157,14 @@ export default function AdminSettingsPage() {
     },
   });
 
-  const [drafts, setDrafts] = useState<Record<string, SettingDraft>>({});
-  const [signupDraft, setSignupDraft] = useState<Partial<AdminSignupSettings>>({});
-  const [throttleDraft, setThrottleDraft] = useState<string | null>(null);
-  const [saveError, setSaveError] = useState<string | null>(null);
-  const [signupError, setSignupError] = useState<string | null>(null);
+  const [draftState, setDraftState] = usePatchReducer<AdminSettingsDraftState>({
+    drafts: {},
+    signupDraft: {},
+    throttleDraft: null,
+    saveError: null,
+    signupError: null,
+  });
+  const { drafts, signupDraft, throttleDraft, saveError, signupError } = draftState;
 
   const sub =
     "Deployment-scope settings: self-serve signup policy, the capability registry read-out, and the raw key/value store. Root-only keys require deployment owner rights.";
@@ -169,8 +179,11 @@ export default function AdminSettingsPage() {
   const isOwner = me.data.is_owner;
   const rows = q.data.settings;
   const setDraft = (key: string, value: SettingDraft) => {
-    setSaveError(null);
-    setDrafts((current) => ({ ...current, [key]: value }));
+    setDraftState((current) => ({
+      ...current,
+      saveError: null,
+      drafts: { ...current.drafts, [key]: value },
+    }));
   };
   const parsedDraft = (row: AdminDeploymentSetting): ParsedSetting =>
     parseSettingDraft(row, settingInputValue(row, drafts));
@@ -185,7 +198,7 @@ export default function AdminSettingsPage() {
 
   const saveAll = async () => {
     if (dirtyCount === 0 || invalidJsonCount > 0) return;
-    setSaveError(null);
+    setDraftState({ saveError: null });
     const clearedKeys = new Set<string>();
     try {
       for (const row of dirtyRows) {
@@ -199,20 +212,19 @@ export default function AdminSettingsPage() {
         }
       }
     } catch {
-      setSaveError("Could not save changes.");
+      setDraftState({ saveError: "Could not save changes." });
     } finally {
-      setDrafts((current) => {
+      setDraftState((current) => {
         if (clearedKeys.size === 0) return current;
-        const next = { ...current };
-        for (const key of clearedKeys) delete next[key];
-        return next;
+        const drafts = { ...current.drafts };
+        for (const key of clearedKeys) delete drafts[key];
+        return { ...current, drafts };
       });
     }
   };
 
   const resetAll = () => {
-    setSaveError(null);
-    setDrafts({});
+    setDraftState({ saveError: null, drafts: {} });
   };
 
   const s = signupQ.data;
@@ -231,8 +243,11 @@ export default function AdminSettingsPage() {
     signupThrottleInvalid = true;
   }
   const setSignup = <K extends keyof AdminSignupSettings>(key: K, value: AdminSignupSettings[K]) => {
-    setSignupError(null);
-    setSignupDraft((current) => ({ ...current, [key]: value }));
+    setDraftState((current) => ({
+      ...current,
+      signupError: null,
+      signupDraft: { ...current.signupDraft, [key]: value },
+    }));
   };
   const signupPatch: Partial<AdminSignupSettings> = {};
   const signupEnabled = signupValue(s, signupDraft, "signup_enabled");
@@ -254,15 +269,13 @@ export default function AdminSettingsPage() {
   const signupDirty = Object.keys(signupPatch).length > 0;
   const saveSignup = () => {
     if (!signupDirty || signupThrottleInvalid) return;
-    setSignupError(null);
+    setDraftState({ signupError: null });
     signupUpdate.mutate(signupPatch, {
-      onError: () => setSignupError("Could not save signup settings."),
+      onError: () => setDraftState({ signupError: "Could not save signup settings." }),
     });
   };
   const resetSignup = () => {
-    setSignupError(null);
-    setSignupDraft({});
-    setThrottleDraft(null);
+    setDraftState({ signupError: null, signupDraft: {}, throttleDraft: null });
   };
   const capabilities = Object.entries(me.data.capabilities).sort(([a], [b]) => a.localeCompare(b));
 
@@ -308,8 +321,7 @@ export default function AdminSettingsPage() {
               rows={5}
               value={signupThrottleText}
               onChange={(e) => {
-                setSignupError(null);
-                setThrottleDraft(e.target.value);
+                setDraftState({ signupError: null, throttleDraft: e.target.value });
               }}
             />
             {signupThrottleInvalid && (

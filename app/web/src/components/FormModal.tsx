@@ -1,6 +1,6 @@
 import {
-  useEffect,
   useId,
+  useLayoutEffect,
   useRef,
   type FormEventHandler,
   type HTMLAttributes,
@@ -77,7 +77,7 @@ export default function FormModal(props: FormModalProps) {
   const resolvedTitleId = titleId ?? generatedTitleId;
   const dialogRef = useRef<HTMLDialogElement>(null);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     const dialog = dialogRef.current;
     if (open && dialog && !dialog.open) {
       if (typeof dialog.showModal === "function") {

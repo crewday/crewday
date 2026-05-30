@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from "react";
+import { useMemo, useRef } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { fetchJson } from "@/lib/api";
@@ -12,6 +12,7 @@ import { useNavHistory } from "@/context/NavHistoryContext";
 import { propertySelectOption } from "@/lib/propertySelectOptions";
 import { cap } from "@/lib/strings";
 import { workspaceRouteForPathname } from "@/lib/workspaceRoutes";
+import { usePatchReducer } from "@/lib/usePatchReducer";
 import type { Issue, Property } from "@/types/api";
 
 type Category = "damage" | "broken" | "supplies" | "safety" | "other";
@@ -34,6 +35,16 @@ interface NewIssueBody {
   body: string;
 }
 
+interface IssueFormState {
+  title: string;
+  propertyId: string;
+  area: string;
+  category: Category;
+  severity: Severity;
+  body: string;
+  submitError: string | null;
+}
+
 export default function IssueNewPage() {
   // code-health: ignore[nloc] Issue form is a single declarative workflow after shared query/offline helpers.
   const nav = useNavigate();
@@ -46,19 +57,22 @@ export default function IssueNewPage() {
     queryFn: () => fetchJson<Property[]>("/api/v1/properties"),
   });
 
-  const [title, setTitle] = useState("");
-  const [propertyId, setPropertyId] = useState("");
-  const [area, setArea] = useState("");
-  const [category, setCategory] = useState<Category>("broken");
-  const [severity, setSeverity] = useState<Severity>("normal");
-  const [body, setBody] = useState("");
-  const [submitError, setSubmitError] = useState<string | null>(null);
+  const [form, setForm] = usePatchReducer<IssueFormState>({
+    title: "",
+    propertyId: "",
+    area: "",
+    category: "broken",
+    severity: "normal",
+    body: "",
+    submitError: null,
+  });
+  const { title, propertyId, area, category, severity, body, submitError } = form;
 
   const create = useMutation({
     mutationFn: (payload: NewIssueBody) =>
       fetchJson<Issue>("/api/v1/issues", { method: "POST", body: payload }),
     onMutate: () => {
-      setSubmitError(null);
+      setForm({ submitError: null });
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: qk.issues() });
@@ -70,7 +84,7 @@ export default function IssueNewPage() {
       }
     },
     onError: (err: Error) => {
-      setSubmitError(err.message);
+      setForm({ submitError: err.message });
     },
   });
 
@@ -120,7 +134,7 @@ export default function IssueNewPage() {
             placeholder="e.g. Bathroom tap dripping"
             required
             value={title}
-            onChange={(e) => setTitle(e.target.value)}
+            onChange={(e) => setForm({ title: e.target.value })}
            aria-label="field Short title title e.g. Bathroom tap dripping"/>
         </label>
 
@@ -129,7 +143,7 @@ export default function IssueNewPage() {
           name="property_id"
           value={activePropertyId}
           options={propertyOptions}
-          onChange={setPropertyId}
+          onChange={(value) => setForm({ propertyId: value })}
           required
         />
 
@@ -139,7 +153,7 @@ export default function IssueNewPage() {
             name="area"
             placeholder="e.g. Master bathroom"
             value={area}
-            onChange={(e) => setArea(e.target.value)}
+            onChange={(e) => setForm({ area: e.target.value })}
            aria-label="field Area area e.g. Master bathroom"/>
         </label>
 
@@ -153,7 +167,7 @@ export default function IssueNewPage() {
                   name="category"
                   value={c}
                   checked={category === c}
-                  onChange={() => setCategory(c)}
+                  onChange={() => setForm({ category: c })}
                  aria-label="chip-radio radio category"/>
                 <span>{cap(c)}</span>
               </label>
@@ -171,7 +185,7 @@ export default function IssueNewPage() {
                   name="severity"
                   value={s}
                   checked={severity === s}
-                  onChange={() => setSeverity(s)}
+                  onChange={() => setForm({ severity: s })}
                  aria-label="chip-radio radio severity"/>
                 <span>{label}</span>
               </label>
@@ -186,7 +200,7 @@ export default function IssueNewPage() {
             aria-label="What happened?"
             placeholder="What you saw, what you tried, anything the manager should know."
             value={body}
-            onChange={(e) => setBody(e.target.value)}
+            onChange={(e) => setForm({ body: e.target.value })}
           />
         </div>
 

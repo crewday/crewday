@@ -80,15 +80,7 @@ export default function IconSelector({
   const requirementLabel = requirement === "required" ? "Required" : "Optional";
 
   useEffect(() => {
-    setQuery("");
-  }, [value]);
-
-  useEffect(() => {
     if (!isOpen) return;
-
-    setQuery("");
-    const previewRect = previewRef.current?.getBoundingClientRect();
-    setPopoverPlacement(previewRect && previewRect.top < 300 ? "below" : "above");
     searchRef.current?.focus();
     searchRef.current?.select();
   }, [isOpen]);
@@ -122,15 +114,31 @@ export default function IconSelector({
   function chooseIcon(nextName: string): void {
     if (!nextName || isAssetIconName(nextName)) {
       onChange(nextName);
+      setQuery("");
       setIsOpen(false);
       previewRef.current?.focus();
     }
   }
 
+  function openPopover(): void {
+    const previewRect = previewRef.current?.getBoundingClientRect();
+    setQuery("");
+    setPopoverPlacement(previewRect && previewRect.top < 300 ? "below" : "above");
+    setIsOpen(true);
+  }
+
+  function togglePopover(): void {
+    if (isOpen) {
+      setIsOpen(false);
+      return;
+    }
+    openPopover();
+  }
+
   function handlePreviewKeyDown(event: ReactKeyboardEvent<HTMLButtonElement>): void {
     if (event.key !== "Enter" && event.key !== " ") return;
     event.preventDefault();
-    setIsOpen(true);
+    openPopover();
   }
 
   return (
@@ -155,7 +163,7 @@ export default function IconSelector({
           title={`${label}: ${selectedLabel}. Edit icon`}
           disabled={disabled}
           onKeyDown={handlePreviewKeyDown}
-          onClick={() => setIsOpen((open) => !open)}
+          onClick={togglePopover}
         >
           <span className="icon-selector__selected-mark">
             {selectedName ? <AssetIcon name={selectedName} size={18} /> : <X size={16} aria-hidden="true" />}

@@ -8,6 +8,7 @@ import {
   type MutableRefObject,
   type PointerEvent as ReactPointerEvent,
   type ReactNode,
+  type Ref,
   useCallback,
   useEffect,
   useId,
@@ -45,8 +46,11 @@ const STATUS_ROLE = "status";
 const GROUP_ROLE = "group";
 let createRowCounter = 0;
 
-function InlineTableRowGroup(props: ComponentPropsWithoutRef<"div">) {
-  return <div {...props} />;
+function InlineTableRowGroup({
+  rowRef,
+  ...props
+}: ComponentPropsWithoutRef<"div"> & { rowRef?: Ref<HTMLDivElement> }) {
+  return <div ref={rowRef} {...props} />;
 }
 
 export interface InlineTableColumn<TDraft> {
@@ -168,60 +172,41 @@ export function inlineTableNextCursor<TItem>(page: ListEnvelope<TItem>): string 
 
 export function useInlineTableInfiniteRows<TItem, TDraft>({
   data,
-  getRowId,
   mapRow,
   mergeRow = mergeInlineTableRowState,
 }: UseInlineTableInfiniteRowsOptions<TItem, TDraft>): UseInlineTableInfiniteRowsResult<TDraft> {
   const [localRows, setLocalRows] = useState<ReadonlyMap<string, InlineTableRow<TDraft>>>(() => new Map());
   const rowsByIdRef = useRef<ReadonlyMap<string, InlineTableRow<TDraft>>>(new Map());
-  const baseRowsByIdRef = useRef<ReadonlyMap<string, InlineTableRow<TDraft>>>(new Map());
-  const baseRowIds = useMemo(() => new Set(data?.pages.flatMap((page) => page.data.map(getRowId)) ?? []), [data, getRowId]);
-
-  const rows = useMemo(() => {
+  const baseEntries = useMemo(() => {
     let rowIndex = 0;
-    const baseRows: InlineTableRow<TDraft>[] = [];
-    const nextRows: InlineTableRow<TDraft>[] = [];
+    const entries: { item: TItem; row: InlineTableRow<TDraft>; index: number }[] = [];
 
     for (const page of data?.pages ?? []) {
       for (const item of page.data) {
         const baseRow = mapRow(item, rowIndex);
-        baseRows.push(baseRow);
-        const localRow = localRows.get(baseRow.id);
-        nextRows.push(localRow ? mergeRow(baseRow, localRow, item, rowIndex) : baseRow);
+        entries.push({ item, row: baseRow, index: rowIndex });
         rowIndex += 1;
       }
     }
 
-    baseRowsByIdRef.current = new Map(baseRows.map((row) => [row.id, row]));
+    return entries;
+  }, [data, mapRow]);
+  const baseRowsById = useMemo(() => new Map(baseEntries.map(({ row }) => [row.id, row])), [baseEntries]);
+  let activeLocalRows = localRows;
+  const normalizedLocalRows = normalizeInlineTableLocalRows(localRows, baseRowsById);
+  if (normalizedLocalRows !== localRows) {
+    activeLocalRows = normalizedLocalRows;
+    setLocalRows(normalizedLocalRows);
+  }
+
+  const rows = useMemo(() => {
+    const nextRows = baseEntries.map(({ item, row: baseRow, index }) => {
+      const localRow = activeLocalRows.get(baseRow.id);
+      return localRow ? mergeRow(baseRow, localRow, item, index) : baseRow;
+    });
     rowsByIdRef.current = new Map(nextRows.map((row) => [row.id, row]));
     return nextRows;
-  }, [data, localRows, mapRow, mergeRow]);
-
-  useEffect(() => {
-    setLocalRows((current) => {
-      const next = new Map<string, InlineTableRow<TDraft>>();
-      for (const [rowId, row] of current) {
-        if (baseRowIds.has(rowId)) next.set(rowId, row);
-      }
-      return next.size === current.size ? current : next;
-    });
-  }, [baseRowIds]);
-
-  useEffect(() => {
-    setLocalRows((current) => {
-      let changed = false;
-      const next = new Map(current);
-      for (const [rowId, localRow] of current) {
-        const baseRow = baseRowsByIdRef.current.get(rowId);
-        if (!baseRow || isLocalRowPending(localRow) || !shallowEqualDraft(baseRow.draft, localRow.draft)) {
-          continue;
-        }
-        next.delete(rowId);
-        changed = true;
-      }
-      return changed ? next : current;
-    });
-  }, [rows]);
+  }, [activeLocalRows, baseEntries, mergeRow]);
 
   const updateRow = useCallback((rowId: string, update: (row: InlineTableRow<TDraft>) => InlineTableRow<TDraft>) => {
     setLocalRows((current) => {
@@ -402,7 +387,6 @@ export function InlineTableForm<TDraft>({
   const pendingFocusRef = useRef<{ rowId: string; columnKey: string } | null>(null);
   const pendingRowFocusRef = useRef<string | null>(null);
   const pendingCreatedSelectionRef = useRef<{ previousIds: Set<string>; sourceRowId: string } | null>(null);
-  const pendingDeletedSelectionRef = useRef<string | null>(null);
   const lastDeleteKeyRef = useRef<{ rowId: string; at: number } | null>(null);
   const deleteArmTimerRef = useRef<number | null>(null);
   const suppressAutosaveBlurRowsRef = useRef<Set<string>>(new Set());
@@ -411,9 +395,21 @@ export function InlineTableForm<TDraft>({
   const [selectedRowId, setSelectedRowId] = useState<string | null>(null);
   const [deleteArmedRowId, setDeleteArmedRowId] = useState<string | null>(null);
   const [deleteConfirmationRowId, setDeleteConfirmationRowId] = useState<string | null>(null);
-  const [factoryCreateRow, setFactoryCreateRow] = useState<InlineTableRow<TDraft> | null>(() => (
-    createEmptyDraft && onCreate ? makeFactoryCreateRow(createEmptyDraft, createRowLabel) : null
-  ));
+  const [factoryCreateRowState, setFactoryCreateRow] = useState<InlineTableRow<TDraft> | null>(null);
+  const defaultFactoryCreateRow = useMemo(
+    () => (createEmptyDraft && onCreate && !trailingCreateRow
+      ? makeFactoryCreateRow(createEmptyDraft, createRowLabel)
+      : null),
+    [createEmptyDraft, createRowLabel, onCreate, trailingCreateRow],
+  );
+  const factoryCreateRow = factoryCreateRowState ?? defaultFactoryCreateRow;
+  const updateFactoryCreateRow = (
+    update: InlineTableRow<TDraft> | null | ((row: InlineTableRow<TDraft> | null) => InlineTableRow<TDraft> | null),
+  ) => {
+    setFactoryCreateRow((current) => (
+      typeof update === "function" ? update(current ?? defaultFactoryCreateRow) : update
+    ));
+  };
   const hasReorderColumn = Boolean(onReorder) || showReorderHandles;
   const templateColumns = [
     ...(hasReorderColumn ? ["42px"] : []),
@@ -465,11 +461,6 @@ export function InlineTableForm<TDraft>({
   const reorderListProps = reorderable.getListProps();
 
   useEffect(() => {
-    if (!createEmptyDraft || !onCreate || trailingCreateRow || factoryCreateRow) return;
-    setFactoryCreateRow(makeFactoryCreateRow(createEmptyDraft, createRowLabel));
-  }, [createEmptyDraft, onCreate, trailingCreateRow, factoryCreateRow, createRowLabel]);
-
-  useEffect(() => {
     const target = pendingFocusRef.current;
     if (!target) return;
     const focused = focusCellControl(rootRef.current, target.rowId, target.columnKey);
@@ -482,31 +473,6 @@ export function InlineTableForm<TDraft>({
     const focused = focusRowGroup(rootRef.current, rowId);
     if (focused) pendingRowFocusRef.current = null;
   }, [renderedRows, selectedRowId]);
-
-  useEffect(() => {
-    const pending = pendingCreatedSelectionRef.current;
-    if (!pending) return;
-    const createdRow = renderedRows.find((row) => (
-      !pending.previousIds.has(row.id) && !isRowEditing(row) && !isRowDisabled(row)
-    ));
-    if (createdRow) {
-      pendingCreatedSelectionRef.current = null;
-      selectRow(createdRow.id, true);
-      return;
-    }
-    const sourceRow = renderedRows.find((row) => row.id === pending.sourceRowId);
-    if (!sourceRow || sourceRow.validation || sourceRow.error) {
-      pendingCreatedSelectionRef.current = null;
-    }
-  }, [renderedRows]);
-
-  useEffect(() => {
-    const rowId = pendingDeletedSelectionRef.current;
-    if (!rowId) return;
-    const targetRow = renderedRows.find((row) => row.id === rowId && !isRowDisabled(row));
-    pendingDeletedSelectionRef.current = null;
-    if (targetRow) selectRow(targetRow.id, true);
-  }, [renderedRows]);
 
   useEffect(() => () => {
     if (deleteArmTimerRef.current) window.clearTimeout(deleteArmTimerRef.current);
@@ -623,7 +589,7 @@ export function InlineTableForm<TDraft>({
 
   const updateRowDraft = (row: InlineTableRow<TDraft>, patch: Partial<TDraft>) => {
     if (factoryCreateRow?.id === row.id) {
-      setFactoryCreateRow((current) => current
+      updateFactoryCreateRow((current) => current
         ? {
           ...current,
           draft: { ...current.draft, ...patch },
@@ -644,7 +610,7 @@ export function InlineTableForm<TDraft>({
     }
     const validation = validateCreate?.(row.draft);
     if (validation) {
-      setFactoryCreateRow((current) => current ? { ...current, dirty: true, validation } : current);
+      updateFactoryCreateRow((current) => current ? { ...current, dirty: true, validation } : current);
       return;
     }
     const result = onCreate?.(row.draft);
@@ -654,13 +620,13 @@ export function InlineTableForm<TDraft>({
       sourceRowId: row.id,
     };
     clearDeleteArm();
-    setFactoryCreateRow(makeFactoryCreateRow(createEmptyDraft ?? (() => row.draft), createRowLabel));
+    updateFactoryCreateRow(makeFactoryCreateRow(createEmptyDraft ?? (() => row.draft), createRowLabel));
   };
 
   const cancelRow = (row: InlineTableRow<TDraft>) => {
     if (factoryCreateRow?.id === row.id) {
       clearDeleteArm();
-      setFactoryCreateRow(makeFactoryCreateRow(createEmptyDraft ?? (() => row.draft), createRowLabel));
+      updateFactoryCreateRow(makeFactoryCreateRow(createEmptyDraft ?? (() => row.draft), createRowLabel));
       return;
     }
     exitRow(row, () => onCancel?.(row.id));
@@ -695,7 +661,7 @@ export function InlineTableForm<TDraft>({
     const rowId = deleteConfirmationRowId;
     if (!rowId || !onDelete) return;
     clearSuppressedAutosaveBlur(rowId);
-    pendingDeletedSelectionRef.current = deleteSelectionTarget(rowId);
+    selectDeleteTarget(rowId);
     onDelete(rowId);
   };
 
@@ -706,20 +672,59 @@ export function InlineTableForm<TDraft>({
       return;
     }
     clearDeleteArm();
-    pendingDeletedSelectionRef.current = deleteSelectionTarget(rowId);
+    selectDeleteTarget(rowId);
     onDelete(rowId);
   };
 
-  const deleteSelectionTarget = (rowId: string) => {
+  const selectDeleteTarget = (rowId: string) => {
     const selectableRowIds = selectableRows().map((row) => row.id);
     const currentIndex = selectableRowIds.indexOf(rowId);
-    if (currentIndex === -1) return null;
-    return selectableRowIds[currentIndex + 1] ?? selectableRowIds[currentIndex - 1] ?? null;
+    if (currentIndex === -1) {
+      setSelectedRowId(null);
+      return;
+    }
+    const nextRowId = selectableRowIds[currentIndex + 1] ?? selectableRowIds[currentIndex - 1] ?? null;
+    if (nextRowId) {
+      selectRow(nextRowId, true);
+      return;
+    }
+    setSelectedRowId(null);
   };
 
   const selectableRows = () => renderedRows.filter((candidate) => (
     (!isRowEditing(candidate) || candidate.id === activeTrailingCreateRow?.id) && !isRowDisabled(candidate)
   ));
+
+  const selectPendingCreatedRow = (row: InlineTableRow<TDraft>) => (node: HTMLDivElement | null) => {
+    if (!node) return;
+    const pending = pendingCreatedSelectionRef.current;
+    if (
+      !pending
+      || pending.previousIds.has(row.id)
+      || isRowEditing(row)
+      || isRowDisabled(row)
+    ) {
+      return;
+    }
+    pendingCreatedSelectionRef.current = null;
+    setSelectedRowId(row.id);
+    pendingRowFocusRef.current = row.id;
+    node.focus();
+  };
+
+  const pendingCreatedSelection = pendingCreatedSelectionRef.current;
+  const pendingCreatedRowId = pendingCreatedSelection
+    ? renderedRows.find((row) => (
+      !pendingCreatedSelection.previousIds.has(row.id) && !isRowEditing(row) && !isRowDisabled(row)
+    ))?.id ?? null
+    : null;
+  const effectiveSelectedRowId = pendingCreatedRowId ?? selectedRowId;
+  if (pendingCreatedSelection && !pendingCreatedRowId) {
+    const sourceRow = renderedRows.find((row) => row.id === pendingCreatedSelection.sourceRowId);
+    if (!sourceRow || sourceRow.validation || sourceRow.error) {
+      pendingCreatedSelectionRef.current = null;
+    }
+  }
 
   const moveSelectedRow = (rowId: string, direction: "previous" | "next") => {
     const selectableRowIds = selectableRows().map((candidate) => candidate.id);
@@ -839,7 +844,7 @@ export function InlineTableForm<TDraft>({
               cancel: () => cancelRow(row),
             };
             const detail = renderDetail?.(context);
-            const selected = selectedRowId === row.id && !selectionDisabled && (!renderEditing || isTrailingCreate);
+            const selected = effectiveSelectedRowId === row.id && !selectionDisabled && (!renderEditing || isTrailingCreate);
             const deleteArmed = deleteArmedRowId === row.id && selected;
             const movableIndex = reorderableRows.findIndex((candidate) => candidate.id === row.id);
             const canShowReorderHandle = hasReorderColumn && !row.disabled && !isTrailingCreate;
@@ -872,6 +877,7 @@ export function InlineTableForm<TDraft>({
             return (
               <InlineTableRowGroup
                 key={row.id}
+                rowRef={selectPendingCreatedRow(row)}
                 tabIndex={(renderEditing && !isTrailingCreate) || selectionDisabled ? undefined : 0}
                 className={[
                   "inline-table-form__group",
@@ -2035,6 +2041,25 @@ function mergeInlineTableRowState<TDraft>(
 
 function isLocalRowPending<TDraft>(row: InlineTableRow<TDraft>): boolean {
   return Boolean(row.editing || row.dirty || row.saving || row.error || row.validation);
+}
+
+function normalizeInlineTableLocalRows<TDraft>(
+  current: ReadonlyMap<string, InlineTableRow<TDraft>>,
+  baseRowsById: ReadonlyMap<string, InlineTableRow<TDraft>>,
+): ReadonlyMap<string, InlineTableRow<TDraft>> {
+  let changed = false;
+  const next = new Map<string, InlineTableRow<TDraft>>();
+
+  for (const [rowId, localRow] of current) {
+    const baseRow = baseRowsById.get(rowId);
+    if (!baseRow || (!isLocalRowPending(localRow) && shallowEqualDraft(baseRow.draft, localRow.draft))) {
+      changed = true;
+      continue;
+    }
+    next.set(rowId, localRow);
+  }
+
+  return changed ? next : current;
 }
 
 function shallowEqualDraft<TDraft>(left: TDraft, right: TDraft): boolean {

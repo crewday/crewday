@@ -40,6 +40,20 @@ describe("<RecurrencePicker>", () => {
     expect(screen.getByRole("button", { name: "Recurrence" })).toHaveTextContent("Weekly on Mon, Wed");
   });
 
+  it("loads an existing weekly interval into the friendly editor", () => {
+    render(<Harness initial="FREQ=WEEKLY;INTERVAL=3;BYDAY=TU" />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Recurrence" }));
+    const dialog = screen.getByRole("dialog", { name: "Recurrence" });
+
+    expect(within(dialog).getByLabelText(/^Repeats\b/)).toHaveValue("weekly");
+    expect(within(dialog).getByLabelText("Every weeks")).toHaveValue(3);
+    expect(within(dialog).getByRole("button", { name: "Tue" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+  });
+
   it("blocks invalid advanced RRULE values before applying", () => {
     render(<Harness initial="FREQ=MONTHLY;BYMONTHDAY=1" />);
 

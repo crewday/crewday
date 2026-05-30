@@ -1,4 +1,3 @@
-import { useState } from "react";
 import type { KeyboardEvent } from "react";
 import type { ReactNode } from "react";
 import { useMutation } from "@tanstack/react-query";
@@ -6,6 +5,7 @@ import AutoGrowTextarea from "@/components/AutoGrowTextarea";
 import FileDropZone from "@/components/FileDropZone";
 import { FormModalField } from "@/components/FormModal";
 import { ApiError, fetchJson } from "@/lib/api";
+import { usePatchReducer } from "@/lib/usePatchReducer";
 import type {
   LlmAssignment,
   LlmModel,
@@ -33,6 +33,17 @@ interface PlaygroundErrorNotice {
   errorId: string | null;
 }
 
+interface LlmPlaygroundState {
+  prompt: string;
+  systemPrompt: string;
+  imageUrl: string;
+  imageFile: File | null;
+  audioUrl: string;
+  audioFile: File | null;
+  clientErr: PlaygroundErrorNotice | null;
+  result: LlmProviderModelPlaygroundResponse | null;
+}
+
 const DEFAULT_VISION_ONLY_PROMPT = "Extract the text from this image.";
 
 export default function LlmPlayground({
@@ -45,15 +56,26 @@ export default function LlmPlayground({
   titleId,
   description,
 }: LlmPlaygroundProps) {
-  const [prompt, setPrompt] = useState("");
-  const [systemPrompt, setSystemPrompt] = useState("");
-  const [imageUrl, setImageUrl] = useState("");
-  const [imageFile, setImageFile] = useState<File | null>(null);
-  const [audioUrl, setAudioUrl] = useState("");
-  const [audioFile, setAudioFile] = useState<File | null>(null);
-  const [clientErr, setClientErr] = useState<PlaygroundErrorNotice | null>(null);
-  const [result, setResult] =
-    useState<LlmProviderModelPlaygroundResponse | null>(null);
+  const [playgroundState, setPlaygroundState] = usePatchReducer<LlmPlaygroundState>({
+    prompt: "",
+    systemPrompt: "",
+    imageUrl: "",
+    imageFile: null,
+    audioUrl: "",
+    audioFile: null,
+    clientErr: null,
+    result: null,
+  });
+  const {
+    prompt,
+    systemPrompt,
+    imageUrl,
+    imageFile,
+    audioUrl,
+    audioFile,
+    clientErr,
+    result,
+  } = playgroundState;
 
   const supportsChat = model?.capabilities.includes("chat") ?? false;
   const supportsVision = model?.capabilities.includes("vision") ?? false;
@@ -69,22 +91,22 @@ export default function LlmPlayground({
         { method: "POST", body },
       ),
     onSuccess: (response) => {
-      setClientErr(null);
-      setResult(response);
+      setPlaygroundState({ clientErr: null, result: response });
     },
     onError: (error: Error) => {
-      setResult(null);
-      setClientErr(playgroundErrorCopy(error));
+      setPlaygroundState({ result: null, clientErr: playgroundErrorCopy(error) });
     },
   });
 
   function runPlayground(): void {
     if (supportsVision && imageUrl.trim() && imageFile) {
-      setResult(null);
-      setClientErr({
-        message: "Use either an image URL or an uploaded image, not both.",
-        code: "playground_image_multiple_sources",
-        errorId: null,
+      setPlaygroundState({
+        result: null,
+        clientErr: {
+          message: "Use either an image URL or an uploaded image, not both.",
+          code: "playground_image_multiple_sources",
+          errorId: null,
+        },
       });
       return;
     }
@@ -95,52 +117,62 @@ export default function LlmPlayground({
       !imageFile &&
       !imageUrl.trim()
     ) {
-      setResult(null);
-      setClientErr({
-        message: "Image is required for this vision-only model.",
-        code: "playground_image_required",
-        errorId: null,
+      setPlaygroundState({
+        result: null,
+        clientErr: {
+          message: "Image is required for this vision-only model.",
+          code: "playground_image_required",
+          errorId: null,
+        },
       });
       return;
     }
     if (!supportsChat && supportsAudio && !audioFile && !audioUrl.trim()) {
-      setResult(null);
-      setClientErr({
-        message: "Audio is required for this audio-only model.",
-        code: "playground_audio_required",
-        errorId: null,
+      setPlaygroundState({
+        result: null,
+        clientErr: {
+          message: "Audio is required for this audio-only model.",
+          code: "playground_audio_required",
+          errorId: null,
+        },
       });
       return;
     }
     if (supportsAudio && audioUrl.trim() && audioFile) {
-      setResult(null);
-      setClientErr({
-        message: "Use either an audio URL or an uploaded audio file, not both.",
-        code: "playground_audio_multiple_sources",
-        errorId: null,
+      setPlaygroundState({
+        result: null,
+        clientErr: {
+          message: "Use either an audio URL or an uploaded audio file, not both.",
+          code: "playground_audio_multiple_sources",
+          errorId: null,
+        },
       });
       return;
     }
     if (!effectivePrompt()) {
-      setResult(null);
-      setClientErr({
-        message: "Prompt is required.",
-        code: "prompt_required",
-        errorId: null,
+      setPlaygroundState({
+        result: null,
+        clientErr: {
+          message: "Prompt is required.",
+          code: "prompt_required",
+          errorId: null,
+        },
       });
       return;
     }
     if (mode === "assignment" && !assignment) {
-      setResult(null);
-      setClientErr({
-        message: "Assignment is required.",
-        code: "assignment_required",
-        errorId: null,
+      setPlaygroundState({
+        result: null,
+        clientErr: {
+          message: "Assignment is required.",
+          code: "assignment_required",
+          errorId: null,
+        },
       });
       return;
     }
 
-    setClientErr(null);
+    setPlaygroundState({ clientErr: null });
     playground.mutate(buildPlaygroundBody());
   }
 
@@ -180,14 +212,16 @@ export default function LlmPlayground({
   }
 
   function resetPlayground(): void {
-    setPrompt("");
-    setSystemPrompt("");
-    setImageUrl("");
-    setImageFile(null);
-    setAudioUrl("");
-    setAudioFile(null);
-    setClientErr(null);
-    setResult(null);
+    setPlaygroundState({
+      prompt: "",
+      systemPrompt: "",
+      imageUrl: "",
+      imageFile: null,
+      audioUrl: "",
+      audioFile: null,
+      clientErr: null,
+      result: null,
+    });
     playground.reset();
   }
 
@@ -228,7 +262,7 @@ export default function LlmPlayground({
         >
           <AutoGrowTextarea
             value={systemPrompt}
-            onChange={(event) => setSystemPrompt(event.target.value)}
+            onChange={(event) => setPlaygroundState({ systemPrompt: event.target.value })}
             rows={3}
             disabled={!supportsSystemPrompt}
             aria-describedby={
@@ -241,7 +275,7 @@ export default function LlmPlayground({
       <FormModalField label="Prompt" requirement="required">
         <AutoGrowTextarea
           value={prompt}
-          onChange={(event) => setPrompt(event.target.value)}
+          onChange={(event) => setPlaygroundState({ prompt: event.target.value })}
           rows={4}
           required
           aria-invalid={clientErr?.code === "prompt_required"}
@@ -255,7 +289,7 @@ export default function LlmPlayground({
             <input
               type="url"
               value={imageUrl}
-              onChange={(event) => setImageUrl(event.target.value)}
+              onChange={(event) => setPlaygroundState({ imageUrl: event.target.value })}
               placeholder="https://example.com/image.jpg"
               aria-describedby={errId}
              aria-label="Image URL"/>
@@ -271,8 +305,7 @@ export default function LlmPlayground({
             accept="image/*"
             disabled={playground.isPending}
             onFiles={(files) => {
-              setImageFile(files[0] ?? null);
-              setClientErr(null);
+              setPlaygroundState({ imageFile: files[0] ?? null, clientErr: null });
             }}
           />
         </PlaygroundDisclosure>
@@ -284,7 +317,7 @@ export default function LlmPlayground({
             <input
               type="url"
               value={audioUrl}
-              onChange={(event) => setAudioUrl(event.target.value)}
+              onChange={(event) => setPlaygroundState({ audioUrl: event.target.value })}
               placeholder="https://example.com/audio.mp3"
               aria-describedby={errId}
              aria-label="Audio URL"/>
@@ -300,8 +333,7 @@ export default function LlmPlayground({
             accept="audio/*"
             disabled={playground.isPending}
             onFiles={(files) => {
-              setAudioFile(files[0] ?? null);
-              setClientErr(null);
+              setPlaygroundState({ audioFile: files[0] ?? null, clientErr: null });
             }}
           />
         </PlaygroundDisclosure>

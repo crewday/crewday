@@ -81,12 +81,13 @@ export default function SearchableSelect({
   const inputRef = useRef<HTMLInputElement | null>(null);
   const activeIndexRef = useRef(0);
   const selectOptions = useMemo(() => withBlankOption(options, blankOption), [blankOption, options]);
-  const [query, setQuery] = useState(() => selectedLabel(selectOptions, value));
+  const [draftQuery, setDraftQuery] = useState<string | null>(null);
   const [open, setOpen] = useState(false);
   const [activeIndex, setActiveIndex] = useState(0);
 
   const selectedOption = selectOptions.find((option) => option.value === value);
   const selectedOptionLabel = selectedOption?.label ?? "";
+  const query = draftQuery ?? selectedOptionLabel;
   const filterQuery = open && query === selectedOptionLabel ? "" : query;
   const filteredOptions = useMemo(() => filterOptions(selectOptions, filterQuery), [selectOptions, filterQuery]);
   const selectedOptionIndex = selectOptions.findIndex((option) => option.value === selectedOption?.value);
@@ -115,24 +116,18 @@ export default function SearchableSelect({
   const inputClasses = ["searchable-select__input", inputClassName].filter(Boolean).join(" ");
 
   useEffect(() => {
-    if (document.activeElement !== inputRef.current) {
-      setQuery(selectedLabel(selectOptions, value));
-    }
-  }, [selectOptions, value]);
-
-  useEffect(() => {
     inputRef.current?.setCustomValidity(invalidSelection ? `Select a ${label.toLocaleLowerCase()}.` : "");
   }, [invalidSelection, label]);
 
   function commit(option: SearchableSelectOption) {
     if (disabled || option.disabled) return;
     onChange(option.value);
-    setQuery(option.label);
+    setDraftQuery(option.label);
     setOpen(false);
   }
 
   function resetToSelected() {
-    setQuery(selectedLabel(selectOptions, value));
+    setDraftQuery(null);
     setOpen(false);
   }
 
@@ -203,7 +198,7 @@ export default function SearchableSelect({
         onBlur={resetToSelected}
         onChange={(event) => {
           const nextQuery = event.currentTarget.value;
-          setQuery(nextQuery);
+          setDraftQuery(nextQuery);
           setOpen(true);
           updateActiveIndex(firstEnabledIndex(
             filterOptions(selectOptions, nextQuery).slice(0, MAX_VISIBLE_OPTIONS),
@@ -282,10 +277,6 @@ function withBlankOption(
 
 function defaultOptionSecondaryText(option: SearchableSelectOption): ReactNode {
   return option.secondaryText ?? option.value;
-}
-
-function selectedLabel(options: readonly SearchableSelectOption[], value: string): string {
-  return options.find((option) => option.value === value)?.label ?? value;
 }
 
 function filterOptions(

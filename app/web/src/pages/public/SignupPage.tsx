@@ -29,12 +29,11 @@
 import {
   useCallback,
   useEffect,
+  useEffectEvent,
   useRef,
-  useState,
   type FormEvent,
   type ReactElement,
   type ReactNode,
-  type RefObject,
 } from "react";
 import { Link } from "react-router-dom";
 import { useMutation } from "@tanstack/react-query";
@@ -47,6 +46,7 @@ import {
   type SlugError,
 } from "./publicAuthMappers";
 import { normalizeWorkspaceSlugInput } from "@/lib/workspaceSlug";
+import { usePatchReducer } from "@/lib/usePatchReducer";
 
 export { normalizeWorkspaceSlugInput } from "@/lib/workspaceSlug";
 
@@ -83,12 +83,23 @@ const TURNSTILE_SCRIPT_ID = "crewday-turnstile-script";
 const TURNSTILE_SCRIPT_SRC = "https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit";
 const STATUS_ROLE = "status";
 
+interface SignupPageState {
+  email: string;
+  slug: string;
+  form: SignupFormState;
+  captchaToken: string | null;
+  captchaResetSignal: number;
+}
+
 export default function SignupPage(): ReactElement {
-  const [email, setEmail] = useState("");
-  const [slug, setSlug] = useState("");
-  const [form, setForm] = useState<SignupFormState>({ kind: "idle" });
-  const [captchaToken, setCaptchaToken] = useState<string | null>(null);
-  const [captchaResetSignal, setCaptchaResetSignal] = useState(0);
+  const [state, setState] = usePatchReducer<SignupPageState>({
+    email: "",
+    slug: "",
+    form: { kind: "idle" },
+    captchaToken: null,
+    captchaResetSignal: 0,
+  });
+  const { email, slug, form, captchaToken, captchaResetSignal } = state;
   const captchaSiteKey = turnstileSiteKey();
   // Concurrency guard. Same shape as RecoverPage / LoginPage —
   // `disabled={pending}` only kicks in after React commits, so a
@@ -100,27 +111,29 @@ export default function SignupPage(): ReactElement {
   // replaced we move focus off the unmounted submit button onto the
   // confirmation heading — assistive tech announces the new view
   // and keyboard users keep an anchor.
-  const sentHeadingRef = useRef<HTMLHeadingElement | null>(null);
 
   const mutation = useMutation<SignupStartResponse, Error, SignupStartBody>({
     mutationFn: (body) =>
       fetchJson<SignupStartResponse>("/api/v1/signup/start", {
         method: "POST",
         body,
-      }),
+    }),
     onMutate: () => {
-      setForm({ kind: "pending" });
+      setState({ form: { kind: "pending" } });
     },
     onSuccess: () => {
-      setForm({ kind: "sent" });
+      setState({ form: { kind: "sent" } });
       inflightRef.current = false;
     },
     onError: (err) => {
       if (captchaSiteKey && isSignupCaptchaError(err)) {
-        setCaptchaToken(null);
-        setCaptchaResetSignal((value) => value + 1);
+        setState((current) => ({
+          ...current,
+          captchaToken: null,
+          captchaResetSignal: current.captchaResetSignal + 1,
+        }));
       }
-      setForm(stateForSignupError(err, Boolean(captchaSiteKey)));
+      setState({ form: stateForSignupError(err, Boolean(captchaSiteKey)) });
       inflightRef.current = false;
     },
   });
@@ -144,25 +157,23 @@ export default function SignupPage(): ReactElement {
   );
 
   const onCaptchaToken = useCallback((token: string) => {
-    setCaptchaToken(token);
-    setForm((current) => (current.kind === "error" ? { kind: "idle" } : current));
+    setState((current) => ({
+      ...current,
+      captchaToken: token,
+      form: current.form.kind === "error" ? { kind: "idle" } : current.form,
+    }));
   }, []);
 
   const onCaptchaStale = useCallback(() => {
-    setCaptchaToken(null);
+    setState({ captchaToken: null });
   }, []);
 
   const acceptSuggestion = useCallback(
     (suggestion: string) => {
-      setSlug(suggestion);
-      setForm({ kind: "idle" });
+      setState({ slug: suggestion, form: { kind: "idle" } });
     },
     [],
   );
-
-  useEffect(() => {
-    if (form.kind === "sent") sentHeadingRef.current?.focus();
-  }, [form.kind]);
 
   const pending = form.kind === "pending";
 
@@ -177,7 +188,7 @@ export default function SignupPage(): ReactElement {
   if (form.kind === "sent") {
     return (
       <SignupShell>
-        <SignupSentConfirmation headingRef={sentHeadingRef} />
+        <SignupSentConfirmation />
       </SignupShell>
     );
   }
@@ -207,7 +218,7 @@ export default function SignupPage(): ReactElement {
             autoComplete="email"
             required
             value={email}
-            onChange={(ev) => setEmail(ev.target.value)}
+            onChange={(ev) => setState({ email: ev.target.value })}
             data-testid="signup-email"
            aria-label="field Your email email you@example.com email signup-email"/>
         </label>
@@ -223,7 +234,7 @@ export default function SignupPage(): ReactElement {
             pattern="[a-z][a-z0-9-]{1,38}[a-z0-9]"
             required
             value={slug}
-            onChange={(ev) => setSlug(normalizeWorkspaceSlugInput(ev.target.value))}
+            onChange={(ev) => setState({ slug: normalizeWorkspaceSlugInput(ev.target.value) })}
             data-testid="signup-slug"
             aria-describedby="signup-slug-hint"
            aria-label="field Workspace handle text villa-sud off url [a-z][a-z0-9-]{1,38}[a-z0-9] signup-slug signup-slug-hint signup-slug-hint login__hint Lowercase letters, digits, and hyphens. Lives at /w/&lt;handle&gt;/ ."/>
@@ -284,18 +295,17 @@ function SignupShell({ children }: { children: ReactNode }): ReactElement {
 /**
  * Generic "check your email" confirmation. Mirrors the
  * RecoverPage shape — `role="status"` + `aria-live="polite"` so
- * assistive tech announces the swap; the heading is
- * programmatically focusable so the parent effect can move
- * keyboard focus off the unmounted submit button.
+ * assistive tech announces the swap; the heading callback moves
+ * keyboard focus off the unmounted submit button when this view mounts.
  */
-function SignupSentConfirmation({
-  headingRef,
-}: {
-  headingRef: RefObject<HTMLHeadingElement | null>;
-}): ReactElement {
+function SignupSentConfirmation(): ReactElement {
+  const focusHeading = useCallback((node: HTMLHeadingElement | null) => {
+    node?.focus();
+  }, []);
+
   return (
     <output data-testid="signup-sent" role={STATUS_ROLE} aria-live="polite">
-      <h1 className="login__headline" ref={headingRef} tabIndex={-1}>
+      <h1 className="login__headline" ref={focusHeading} tabIndex={-1}>
         Check your email
       </h1>
       <p className="login__sub">
@@ -378,6 +388,8 @@ function TurnstileWidget({
 }): ReactElement {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const widgetIdRef = useRef<string | null>(null);
+  const handleToken = useEffectEvent(onToken);
+  const handleStale = useEffectEvent(onStale);
 
   useEffect(() => {
     let cancelled = false;
@@ -388,9 +400,9 @@ function TurnstileWidget({
       }
       widgetIdRef.current = window.turnstile.render(containerRef.current, {
         sitekey: siteKey,
-        callback: onToken,
-        "expired-callback": onStale,
-        "error-callback": onStale,
+        callback: handleToken,
+        "expired-callback": handleStale,
+        "error-callback": handleStale,
       });
     };
 
@@ -408,7 +420,7 @@ function TurnstileWidget({
     return () => {
       cancelled = true;
     };
-  }, [siteKey, onToken, onStale]);
+  }, [siteKey]);
 
   useEffect(() => {
     if (resetSignal > 0 && widgetIdRef.current) {

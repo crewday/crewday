@@ -1,10 +1,11 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef } from "react";
 import { useParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { fetchJson } from "@/lib/api";
 import { useAgentActivity } from "@/lib/agentTyping";
 import { formatDecimal } from "@/lib/numberFormat";
 import { qk } from "@/lib/queryKeys";
+import { usePatchReducer } from "@/lib/usePatchReducer";
 import { Ban, Camera, Check, SkipForward } from "lucide-react";
 import { Chip, EmptyState, Loading } from "@/components/common";
 import AutoGrowTextarea from "@/components/AutoGrowTextarea";
@@ -92,6 +93,14 @@ interface ChecklistMutationContext {
   previous: ApiTask | TaskDetailResponse | undefined;
 }
 
+interface TaskDetailLocalState {
+  skipReason: string;
+  skipOpen: boolean;
+  chatDraft: string;
+  localEvidence: LocalEvidence[];
+  evidenceError: string | null;
+}
+
 function fmtQty(n: number): string {
   return formatDecimal(n, { maximumFractionDigits: 3 });
 }
@@ -110,11 +119,14 @@ export default function TaskDetailPage() {
   const { tid = "" } = useParams();
   const qc = useQueryClient();
   const previewUrls = useRef<string[]>([]);
-  const [skipReason, setSkipReason] = useState("");
-  const [skipOpen, setSkipOpen] = useState(false);
-  const [chatDraft, setChatDraft] = useState("");
-  const [localEvidence, setLocalEvidence] = useState<LocalEvidence[]>([]);
-  const [evidenceError, setEvidenceError] = useState<string | null>(null);
+  const [localState, setLocalState] = usePatchReducer<TaskDetailLocalState>({
+    skipReason: "",
+    skipOpen: false,
+    chatDraft: "",
+    localEvidence: [],
+    evidenceError: null,
+  });
+  const { skipReason, skipOpen, chatDraft, localEvidence, evidenceError } = localState;
 
   useEffect(() => {
     return () => {
@@ -196,26 +208,28 @@ export default function TaskDetailPage() {
       });
     },
     onMutate: ({ localId }) => {
-      setEvidenceError(null);
+      setLocalState({ evidenceError: null });
       return { localId };
     },
     onSuccess: (evidence, _input, ctx) => {
-      setLocalEvidence((prev) =>
-        prev.map((item) =>
+      setLocalState((current) => ({
+        ...current,
+        localEvidence: current.localEvidence.map((item) =>
           item.localId === ctx.localId
             ? { ...item, status: "uploaded", evidenceId: evidence.id }
             : item,
         ),
-      );
+      }));
       qc.invalidateQueries({ queryKey: [...qk.task(tid), "evidence"] as const });
     },
     onError: (err, _input, ctx) => {
-      setEvidenceError(err.message || "Photo upload failed. Try again.");
-      setLocalEvidence((prev) =>
-        prev.map((item) =>
+      setLocalState((current) => ({
+        ...current,
+        evidenceError: err.message || "Photo upload failed. Try again.",
+        localEvidence: current.localEvidence.map((item) =>
           item.localId === ctx?.localId ? { ...item, status: "failed" } : item,
         ),
-      );
+      }));
     },
   });
 
@@ -236,10 +250,9 @@ export default function TaskDetailPage() {
       fetchJson<TaskStatePayload>("/api/v1/tasks/" + tid + "/skip", {
         method: "POST",
         body: { reason_md: reason },
-      }),
+    }),
     onSuccess: () => {
-      setSkipOpen(false);
-      setSkipReason("");
+      setLocalState({ skipOpen: false, skipReason: "" });
       qc.invalidateQueries({ queryKey: qk.task(tid) });
       qc.invalidateQueries({ queryKey: qk.today() });
     },
@@ -325,17 +338,20 @@ export default function TaskDetailPage() {
     const file = files[0] ?? null;
     if (!file) return;
     if (!file.type.startsWith("image/")) {
-      setEvidenceError("Choose an image file for photo evidence.");
+      setLocalState({ evidenceError: "Choose an image file for photo evidence." });
       return;
     }
     const localId = "local-" + Date.now().toString(36) + "-" + localEvidence.length;
     const previewUrl =
       typeof URL.createObjectURL === "function" ? URL.createObjectURL(file) : "";
     if (previewUrl) previewUrls.current.push(previewUrl);
-    setLocalEvidence((prev) => [
-      ...prev,
-      { localId, previewUrl, fileName: file.name, status: "uploading", evidenceId: null },
-    ]);
+    setLocalState((current) => ({
+      ...current,
+      localEvidence: [
+        ...current.localEvidence,
+        { localId, previewUrl, fileName: file.name, status: "uploading", evidenceId: null },
+      ],
+    }));
     evidenceUpload.mutate({ file, localId });
   };
 
@@ -360,7 +376,7 @@ export default function TaskDetailPage() {
                 {
                   label: "Skip this task",
                   icon: <SkipForward size={18} strokeWidth={1.8} aria-hidden="true" />,
-                  onSelect: () => setSkipOpen(true),
+                  onSelect: () => setLocalState({ skipOpen: true }),
                   destructive: true,
                 },
               ]
@@ -570,10 +586,10 @@ export default function TaskDetailPage() {
         />
         <ChatComposer
           value={chatDraft}
-          onChange={setChatDraft}
+          onChange={(value) => setLocalState({ chatDraft: value })}
           onSubmit={(trimmed) => {
             chatSend.mutate(trimmed);
-            setChatDraft("");
+            setLocalState({ chatDraft: "" });
           }}
           placeholder="Ask about this task or share what you saw…"
           ariaLabel="Message the assistant about this task"
@@ -598,7 +614,7 @@ export default function TaskDetailPage() {
         eyebrow="Task exception"
         subtitle="Give a quick reason so the manager knows. It'll go in the audit log."
         formClassName="task-skip-form"
-        onClose={() => setSkipOpen(false)}
+        onClose={() => setLocalState({ skipOpen: false })}
         onSubmit={(e) => {
           e.preventDefault();
           skip.mutate(skipReason);
@@ -608,7 +624,7 @@ export default function TaskDetailPage() {
             <button
               className="btn btn--ghost"
               type="button"
-              onClick={() => setSkipOpen(false)}
+              onClick={() => setLocalState({ skipOpen: false })}
             >
               Cancel
             </button>
@@ -621,7 +637,7 @@ export default function TaskDetailPage() {
             required
             placeholder="e.g. Guest still in the room — came back early from their day."
             value={skipReason}
-            onChange={(e) => setSkipReason(e.target.value)}
+            onChange={(e) => setLocalState({ skipReason: e.target.value })}
           />
         </FormModalField>
       </FormModal>

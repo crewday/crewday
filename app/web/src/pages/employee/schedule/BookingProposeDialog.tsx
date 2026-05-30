@@ -4,7 +4,7 @@
 // approves or rejects. The mock implements the minimum viable form;
 // the production shell will expand it to match the full §09 body.
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useMemo, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { fetchJson } from "@/lib/api";
 import { qk } from "@/lib/queryKeys";
@@ -22,30 +22,28 @@ export function BookingProposeDialog({
   properties: { id: string; name: string; timezone: string }[];
   onClose: () => void;
 }) {
-  const qc = useQueryClient();
-  const [propertyId, setPropertyId] = useState<string>("");
-  const [starts, setStarts] = useState<string>("09:00");
-  const [ends, setEnds] = useState<string>("12:00");
-  const [notes, setNotes] = useState<string>("");
-  const propertyOptions = useMemo(() => properties.map(propertySelectOption), [properties]);
+  if (!iso) return null;
+  return <BookingProposeDialogForm key={iso} iso={iso} properties={properties} onClose={onClose} />;
+}
 
-  // Re-init only when the dialog OPENS (iso flips from null to a date).
-  // We deliberately don't depend on `properties`: once the dialog is
-  // open, an SSE-driven `qk.mySchedulePrefix()` invalidation regenerates
-  // the merged payload (and hence `properties` array reference) on
-  // every event — depending on it would clobber the worker's half-typed
-  // form mid-edit. Properties are reachable on first paint (the dialog
-  // only opens from a loaded day cell), so the empty fallback below
-  // never triggers in practice.
-  const propertiesRef = useRef(properties);
-  propertiesRef.current = properties;
-  useEffect(() => {
-    if (iso === null) return;
-    setPropertyId(propertiesRef.current[0]?.id ?? "");
-    setStarts("09:00");
-    setEnds("12:00");
-    setNotes("");
-  }, [iso]);
+function BookingProposeDialogForm({
+  iso,
+  properties,
+  onClose,
+}: {
+  iso: string;
+  properties: { id: string; name: string; timezone: string }[];
+  onClose: () => void;
+}) {
+  const qc = useQueryClient();
+  const [form, setForm] = useState(() => ({
+    propertyId: properties[0]?.id ?? "",
+    starts: "09:00",
+    ends: "12:00",
+    notes: "",
+  }));
+  const { propertyId, starts, ends, notes } = form;
+  const propertyOptions = useMemo(() => properties.map(propertySelectOption), [properties]);
 
   const m = useMutation({
     mutationFn: (body: unknown) =>
@@ -59,8 +57,6 @@ export function BookingProposeDialog({
       onClose();
     },
   });
-
-  if (!iso) return null;
 
   return (
     <FormModal
@@ -96,25 +92,38 @@ export function BookingProposeDialog({
         className="form-modal__field booking-propose-form__field"
         value={propertyId}
         options={propertyOptions}
-        onChange={setPropertyId}
+        onChange={(nextPropertyId) => setForm((current) => ({ ...current, propertyId: nextPropertyId }))}
         required
       />
 
       <FormModalGrid className="booking-propose-form__grid">
         <FormModalField label="From" requirement="required" className="booking-propose-form__field">
-          <input type="time" value={starts} onChange={(e) => setStarts(e.target.value)} required  aria-label="From"/>
+          <input
+            type="time"
+            value={starts}
+            onChange={(e) => setForm((current) => ({ ...current, starts: e.target.value }))}
+            required
+            aria-label="From"
+          />
         </FormModalField>
         <FormModalField label="Until" requirement="required" className="booking-propose-form__field">
-          <input type="time" value={ends} onChange={(e) => setEnds(e.target.value)} required  aria-label="Until"/>
+          <input
+            type="time"
+            value={ends}
+            onChange={(e) => setForm((current) => ({ ...current, ends: e.target.value }))}
+            required
+            aria-label="Until"
+          />
         </FormModalField>
       </FormModalGrid>
 
       <FormModalField label="Notes" requirement="optional" className="booking-propose-form__field">
         <input
           value={notes}
-          onChange={(e) => setNotes(e.target.value)}
+          onChange={(e) => setForm((current) => ({ ...current, notes: e.target.value }))}
           placeholder="Swung by for forgotten laundry…"
-         aria-label="Notes"/>
+          aria-label="Notes"
+        />
       </FormModalField>
     </FormModal>
   );

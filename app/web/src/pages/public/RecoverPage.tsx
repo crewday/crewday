@@ -32,13 +32,11 @@
 
 import {
   useCallback,
-  useEffect,
   useMemo,
   useRef,
   useState,
   type FormEvent,
   type ReactElement,
-  type RefObject,
 } from "react";
 import { useLocation } from "react-router-dom";
 import { useMutation } from "@tanstack/react-query";
@@ -66,7 +64,7 @@ type FormState =
   | { kind: "error"; message: string };
 
 export default function RecoverPage() {
-  const location = useLocation();
+  const { search } = useLocation();
   const [stepUp, setStepUp] = useState(false);
   const [email, setEmail] = useState("");
   const [code, setCode] = useState("");
@@ -81,11 +79,9 @@ export default function RecoverPage() {
   // `audit.recovery.requested` rows for a single user intent. Mirrors
   // LoginPage's fix for cd-4z54.
   const inflightRef = useRef(false);
-  // Focus pivot for the "sent" confirmation. When the form is
-  // replaced, keyboard focus is stranded on the now-removed submit
-  // button. We move it to the confirmation heading so screen readers
-  // announce the new view and keyboard users regain an anchor.
-  const sentHeadingRef = useRef<HTMLHeadingElement | null>(null);
+  const focusSentHeading = useCallback((node: HTMLHeadingElement | null) => {
+    node?.focus();
+  }, []);
 
   const mutation = useMutation<RecoverRequestResponse, Error, RecoverRequestBody>({
     mutationFn: (body) =>
@@ -134,20 +130,10 @@ export default function RecoverPage() {
 
   const pending = form.kind === "pending";
   const safeNext = useMemo(() => {
-    const params = new URLSearchParams(location.search);
+    const params = new URLSearchParams(search);
     return sanitizeNext(params.get("next"));
-  }, [location.search]);
+  }, [search]);
   const loginHref = safeNext ? `/login?next=${encodeURIComponent(safeNext)}` : "/login";
-
-  // Move focus to the confirmation heading once the form is replaced
-  // by the success view. Keyboard focus would otherwise be stranded
-  // on the unmounted submit button; screen readers re-announce the
-  // new heading when it receives focus.
-  useEffect(() => {
-    if (form.kind === "sent") {
-      sentHeadingRef.current?.focus();
-    }
-  }, [form.kind]);
 
   return (
     <div className="surface surface--login">
@@ -158,7 +144,7 @@ export default function RecoverPage() {
             <span className="desk__wordmark">crew.day</span>
           </div>
           {form.kind === "sent" ? (
-            <RecoverSentConfirmation headingRef={sentHeadingRef} />
+            <RecoverSentConfirmation headingRef={focusSentHeading} />
           ) : (
             <>
               <h1 className="login__headline">Lost your device?</h1>
@@ -250,14 +236,14 @@ export default function RecoverPage() {
  * `role="status"` + `aria-live="polite"` announces the swap to
  * screen readers — without it, assistive tech sees the form vanish
  * with no replacement context. `tabIndex={-1}` on the heading makes
- * it programmatically focusable so the parent effect can move
+ * it programmatically focusable so the callback ref can move
  * keyboard focus off the unmounted submit button and onto a stable
  * landmark.
  */
 function RecoverSentConfirmation({
   headingRef,
 }: {
-  headingRef: RefObject<HTMLHeadingElement | null>;
+  headingRef: (node: HTMLHeadingElement | null) => void;
 }): ReactElement {
   return (
     <output data-testid="recover-sent" role={STATUS_ROLE} aria-live="polite">

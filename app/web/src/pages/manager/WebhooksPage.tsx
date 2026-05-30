@@ -1,4 +1,4 @@
-import { type FormEvent, useState } from "react";
+import { type FormEvent } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { fetchJson } from "@/lib/api";
 import { qk } from "@/lib/queryKeys";
@@ -9,6 +9,7 @@ import DateTime from "@/components/DateTime";
 import FormField from "@/components/FormField";
 import FormModal from "@/components/FormModal";
 import { Chip, Loading } from "@/components/common";
+import { usePatchReducer } from "@/lib/usePatchReducer";
 import type { Webhook, WebhookDelivery } from "@/types/api";
 
 function isOkStatus(status: string | number | null): boolean {
@@ -29,15 +30,28 @@ function deliveryResponseText(delivery: WebhookDelivery): string | number {
   return delivery.response_status ?? delivery.last_status_code ?? delivery.error ?? delivery.last_error ?? "pending";
 }
 
+interface WebhooksPageState {
+  createOpen: boolean;
+  name: string;
+  url: string;
+  events: string;
+  active: boolean;
+  secret: { label: string; value: string } | null;
+  selected: Webhook | null;
+}
+
 export default function WebhooksPage() {
   const qc = useQueryClient();
-  const [createOpen, setCreateOpen] = useState(false);
-  const [name, setName] = useState("");
-  const [url, setUrl] = useState("");
-  const [events, setEvents] = useState("");
-  const [active, setActive] = useState(true);
-  const [secret, setSecret] = useState<{ label: string; value: string } | null>(null);
-  const [selected, setSelected] = useState<Webhook | null>(null);
+  const [pageState, setPageState] = usePatchReducer<WebhooksPageState>({
+    createOpen: false,
+    name: "",
+    url: "",
+    events: "",
+    active: true,
+    secret: null,
+    selected: null,
+  });
+  const { createOpen, name, url, events, active, secret, selected } = pageState;
 
   const q = useQuery({
     queryKey: qk.webhooks(),
@@ -54,12 +68,14 @@ export default function WebhooksPage() {
     mutationFn: (body: { name: string; url: string; events: string[]; active: boolean }) =>
       fetchJson<Webhook>("/api/v1/webhooks", { method: "POST", body }),
     onSuccess: (created) => {
-      setSecret(created.secret ? { label: "Webhook signing secret", value: created.secret } : null);
-      setCreateOpen(false);
-      setName("");
-      setUrl("");
-      setEvents("");
-      setActive(true);
+      setPageState({
+        secret: created.secret ? { label: "Webhook signing secret", value: created.secret } : null,
+        createOpen: false,
+        name: "",
+        url: "",
+        events: "",
+        active: true,
+      });
       qc.invalidateQueries({ queryKey: qk.webhooks() });
     },
   });
@@ -68,7 +84,7 @@ export default function WebhooksPage() {
     mutationFn: (webhook: Webhook) =>
       fetchJson<WebhookDelivery>(`/api/v1/webhooks/${webhook.id}/test`, { method: "POST" }),
     onSuccess: (_delivery, webhook) => {
-      setSelected(webhook);
+      setPageState({ selected: webhook });
       qc.invalidateQueries({ queryKey: qk.webhooks() });
       qc.invalidateQueries({ queryKey: qk.webhookDeliveries(webhook.id) });
     },
@@ -78,7 +94,9 @@ export default function WebhooksPage() {
     mutationFn: (webhook: Webhook) =>
       fetchJson<Webhook>(`/api/v1/webhooks/${webhook.id}/rotate-secret`, { method: "POST" }),
     onSuccess: (updated) => {
-      setSecret(updated.secret ? { label: "Rotated webhook signing secret", value: updated.secret } : null);
+      setPageState({
+        secret: updated.secret ? { label: "Rotated webhook signing secret", value: updated.secret } : null,
+      });
       qc.invalidateQueries({ queryKey: qk.webhooks() });
       qc.invalidateQueries({ queryKey: qk.webhookDeliveries(updated.id) });
     },
@@ -93,7 +111,7 @@ export default function WebhooksPage() {
 
   const sub = "Outbound notifications when things happen. HMAC-signed with a per-subscription secret.";
   const actions = (
-    <button type="button" className="btn btn--moss" onClick={() => setCreateOpen(true)}>
+    <button type="button" className="btn btn--moss" onClick={() => setPageState({ createOpen: true })}>
       + New subscription
     </button>
   );
@@ -108,11 +126,11 @@ export default function WebhooksPage() {
         active={active}
         pending={create.isPending}
         error={create.isError ? create.error.message : null}
-        onName={setName}
-        onUrl={setUrl}
-        onEvents={setEvents}
-        onActive={setActive}
-        onClose={() => setCreateOpen(false)}
+        onName={(value) => setPageState({ name: value })}
+        onUrl={(value) => setPageState({ url: value })}
+        onEvents={(value) => setPageState({ events: value })}
+        onActive={(value) => setPageState({ active: value })}
+        onClose={() => setPageState({ createOpen: false })}
         onSubmit={submitCreate}
       />
       <Loading />
@@ -128,11 +146,11 @@ export default function WebhooksPage() {
         active={active}
         pending={create.isPending}
         error={create.isError ? create.error.message : null}
-        onName={setName}
-        onUrl={setUrl}
-        onEvents={setEvents}
-        onActive={setActive}
-        onClose={() => setCreateOpen(false)}
+        onName={(value) => setPageState({ name: value })}
+        onUrl={(value) => setPageState({ url: value })}
+        onEvents={(value) => setPageState({ events: value })}
+        onActive={(value) => setPageState({ active: value })}
+        onClose={() => setPageState({ createOpen: false })}
         onSubmit={submitCreate}
       />
       Failed to load.
@@ -149,14 +167,20 @@ export default function WebhooksPage() {
         active={active}
         pending={create.isPending}
         error={create.isError ? create.error.message : null}
-        onName={setName}
-        onUrl={setUrl}
-        onEvents={setEvents}
-        onActive={setActive}
-        onClose={() => setCreateOpen(false)}
+        onName={(value) => setPageState({ name: value })}
+        onUrl={(value) => setPageState({ url: value })}
+        onEvents={(value) => setPageState({ events: value })}
+        onActive={(value) => setPageState({ active: value })}
+        onClose={() => setPageState({ createOpen: false })}
         onSubmit={submitCreate}
       />
-      {secret && <SecretReveal label={secret.label} value={secret.value} onDismiss={() => setSecret(null)} />}
+      {secret && (
+        <SecretReveal
+          label={secret.label}
+          value={secret.value}
+          onDismiss={() => setPageState({ secret: null })}
+        />
+      )}
       <div className="panel">
         <table className="table table--roomy">
           <thead>
@@ -188,7 +212,11 @@ export default function WebhooksPage() {
                     )}
                   </td>
                   <td>
-                    <button type="button" className="btn btn--sm btn--ghost" onClick={() => setSelected(w)}>
+                    <button
+                      type="button"
+                      className="btn btn--sm btn--ghost"
+                      onClick={() => setPageState({ selected: w })}
+                    >
                       Log
                     </button>{" "}
                     <button
@@ -222,7 +250,7 @@ export default function WebhooksPage() {
           deliveries={deliveriesQ.data}
           loading={deliveriesQ.isPending}
           error={deliveriesQ.isError ? deliveriesQ.error.message : null}
-          onClose={() => setSelected(null)}
+          onClose={() => setPageState({ selected: null })}
         />
       )}
     </DeskPage>

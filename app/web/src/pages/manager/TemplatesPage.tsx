@@ -1,5 +1,5 @@
 import type { FormEvent, ReactElement } from "react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useReducer, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Camera, Globe, Hash, Map as MapIcon, Sparkles, Timer } from "lucide-react";
 
@@ -23,6 +23,7 @@ import { fetchJson } from "@/lib/api";
 import { type ListEnvelope } from "@/lib/listResponse";
 import { formatDecimal } from "@/lib/numberFormat";
 import { qk } from "@/lib/queryKeys";
+import { usePatchReducer } from "@/lib/usePatchReducer";
 import type { ChecklistTemplateItem, PhotoEvidence, TaskPriority, TaskTemplate } from "@/types/task";
 import type { WorkRole } from "@/types/employee";
 
@@ -80,6 +81,18 @@ interface TaskTemplateCreateBody {
   auto_shift_from_occurrence: boolean;
   inventory_consumption_json: Record<string, number>;
   llm_hints_md: string | null;
+}
+
+interface NewTemplateFormState {
+  name: string;
+  description: string;
+  roleId: string;
+  durationMinutes: string;
+  priority: TaskPriority;
+  photoEvidence: PhotoEvidence;
+  autoShift: boolean;
+  llmHints: string;
+  clientError: string | null;
 }
 
 function truncate(text: string, max: number): string {
@@ -290,15 +303,28 @@ function NewTemplateForm({
   onClose: () => void;
   onSubmit: (body: TaskTemplateCreateBody) => void;
 }): ReactElement {
-  const [name, setName] = useState("");
-  const [description, setDescription] = useState("");
-  const [roleId, setRoleId] = useState("");
-  const [durationMinutes, setDurationMinutes] = useState("30");
-  const [priority, setPriority] = useState<TaskPriority>("normal");
-  const [photoEvidence, setPhotoEvidence] = useState<PhotoEvidence>("disabled");
-  const [autoShift, setAutoShift] = useState(false);
-  const [llmHints, setLlmHints] = useState("");
-  const [clientError, setClientError] = useState<string | null>(null);
+  const [formState, setFormState] = usePatchReducer<NewTemplateFormState>({
+    name: "",
+    description: "",
+    roleId: "",
+    durationMinutes: "30",
+    priority: "normal",
+    photoEvidence: "disabled",
+    autoShift: false,
+    llmHints: "",
+    clientError: null,
+  });
+  const {
+    name,
+    description,
+    roleId,
+    durationMinutes,
+    priority,
+    photoEvidence,
+    autoShift,
+    llmHints,
+    clientError,
+  } = formState;
   const roleOptions = useMemo(() => roles.map(roleOption), [roles]);
 
   const visibleError = clientError ?? error;
@@ -309,14 +335,14 @@ function NewTemplateForm({
     const trimmedName = name.trim();
     const minutes = Number.parseInt(durationMinutes, 10);
     if (!trimmedName) {
-      setClientError("Name is required.");
+      setFormState({ clientError: "Name is required." });
       return;
     }
     if (!Number.isInteger(minutes) || minutes < 1 || minutes > 24 * 60) {
-      setClientError("Duration must be between 1 and 1440 minutes.");
+      setFormState({ clientError: "Duration must be between 1 and 1440 minutes." });
       return;
     }
-    setClientError(null);
+    setFormState({ clientError: null });
     onSubmit({
       name: trimmedName,
       description_md: description.trim(),
@@ -362,7 +388,7 @@ function NewTemplateForm({
         <FormField label="Name" requirement="required" className="template-create-form__field sheet-form__field">
           <input
             value={name}
-            onChange={(event) => setName(event.target.value)}
+            onChange={(event) => setFormState({ name: event.target.value })}
             required
             maxLength={200}
             aria-invalid={clientError === "Name is required."}
@@ -372,7 +398,7 @@ function NewTemplateForm({
         <FormField label="Description" requirement="optional" className="template-create-form__field sheet-form__field">
           <AutoGrowTextarea
             value={description}
-            onChange={(event) => setDescription(event.target.value)}
+            onChange={(event) => setFormState({ description: event.target.value })}
             rows={4}
           />
         </FormField>
@@ -383,7 +409,7 @@ function NewTemplateForm({
           value={roleId}
           options={roleOptions}
           blankOption={{ label: "Any role" }}
-          onChange={setRoleId}
+          onChange={(value) => setFormState({ roleId: value })}
         />
         <FormModalGrid className="template-create-form__grid">
           <FormField label="Duration" requirement="required" className="template-create-form__field sheet-form__field">
@@ -394,7 +420,7 @@ function NewTemplateForm({
               max="1440"
               step="1"
               value={durationMinutes}
-              onChange={(event) => setDurationMinutes(event.target.value)}
+              onChange={(event) => setFormState({ durationMinutes: event.target.value })}
               required
               aria-invalid={clientError === "Duration must be between 1 and 1440 minutes."}
               aria-describedby={errorId}
@@ -403,7 +429,7 @@ function NewTemplateForm({
           <FormField label="Priority" requirement="required" className="template-create-form__field sheet-form__field">
             <select
               value={priority}
-              onChange={(event) => setPriority(event.target.value as TaskPriority)} aria-label="Priority"
+              onChange={(event) => setFormState({ priority: event.target.value as TaskPriority })} aria-label="Priority"
             >
               <option value="low">Low</option>
               <option value="normal">Normal</option>
@@ -415,7 +441,7 @@ function NewTemplateForm({
         <FormField label="Photo evidence" requirement="required" className="template-create-form__field sheet-form__field">
         <select
           value={photoEvidence}
-          onChange={(event) => setPhotoEvidence(event.target.value as PhotoEvidence)} aria-label="Photo evidence"
+          onChange={(event) => setFormState({ photoEvidence: event.target.value as PhotoEvidence })} aria-label="Photo evidence"
         >
           <option value="disabled">Disabled</option>
           <option value="optional">Optional</option>
@@ -431,7 +457,7 @@ function NewTemplateForm({
       >
         <AutoGrowTextarea
           value={llmHints}
-          onChange={(event) => setLlmHints(event.target.value)}
+          onChange={(event) => setFormState({ llmHints: event.target.value })}
           rows={3}
           aria-describedby={AGENT_GUIDANCE_HELP_ID}
         />
@@ -441,7 +467,7 @@ function NewTemplateForm({
           className="checkbox__input"
           type="checkbox"
           checked={autoShift}
-          onChange={(event) => setAutoShift(event.target.checked)}
+          onChange={(event) => setFormState({ autoShift: event.target.checked })}
           aria-label="Start shift automatically from generated tasks"
         />
         <span className="checkbox__box" aria-hidden="true">
@@ -496,9 +522,17 @@ type ChecklistEditorRow = InlineTableRow<ChecklistTemplateItem>;
 // (we mirror back from props on incoming refetches that aren't ours).
 function ChecklistEditor({ template }: ChecklistEditorProps): ReactElement {
   const queryClient = useQueryClient();
-  const [rows, setRows] = useState<ChecklistEditorRow[]>(
-    checklistRows(template.checklist_template_json),
+  const [rows, dispatchRows] = useReducer(
+    (
+      current: ChecklistEditorRow[],
+      update: ChecklistEditorRow[] | ((rows: ChecklistEditorRow[]) => ChecklistEditorRow[]),
+    ) => (typeof update === "function" ? update(current) : update),
+    template.checklist_template_json,
+    checklistRows,
   );
+  const setRows = (
+    update: ChecklistEditorRow[] | ((rows: ChecklistEditorRow[]) => ChecklistEditorRow[]),
+  ) => dispatchRows(update);
   const [announcement, setAnnouncement] = useState<string>("");
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pendingRef = useRef<ChecklistTemplateItem[] | null>(null);

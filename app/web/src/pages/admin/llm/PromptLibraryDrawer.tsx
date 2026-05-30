@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import type { FormEvent } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import AutoGrowTextarea from "@/components/AutoGrowTextarea";
@@ -112,8 +112,7 @@ function promptErrorCopy(error: unknown, fallback: string): string {
 function PromptEditorDialog({ prompt, onClose }: PromptEditorDialogProps) {
   // code-health: ignore[ccn nloc] Lizard misattributes the prompt editor TSX body to the preceding error-copy helper.
   const qc = useQueryClient();
-  const [template, setTemplate] = useState("");
-  const [notes, setNotes] = useState("");
+  const [draft, setDraft] = useState<PromptPayload | null>(null);
   const [clientErr, setClientErr] = useState<string | null>(null);
   const [serverErr, setServerErr] = useState<string | null>(null);
   const detailQ = useQuery({
@@ -129,12 +128,6 @@ function PromptEditorDialog({ prompt, onClose }: PromptEditorDialogProps) {
       ),
   });
 
-  useEffect(() => {
-    if (!detailQ.data) return;
-    setTemplate(detailQ.data.template);
-    setNotes(detailQ.data.notes ?? "");
-  }, [detailQ.data]);
-
   const invalidate = async () => {
     await qc.invalidateQueries({ queryKey: qk.adminLlmPrompts() });
   };
@@ -143,10 +136,9 @@ function PromptEditorDialog({ prompt, onClose }: PromptEditorDialogProps) {
       fetchJson<LlmPromptTemplateDetail>(`/admin/api/v1/llm/prompts/${prompt.id}`, {
         method: "PUT",
         body,
-      }),
+    }),
     onSuccess: async (updated) => {
-      setTemplate(updated.template);
-      setNotes(updated.notes ?? "");
+      setDraft({ template: updated.template, notes: updated.notes ?? "" });
       setClientErr(null);
       setServerErr(null);
       await invalidate();
@@ -160,8 +152,7 @@ function PromptEditorDialog({ prompt, onClose }: PromptEditorDialogProps) {
         { method: "POST" },
       ),
     onSuccess: async (updated) => {
-      setTemplate(updated.template);
-      setNotes(updated.notes ?? "");
+      setDraft({ template: updated.template, notes: updated.notes ?? "" });
       setClientErr(null);
       setServerErr(null);
       await invalidate();
@@ -170,6 +161,8 @@ function PromptEditorDialog({ prompt, onClose }: PromptEditorDialogProps) {
   });
 
   const detail = detailQ.data;
+  const template = draft?.template ?? detail?.template ?? "";
+  const notes = draft?.notes ?? detail?.notes ?? "";
   const err = clientErr ?? serverErr;
   const errId = err ? "llm-prompt-error" : undefined;
 
@@ -237,7 +230,7 @@ function PromptEditorDialog({ prompt, onClose }: PromptEditorDialogProps) {
           <FormModalField label="Active template body" requirement="required">
             <AutoGrowTextarea
               value={template}
-              onChange={(e) => setTemplate(e.target.value)}
+              onChange={(e) => setDraft({ template: e.target.value, notes })}
               rows={14}
               required
               aria-invalid={clientErr === "Prompt body is required."}
@@ -245,7 +238,11 @@ function PromptEditorDialog({ prompt, onClose }: PromptEditorDialogProps) {
             />
           </FormModalField>
           <FormModalField label="Notes" requirement="optional">
-            <AutoGrowTextarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={3} />
+            <AutoGrowTextarea
+              value={notes}
+              onChange={(e) => setDraft({ template, notes: e.target.value })}
+              rows={3}
+            />
           </FormModalField>
           <section className="llm-prompt-revisions" aria-label="Prompt revision history">
             <h4>Revision history</h4>

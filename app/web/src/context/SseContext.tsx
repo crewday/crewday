@@ -3,8 +3,8 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useReducer,
   useRef,
-  useState,
   useSyncExternalStore,
   type ReactNode,
 } from "react";
@@ -44,6 +44,22 @@ interface SseCtxValue {
 }
 
 const SseCtx = createContext<SseCtxValue | null>(null);
+const CLOSED_SSE_STATE: SseCtxValue = { status: "closed", lastEventId: null };
+type SseAction =
+  | { type: "closed" }
+  | { type: "status"; status: SseStatus }
+  | { type: "lastEventId"; lastEventId: string | null };
+
+function sseReducer(state: SseCtxValue, action: SseAction): SseCtxValue {
+  switch (action.type) {
+    case "closed":
+      return CLOSED_SSE_STATE;
+    case "status":
+      return { ...state, status: action.status };
+    case "lastEventId":
+      return { ...state, lastEventId: action.lastEventId };
+  }
+}
 
 export function SseProvider({ children }: { children: ReactNode }) {
   const qc = useQueryClient();
@@ -58,23 +74,19 @@ export function SseProvider({ children }: { children: ReactNode }) {
     () => getAuthState().status,
   );
 
-  const [status, setStatus] = useState<SseStatus>("closed");
-  const [lastEventId, setLastEventId] = useState<string | null>(null);
+  const [connection, dispatchConnection] = useReducer(sseReducer, CLOSED_SSE_STATE);
 
   // Keep setters in a ref so the effect's identity is stable against
   // parent re-renders that produce new setter references. React's
   // `useState` setters are already referentially stable, but threading
   // through a ref makes the callbacks we hand to `connectEventStream`
   // stable across mounts too — and keeps the effect's dep list honest.
-  const statusRef = useRef(setStatus);
-  statusRef.current = setStatus;
-  const lastIdRef = useRef(setLastEventId);
-  lastIdRef.current = setLastEventId;
+  const connectionRef = useRef(dispatchConnection);
+  connectionRef.current = dispatchConnection;
 
   useEffect(() => {
     if (typeof EventSource === "undefined") {
-      setStatus("closed");
-      setLastEventId(null);
+      dispatchConnection({ type: "closed" });
       return;
     }
     // Only open the stream once auth is positively resolved. On the
@@ -84,26 +96,24 @@ export function SseProvider({ children }: { children: ReactNode }) {
     // a logout). The `'loading'` leg also defers — the bootstrap
     // probe usually settles in a single tick.
     if (authStatus !== "authenticated") {
-      setStatus("closed");
-      setLastEventId(null);
+      dispatchConnection({ type: "closed" });
       return;
     }
     if (!workspaceId) {
-      setStatus("closed");
-      setLastEventId(null);
+      dispatchConnection({ type: "closed" });
       return;
     }
 
     // A workspace switch is a fresh stream on the server (different
     // workspace_id, different sequence). Drop the cached last-event
     // id so the new connection doesn't carry a stale reference.
-    setLastEventId(null);
+    dispatchConnection({ type: "lastEventId", lastEventId: null });
 
     const conn = connectEventStream({
       slug: workspaceId,
       qc,
-      onStatus: (next) => statusRef.current(next),
-      onLastEventId: (id) => lastIdRef.current(id),
+      onStatus: (next) => connectionRef.current({ type: "status", status: next }),
+      onLastEventId: (id) => connectionRef.current({ type: "lastEventId", lastEventId: id }),
     });
 
     return () => {
@@ -112,8 +122,8 @@ export function SseProvider({ children }: { children: ReactNode }) {
   }, [qc, workspaceId, authStatus]);
 
   const value = useMemo<SseCtxValue>(
-    () => ({ status, lastEventId }),
-    [status, lastEventId],
+    () => connection,
+    [connection],
   );
 
   return <SseCtx.Provider value={value}>{children}</SseCtx.Provider>;
@@ -127,36 +137,31 @@ export function AdminSseProvider({ children }: { children: ReactNode }) {
     getAuthState,
   );
 
-  const [status, setStatus] = useState<SseStatus>("closed");
-  const [lastEventId, setLastEventId] = useState<string | null>(null);
+  const [connection, dispatchConnection] = useReducer(sseReducer, CLOSED_SSE_STATE);
 
-  const statusRef = useRef(setStatus);
-  statusRef.current = setStatus;
-  const lastIdRef = useRef(setLastEventId);
-  lastIdRef.current = setLastEventId;
+  const connectionRef = useRef(dispatchConnection);
+  connectionRef.current = dispatchConnection;
 
   useEffect(() => {
     if (typeof EventSource === "undefined") {
-      setStatus("closed");
-      setLastEventId(null);
+      dispatchConnection({ type: "closed" });
       return;
     }
     if (
       authState.status !== "authenticated" ||
       authState.user?.is_deployment_admin !== true
     ) {
-      setStatus("closed");
-      setLastEventId(null);
+      dispatchConnection({ type: "closed" });
       return;
     }
 
-    setLastEventId(null);
+    dispatchConnection({ type: "lastEventId", lastEventId: null });
 
     const conn = connectEventStream({
       scope: "admin",
       qc,
-      onStatus: (next) => statusRef.current(next),
-      onLastEventId: (id) => lastIdRef.current(id),
+      onStatus: (next) => connectionRef.current({ type: "status", status: next }),
+      onLastEventId: (id) => connectionRef.current({ type: "lastEventId", lastEventId: id }),
     });
 
     return () => {
@@ -165,8 +170,8 @@ export function AdminSseProvider({ children }: { children: ReactNode }) {
   }, [qc, authState.status, authState.user?.is_deployment_admin]);
 
   const value = useMemo<SseCtxValue>(
-    () => ({ status, lastEventId }),
-    [status, lastEventId],
+    () => connection,
+    [connection],
   );
 
   return <SseCtx.Provider value={value}>{children}</SseCtx.Provider>;

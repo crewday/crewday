@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ApiError, fetchJson } from "@/lib/api";
 import { type ListEnvelope, unwrapList } from "@/lib/listResponse";
@@ -7,6 +7,7 @@ import type { Me, Property, Task } from "@/types/api";
 import FormModal, { FormModalField } from "@/components/FormModal";
 import { Checkbox } from "@/components/common";
 import SearchableSelect, { type SearchableSelectOption } from "@/components/SearchableSelect";
+import { usePatchReducer } from "@/lib/usePatchReducer";
 
 // §06 quick-add. Clicking the button opens a <dialog> (same pattern as
 // the task skip modal in TaskDetailPage) and POSTs to /api/v1/tasks.
@@ -27,6 +28,16 @@ interface Area {
   name: string;
 }
 
+interface NewTaskFormState {
+  title: string;
+  due: string;
+  propertyId: string;
+  areaId: string;
+  personal: boolean;
+  formError: string | null;
+  open: boolean;
+}
+
 export default function NewTaskButton() {
   // code-health: ignore[ccn nloc] Quick-add task dialog keeps compact form state, validation, and mutation beside the button that opens it.
   const qc = useQueryClient();
@@ -38,7 +49,18 @@ export default function NewTaskButton() {
     queryKey: qk.me(),
     queryFn: () => fetchJson<Me>("/api/v1/me"),
   });
-  const [propertyId, setPropertyId] = useState("");
+  const systemTodayIso = new Date().toISOString().slice(0, 10);
+  const defaultDue = meQ.data?.today ?? systemTodayIso;
+  const [form, setForm] = usePatchReducer<NewTaskFormState>(() => ({
+    title: "",
+    due: defaultDue,
+    propertyId: "",
+    areaId: "",
+    personal: true,
+    formError: null,
+    open: false,
+  }));
+  const { title, due, propertyId, areaId, personal, formError, open } = form;
   const areasQ = useQuery({
     queryKey: qk.propertyAreas(propertyId),
     queryFn: () =>
@@ -46,14 +68,6 @@ export default function NewTaskButton() {
     enabled: Boolean(propertyId),
   });
 
-  const systemTodayIso = new Date().toISOString().slice(0, 10);
-  const defaultDue = meQ.data?.today ?? systemTodayIso;
-  const [title, setTitle] = useState("");
-  const [due, setDue] = useState(defaultDue);
-  const [areaId, setAreaId] = useState("");
-  const [personal, setPersonal] = useState(true);
-  const [formError, setFormError] = useState<string | null>(null);
-  const [open, setOpen] = useState(false);
   const submitLocked = useRef(false);
   const propertyOptions = useMemo(
     () => (propsQ.data ?? []).map(propertyOption),
@@ -65,16 +79,20 @@ export default function NewTaskButton() {
   );
 
   useEffect(() => {
-    setDue((current) => (current === systemTodayIso ? defaultDue : current));
+    setForm((current) => (
+      current.due === systemTodayIso ? { ...current, due: defaultDue } : current
+    ));
   }, [defaultDue, systemTodayIso]);
 
   const reset = () => {
-    setTitle("");
-    setDue(defaultDue);
-    setPropertyId("");
-    setAreaId("");
-    setPersonal(true);
-    setFormError(null);
+    setForm({
+      title: "",
+      due: defaultDue,
+      propertyId: "",
+      areaId: "",
+      personal: true,
+      formError: null,
+    });
   };
 
   const create = useMutation({
@@ -84,11 +102,11 @@ export default function NewTaskButton() {
       qc.invalidateQueries({ queryKey: qk.today() });
       qc.invalidateQueries({ queryKey: qk.week() });
       qc.invalidateQueries({ queryKey: qk.tasks() });
-      setOpen(false);
+      setForm({ open: false });
       reset();
     },
     onError: (error) => {
-      setFormError(taskCreateErrorMessage(error));
+      setForm({ formError: taskCreateErrorMessage(error) });
     },
     onSettled: () => {
       submitLocked.current = false;
@@ -98,11 +116,11 @@ export default function NewTaskButton() {
   const currentUserId = meQ.data?.user_id ?? "";
   const closeForm = () => {
     if (submitLocked.current || create.isPending) return;
-    setOpen(false);
+    setForm({ open: false });
     reset();
   };
   const handleDialogClose = () => {
-    setOpen(false);
+    setForm({ open: false });
     reset();
   };
 
@@ -111,7 +129,7 @@ export default function NewTaskButton() {
       <button
         type="button"
         className="btn btn--moss"
-        onClick={() => setOpen(true)}
+        onClick={() => setForm({ open: true })}
       >
         + New task
       </button>
@@ -137,15 +155,15 @@ export default function NewTaskButton() {
           const trimmed = title.trim();
           if (!trimmed) return;
           if (!due) {
-            setFormError("Choose a due date before adding the task.");
+            setForm({ formError: "Choose a due date before adding the task." });
             return;
           }
           if (personal && !currentUserId) {
-            setFormError("Your profile is still loading. Wait a moment and try again.");
+            setForm({ formError: "Your profile is still loading. Wait a moment and try again." });
             return;
           }
           submitLocked.current = true;
-          setFormError(null);
+          setForm({ formError: null });
           create.mutate({
             title: trimmed,
             scheduled_for_local: due + "T09:00:00",
@@ -180,8 +198,7 @@ export default function NewTaskButton() {
             required
             value={title}
             onChange={(e) => {
-              setTitle(e.target.value);
-              setFormError(null);
+              setForm({ title: e.target.value, formError: null });
             }}
             placeholder="e.g. Call back Maria about the stay"
            aria-label="Title"/>
@@ -193,8 +210,7 @@ export default function NewTaskButton() {
             required
             value={due}
             onChange={(e) => {
-              setDue(e.target.value);
-              setFormError(null);
+              setForm({ due: e.target.value, formError: null });
             }}
            aria-label="Due"/>
         </FormModalField>
@@ -207,9 +223,7 @@ export default function NewTaskButton() {
           options={propertyOptions}
           blankOption={{ label: "No property" }}
           onChange={(value) => {
-            setPropertyId(value);
-            setAreaId("");
-            setFormError(null);
+            setForm({ propertyId: value, areaId: "", formError: null });
           }}
         />
 
@@ -222,8 +236,7 @@ export default function NewTaskButton() {
             options={areaOptions}
             blankOption={{ label: "No area" }}
             onChange={(value) => {
-              setAreaId(value);
-              setFormError(null);
+              setForm({ areaId: value, formError: null });
             }}
           />
         )}
@@ -231,8 +244,7 @@ export default function NewTaskButton() {
         <Checkbox
           checked={personal}
           onChange={(e) => {
-            setPersonal(e.target.checked);
-            setFormError(null);
+            setForm({ personal: e.target.checked, formError: null });
           }}
           label="Keep this personal (only I can see it)"
         />

@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { type FormEvent, useMemo, useState } from "react";
+import { type FormEvent, useMemo } from "react";
 import { Link, useLocation } from "react-router-dom";
 import { ApiError, fetchJson } from "@/lib/api";
 import { fetchAllList } from "@/lib/fetchAllList";
@@ -17,6 +17,7 @@ import {
   type InlineTableRow,
 } from "@/components/InlineTableForm";
 import { Avatar, Chip, Loading } from "@/components/common";
+import { usePatchReducer } from "@/lib/usePatchReducer";
 import { workspaceRouteForPathname } from "@/lib/workspaceRoutes";
 import type { Booking, Employee, Me, Property, WorkRole } from "@/types/api";
 
@@ -45,6 +46,24 @@ interface WorkRoleFormState {
 }
 
 type WorkRoleField = keyof WorkRoleFormState;
+
+interface WorkRoleCatalogState {
+  editedDrafts: ReadonlyMap<string, WorkRoleFormState>;
+  rowFieldErrors: ReadonlyMap<string, Partial<Record<WorkRoleField, string>>>;
+  rowErrors: ReadonlyMap<string, string>;
+  createDraft: WorkRoleFormState;
+  createDirty: boolean;
+  createFieldErrors: Partial<Record<WorkRoleField, string>>;
+  createError: string | null;
+}
+
+interface InviteEmployeeState {
+  name: string;
+  email: string;
+  inviteDialogOpen: boolean;
+  formError: string | null;
+  sentInvite: InviteEmployeeResponse | null;
+}
 
 interface WorkRoleWriteRequest extends WorkRoleFormState {
   default_settings_json?: Record<string, unknown>;
@@ -180,15 +199,47 @@ function WorkRoleCatalogManager() {
     queryKey: qk.workRoles(),
     queryFn: () => fetchAllList<WorkRole>("/api/v1/work_roles"),
   });
-  const [editedDrafts, setEditedDrafts] = useState<ReadonlyMap<string, WorkRoleFormState>>(() => new Map());
-  const [rowFieldErrors, setRowFieldErrors] = useState<ReadonlyMap<string, Partial<Record<WorkRoleField, string>>>>(
-    () => new Map(),
-  );
-  const [rowErrors, setRowErrors] = useState<ReadonlyMap<string, string>>(() => new Map());
-  const [createDraft, setCreateDraft] = useState<WorkRoleFormState>(EMPTY_WORK_ROLE_FORM);
-  const [createDirty, setCreateDirty] = useState(false);
-  const [createFieldErrors, setCreateFieldErrors] = useState<Partial<Record<WorkRoleField, string>>>({});
-  const [createError, setCreateError] = useState<string | null>(null);
+  const [catalogState, setCatalogState] = usePatchReducer<WorkRoleCatalogState>(() => ({
+    editedDrafts: new Map(),
+    rowFieldErrors: new Map(),
+    rowErrors: new Map(),
+    createDraft: EMPTY_WORK_ROLE_FORM,
+    createDirty: false,
+    createFieldErrors: {},
+    createError: null,
+  }));
+  const {
+    editedDrafts,
+    rowFieldErrors,
+    rowErrors,
+    createDraft,
+    createDirty,
+    createFieldErrors,
+    createError,
+  } = catalogState;
+  const setEditedDrafts = (
+    update: ReadonlyMap<string, WorkRoleFormState>
+      | ((current: ReadonlyMap<string, WorkRoleFormState>) => ReadonlyMap<string, WorkRoleFormState>),
+  ) => setCatalogState((current) => ({
+    ...current,
+    editedDrafts: typeof update === "function" ? update(current.editedDrafts) : update,
+  }));
+  const setRowFieldErrors = (
+    update: ReadonlyMap<string, Partial<Record<WorkRoleField, string>>>
+      | ((
+        current: ReadonlyMap<string, Partial<Record<WorkRoleField, string>>>,
+      ) => ReadonlyMap<string, Partial<Record<WorkRoleField, string>>>),
+  ) => setCatalogState((current) => ({
+    ...current,
+    rowFieldErrors: typeof update === "function" ? update(current.rowFieldErrors) : update,
+  }));
+  const setRowErrors = (
+    update: ReadonlyMap<string, string>
+      | ((current: ReadonlyMap<string, string>) => ReadonlyMap<string, string>),
+  ) => setCatalogState((current) => ({
+    ...current,
+    rowErrors: typeof update === "function" ? update(current.rowErrors) : update,
+  }));
   const roles = rolesQ.data ?? [];
   const rolesById = useMemo(() => new Map(roles.map((role) => [role.id, role])), [roles]);
 
@@ -232,8 +283,7 @@ function WorkRoleCatalogManager() {
       const nextFieldErrors = workRoleFieldErrors(error);
       const message = workRoleErrorMessage(error, nextFieldErrors);
       if (variables.rowId === CREATE_WORK_ROLE_ROW_ID) {
-        setCreateFieldErrors(nextFieldErrors);
-        setCreateError(message);
+        setCatalogState({ createFieldErrors: nextFieldErrors, createError: message });
         return;
       }
       setRowFieldErrors((current) => setMapValue(current, variables.rowId, nextFieldErrors));
@@ -413,10 +463,12 @@ function WorkRoleCatalogManager() {
   );
 
   function resetCreateRow(): void {
-    setCreateDraft(EMPTY_WORK_ROLE_FORM);
-    setCreateDirty(false);
-    setCreateFieldErrors({});
-    setCreateError(null);
+    setCatalogState({
+      createDraft: EMPTY_WORK_ROLE_FORM,
+      createDirty: false,
+      createFieldErrors: {},
+      createError: null,
+    });
   }
 
   function saveRow(rowId: string): void {
@@ -425,8 +477,10 @@ function WorkRoleCatalogManager() {
     const nextErrors = validateWorkRoleDraft(draft);
     if (Object.keys(nextErrors).length > 0) {
       if (rowId === CREATE_WORK_ROLE_ROW_ID) {
-        setCreateFieldErrors(nextErrors);
-        setCreateError("Fix the highlighted fields before saving.");
+        setCatalogState({
+          createFieldErrors: nextErrors,
+          createError: "Fix the highlighted fields before saving.",
+        });
         return;
       }
       setRowFieldErrors((current) => setMapValue(current, rowId, nextErrors));
@@ -434,8 +488,7 @@ function WorkRoleCatalogManager() {
       return;
     }
     if (rowId === CREATE_WORK_ROLE_ROW_ID) {
-      setCreateFieldErrors({});
-      setCreateError(null);
+      setCatalogState({ createFieldErrors: {}, createError: null });
     } else {
       setRowFieldErrors((current) => clearMapValue(current, rowId));
       setRowErrors((current) => clearMapValue(current, rowId));
@@ -489,10 +542,13 @@ function WorkRoleCatalogManager() {
           saveMode="explicit"
           onDraftChange={(rowId, patch) => {
             if (rowId === CREATE_WORK_ROLE_ROW_ID) {
-              setCreateDraft((current) => ({ ...current, ...patch }));
-              setCreateDirty(true);
-              setCreateFieldErrors((current) => clearPatchedWorkRoleFieldErrors(current, patch));
-              setCreateError(null);
+              setCatalogState((current) => ({
+                ...current,
+                createDraft: { ...current.createDraft, ...patch },
+                createDirty: true,
+                createFieldErrors: clearPatchedWorkRoleFieldErrors(current.createFieldErrors, patch),
+                createError: null,
+              }));
               return;
             }
             setEditedDrafts((current) => {
@@ -538,11 +594,14 @@ function InviteEmployeeAction() {
     queryKey: qk.me(),
     queryFn: () => fetchJson<Me>("/api/v1/me"),
   });
-  const [name, setName] = useState("");
-  const [email, setEmail] = useState("");
-  const [inviteDialogOpen, setInviteDialogOpen] = useState(false);
-  const [formError, setFormError] = useState<string | null>(null);
-  const [sentInvite, setSentInvite] = useState<InviteEmployeeResponse | null>(null);
+  const [inviteState, setInviteState] = usePatchReducer<InviteEmployeeState>({
+    name: "",
+    email: "",
+    inviteDialogOpen: false,
+    formError: null,
+    sentInvite: null,
+  });
+  const { name, email, inviteDialogOpen, formError, sentInvite } = inviteState;
 
   const invite = useMutation({
     mutationFn: (payload: InviteEmployeeRequest) =>
@@ -551,15 +610,12 @@ function InviteEmployeeAction() {
         body: payload,
       }),
     onSuccess: (result) => {
-      setSentInvite(result);
-      setName("");
-      setEmail("");
-      setFormError(null);
+      setInviteState({ sentInvite: result, name: "", email: "", formError: null });
       void queryClient.invalidateQueries({ queryKey: qk.employees() });
       void queryClient.invalidateQueries({ queryKey: qk.users() });
     },
     onError: (error) => {
-      setFormError(inviteEmployeeErrorMessage(error));
+      setInviteState({ formError: inviteEmployeeErrorMessage(error) });
     },
   });
 
@@ -567,10 +623,7 @@ function InviteEmployeeAction() {
 
   function reset(): void {
     if (invite.isPending) return;
-    setName("");
-    setEmail("");
-    setFormError(null);
-    setSentInvite(null);
+    setInviteState({ name: "", email: "", formError: null, sentInvite: null });
     invite.reset();
   }
 
@@ -580,18 +633,18 @@ function InviteEmployeeAction() {
     const trimmedName = name.trim();
     const trimmedEmail = email.trim();
     if (!trimmedName) {
-      setFormError("Enter the employee's full name before sending the invite.");
+      setInviteState({ formError: "Enter the employee's full name before sending the invite." });
       return;
     }
     if (!trimmedEmail) {
-      setFormError("Enter the employee's email address before sending the invite.");
+      setInviteState({ formError: "Enter the employee's email address before sending the invite." });
       return;
     }
     if (!workspaceId) {
-      setFormError("Workspace context is still loading. Wait a moment and try again.");
+      setInviteState({ formError: "Workspace context is still loading. Wait a moment and try again." });
       return;
     }
-    setFormError(null);
+    setInviteState({ formError: null });
     invite.mutate({
       email: trimmedEmail,
       display_name: trimmedName,
@@ -610,7 +663,7 @@ function InviteEmployeeAction() {
       <button
         type="button"
         className="btn btn--moss"
-        onClick={() => setInviteDialogOpen(true)}
+        onClick={() => setInviteState({ inviteDialogOpen: true })}
       >
         + Invite employee
       </button>
@@ -623,7 +676,7 @@ function InviteEmployeeAction() {
         subtitle="Send a click-to-accept invite for this workspace."
         formClassName="invite-employee-form"
         onClose={() => {
-          setInviteDialogOpen(false);
+          setInviteState({ inviteDialogOpen: false });
           reset();
         }}
         onCancel={(event) => {
@@ -637,7 +690,7 @@ function InviteEmployeeAction() {
               type="button"
               className="btn btn--ghost"
               disabled={invite.isPending}
-              onClick={() => setInviteDialogOpen(false)}
+              onClick={() => setInviteState({ inviteDialogOpen: false })}
             >
               {sentInvite ? "Done" : "Cancel"}
             </button>
@@ -668,8 +721,7 @@ function InviteEmployeeAction() {
                   required
                   value={name}
                   onChange={(event) => {
-                    setName(event.target.value);
-                    setFormError(null);
+                    setInviteState({ name: event.target.value, formError: null });
                   }}
                   placeholder="e.g. Riley Chen"
                  aria-label="Full name"/>
@@ -681,8 +733,7 @@ function InviteEmployeeAction() {
                   required
                   value={email}
                   onChange={(event) => {
-                    setEmail(event.target.value);
-                    setFormError(null);
+                    setInviteState({ email: event.target.value, formError: null });
                   }}
                   placeholder="riley@example.com"
                  aria-label="Email"/>

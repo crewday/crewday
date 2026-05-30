@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useReducer, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { QueryClient } from "@tanstack/react-query";
 import { Link, useLocation, useNavigate } from "react-router-dom";
@@ -118,6 +118,46 @@ interface WorkspaceSwitcherEntry {
   settings_override: Record<string, unknown>;
 }
 
+type WorkspaceConfirmation = "archive" | "delete" | null;
+
+interface WorkspaceActionState {
+  confirmation: WorkspaceConfirmation;
+  exportError: string | null;
+  archiveError: string | null;
+  deleteError: string | null;
+  deleteResult: WorkspaceDeleteResponse | null;
+}
+
+type WorkspaceAction =
+  | { type: "confirmation"; confirmation: WorkspaceConfirmation }
+  | { type: "exportError"; error: string | null }
+  | { type: "archiveError"; error: string | null }
+  | { type: "deleteError"; error: string | null }
+  | { type: "deleteResult"; result: WorkspaceDeleteResponse | null };
+
+const INITIAL_WORKSPACE_ACTION_STATE: WorkspaceActionState = {
+  confirmation: null,
+  exportError: null,
+  archiveError: null,
+  deleteError: null,
+  deleteResult: null,
+};
+
+function workspaceActionReducer(state: WorkspaceActionState, action: WorkspaceAction): WorkspaceActionState {
+  switch (action.type) {
+    case "confirmation":
+      return { ...state, confirmation: action.confirmation };
+    case "exportError":
+      return { ...state, exportError: action.error };
+    case "archiveError":
+      return { ...state, archiveError: action.error };
+    case "deleteError":
+      return { ...state, deleteError: action.error };
+    case "deleteResult":
+      return { ...state, deleteResult: action.result };
+  }
+}
+
 function errorMessage(err: unknown, fallback: string): string {
   if (err instanceof Error && err.message) return err.message;
   return fallback;
@@ -226,12 +266,26 @@ interface SettingPaneItem {
   value: unknown;
 }
 
+interface SettingsPaneDraftState {
+  valuesKey: string;
+  drafts: Record<string, string>;
+  resetKeys: Set<string>;
+}
+
 function settingHelpId(key: string): string {
   return `setting-help-${key.replaceAll(".", "-")}`;
 }
 
 function draftsFromItems(items: SettingPaneItem[]): Record<string, string> {
   return Object.fromEntries(items.map(({ def, value }) => [def.key, draftFromValue(value)]));
+}
+
+function settingsPaneDraftState(items: SettingPaneItem[], valuesKey: string): SettingsPaneDraftState {
+  return {
+    valuesKey,
+    drafts: draftsFromItems(items),
+    resetKeys: new Set(),
+  };
 }
 
 function catalogDraftsFromItems(items: SettingPaneItem[]): Record<string, string> {
@@ -341,18 +395,15 @@ function SettingsPane({
   items: SettingPaneItem[];
 }) {
   const qc = useQueryClient();
-  const [drafts, setDrafts] = useState<Record<string, string>>(() => draftsFromItems(items));
-  const [resetKeys, setResetKeys] = useState<Set<string>>(() => new Set());
   const [error, setError] = useState<string | null>(null);
   const valuesKey = JSON.stringify(items.map(({ def, value }) => [def.key, value]));
-  const syncedValuesKey = useRef(valuesKey);
-
-  useEffect(() => {
-    if (syncedValuesKey.current === valuesKey) return;
-    syncedValuesKey.current = valuesKey;
-    setDrafts(draftsFromItems(items));
-    setResetKeys(new Set());
-  }, [items, valuesKey]);
+  const [draftState, setDraftState] = useState<SettingsPaneDraftState>(() => settingsPaneDraftState(items, valuesKey));
+  let activeDraftState = draftState;
+  if (draftState.valuesKey !== valuesKey) {
+    activeDraftState = settingsPaneDraftState(items, valuesKey);
+    setDraftState(activeDraftState);
+  }
+  const { drafts, resetKeys } = activeDraftState;
 
   const save = useMutation({
     mutationFn: (payload: Record<string, unknown>) =>
@@ -395,12 +446,20 @@ function SettingsPane({
               draft={drafts[def.key] ?? ""}
               disabled={save.isPending}
               onDraftChange={(draft) => {
-                setDrafts((current) => ({ ...current, [def.key]: draft }));
-                setResetKeys((current) => {
-                  if (!current.has(def.key)) return current;
-                  const next = new Set(current);
+                setDraftState((current) => {
+                  if (!current.resetKeys.has(def.key)) {
+                    return {
+                      ...current,
+                      drafts: { ...current.drafts, [def.key]: draft },
+                    };
+                  }
+                  const next = new Set(current.resetKeys);
                   next.delete(def.key);
-                  return next;
+                  return {
+                    ...current,
+                    drafts: { ...current.drafts, [def.key]: draft },
+                    resetKeys: next,
+                  };
                 });
               }}
             />
@@ -423,8 +482,11 @@ function SettingsPane({
                 type="button"
                 disabled={save.isPending}
                 onClick={() => {
-                  setDrafts(catalogDraftsFromItems(items));
-                  setResetKeys(new Set(items.map(({ def }) => def.key)));
+                  setDraftState((current) => ({
+                    ...current,
+                    drafts: catalogDraftsFromItems(items),
+                    resetKeys: new Set(items.map(({ def }) => def.key)),
+                  }));
                 }}
               >
                 Use defaults
@@ -443,10 +505,6 @@ function WorkspaceDetailsForm({ settings }: { settings: WorkspaceSettings }) {
   const displayName = settings.meta.display_name;
   const [draft, setDraft] = useState(displayName);
   const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    setDraft(displayName);
-  }, [displayName]);
 
   const save = useMutation({
     mutationFn: () =>
@@ -680,11 +738,26 @@ export default function SettingsPage() {
   const { pathname } = useLocation();
   const navigate = useNavigate();
   const qc = useQueryClient();
-  const [confirmation, setConfirmation] = useState<"archive" | "delete" | null>(null);
-  const [exportError, setExportError] = useState<string | null>(null);
-  const [archiveError, setArchiveError] = useState<string | null>(null);
-  const [deleteError, setDeleteError] = useState<string | null>(null);
-  const [deleteResult, setDeleteResult] = useState<WorkspaceDeleteResponse | null>(null);
+  const [workspaceActionState, dispatchWorkspaceAction] = useReducer(
+    workspaceActionReducer,
+    INITIAL_WORKSPACE_ACTION_STATE,
+  );
+  const { confirmation, exportError, archiveError, deleteError, deleteResult } = workspaceActionState;
+  const setConfirmation = (confirmation: WorkspaceConfirmation): void => {
+    dispatchWorkspaceAction({ type: "confirmation", confirmation });
+  };
+  const setExportError = (error: string | null): void => {
+    dispatchWorkspaceAction({ type: "exportError", error });
+  };
+  const setArchiveError = (error: string | null): void => {
+    dispatchWorkspaceAction({ type: "archiveError", error });
+  };
+  const setDeleteError = (error: string | null): void => {
+    dispatchWorkspaceAction({ type: "deleteError", error });
+  };
+  const setDeleteResult = (result: WorkspaceDeleteResponse | null): void => {
+    dispatchWorkspaceAction({ type: "deleteResult", result });
+  };
   const settingsQ = useQuery({
     queryKey: qk.settings(),
     queryFn: () => fetchJson<WorkspaceSettings>("/api/v1/settings"),
@@ -797,7 +870,7 @@ export default function SettingsPage() {
       {/* Workspace identity */}
       <section className="panel">
         <header className="panel__head"><h2>Workspace</h2></header>
-        <WorkspaceDetailsForm settings={ws} />
+        <WorkspaceDetailsForm key={ws.meta.display_name} settings={ws} />
       </section>
 
       {/* §11 — Workspace usage budget. Manager-visible shape is

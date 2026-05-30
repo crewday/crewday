@@ -74,7 +74,8 @@ export default function AdminLayout() {
   const navigate = useNavigate();
   const collapsed = initialAgentCollapsed();
   const { pathname } = useLocation();
-  const [navOpen, setNavOpen] = useState(false);
+  const [navState, setNavState] = useState(() => ({ pathname, open: false }));
+  const navOpen = navState.pathname === pathname && navState.open;
   const [navCollapsed, setNavCollapsed] = useState<boolean>(() => initialNavCollapsed());
   const toggleNavCollapsed = useCallback(() => {
     setNavCollapsed((c) => {
@@ -95,18 +96,16 @@ export default function AdminLayout() {
   });
 
   useEffect(() => {
-    setNavOpen(false);
-  }, [pathname]);
-
-  useEffect(() => {
     if (!navOpen) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setNavOpen(false);
+      if (e.key === "Escape") setNavState({ pathname, open: false });
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [navOpen]);
-  const toggleNav = useCallback(() => setNavOpen((v) => !v), []);
+  }, [navOpen, pathname]);
+  const toggleNav = useCallback(() => {
+    setNavState((current) => ({ pathname, open: current.pathname === pathname ? !current.open : true }));
+  }, [pathname]);
 
   const denied = adminMeQ.isError || meQ.data?.is_deployment_admin === false;
   const hasAccess = adminMeQ.isSuccess && meQ.data?.is_deployment_admin === true;
@@ -150,7 +149,7 @@ export default function AdminLayout() {
         {navOpen && (
           <div
             className="desk__scrim"
-            onClick={() => setNavOpen(false)}
+            onClick={() => setNavState({ pathname, open: false })}
             role="presentation"
             aria-hidden="true"
           />

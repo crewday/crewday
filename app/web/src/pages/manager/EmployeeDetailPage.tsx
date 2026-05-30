@@ -1,4 +1,4 @@
-import { type FormEvent, useEffect, useState } from "react";
+import { type FormEvent, useEffect, useState, useSyncExternalStore } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { CalendarOff, ClipboardList, ReceiptText } from "lucide-react";
 import { useParams } from "react-router-dom";
@@ -246,26 +246,28 @@ function normalizeEmployeeTabHash(tab: Tab): void {
   window.history.replaceState(null, "", `${window.location.pathname}${window.location.search}${nextHash}`);
 }
 
+function subscribeHashChange(onStoreChange: () => void): () => void {
+  window.addEventListener("hashchange", onStoreChange);
+  return () => window.removeEventListener("hashchange", onStoreChange);
+}
+
 export default function EmployeeDetailPage() {
   const { eid = "" } = useParams<{ eid: string }>();
-  const [activeTab, setActiveTab] = useState<Tab>(() => tabFromHash(window.location.hash));
+  const activeTab = useSyncExternalStore(
+    subscribeHashChange,
+    () => tabFromHash(window.location.hash),
+    (): Tab => "overview",
+  );
   const [roleDialogOpen, setRoleDialogOpen] = useState(false);
-  const [selectedRoleIds, setSelectedRoleIds] = useState<Set<string>>(new Set());
+  const [selectedRoleIdsOverride, setSelectedRoleIdsOverride] = useState<Set<string> | null>(null);
   const qc = useQueryClient();
 
   useEffect(() => {
-    const syncFromHash = () => {
-      const nextTab = tabFromHash(window.location.hash);
-      normalizeEmployeeTabHash(nextTab);
-      setActiveTab(nextTab);
-    };
-    syncFromHash();
-    window.addEventListener("hashchange", syncFromHash);
-    return () => window.removeEventListener("hashchange", syncFromHash);
-  }, []);
+    normalizeEmployeeTabHash(activeTab);
+  }, [activeTab]);
 
-  function selectTab(next: string): void {
-    setActiveTab(tabFromHash(`#${next}`));
+  function selectTab(): void {
+    // PageTabs owns the hash write; this page subscribes to hash changes.
   }
 
   const detailQ = useQuery({
@@ -298,10 +300,6 @@ export default function EmployeeDetailPage() {
     },
   });
 
-  useEffect(() => {
-    if (!roleDialogOpen || !userWorkRolesQ.data) return;
-    setSelectedRoleIds(new Set(userWorkRolesQ.data.map((link) => link.work_role_id)));
-  }, [roleDialogOpen, userWorkRolesQ.data]);
   const propsQ = useQuery({
     queryKey: qk.properties(),
     queryFn: () => fetchJson<Property[]>("/api/v1/properties"),
@@ -344,19 +342,23 @@ export default function EmployeeDetailPage() {
   const roleRows = workRolesQ.data ?? [];
   const currentLinks = userWorkRolesQ.data ?? [];
   const currentRoleIds = new Set(currentLinks.map((link) => link.work_role_id));
+  const selectedRoleIds = selectedRoleIdsOverride ?? currentRoleIds;
 
   function openRoleDialog() {
     setRoleDialogOpen(true);
+    setSelectedRoleIdsOverride(null);
     roleSave.reset();
   }
 
   function closeRoleDialog() {
     setRoleDialogOpen(false);
+    setSelectedRoleIdsOverride(null);
   }
 
   function toggleRole(roleId: string, checked: boolean) {
-    setSelectedRoleIds((prev) => {
-      const next = new Set(prev);
+    setSelectedRoleIdsOverride((prev) => {
+      const base = prev ?? selectedRoleIds;
+      const next = new Set(base);
       if (checked) {
         next.add(roleId);
       } else {

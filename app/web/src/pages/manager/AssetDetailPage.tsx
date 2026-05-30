@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useSyncExternalStore } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useParams } from "react-router-dom";
 import { fetchJson } from "@/lib/api";
@@ -98,20 +98,22 @@ function tabFromHash(hash: string): Tab {
   return ASSET_TABS.find((tab) => tab.key === key)?.key ?? "overview";
 }
 
+function subscribeHashChange(onStoreChange: () => void): () => void {
+  window.addEventListener("hashchange", onStoreChange);
+  return () => window.removeEventListener("hashchange", onStoreChange);
+}
+
 export default function AssetDetailPage() {
   const { aid = "" } = useParams<{ aid: string }>();
-  const [activeTab, setActiveTab] = useState<Tab>(() => tabFromHash(window.location.hash));
+  const activeTab = useSyncExternalStore(
+    subscribeHashChange,
+    () => tabFromHash(window.location.hash),
+    () => "overview",
+  );
   const queryClient = useQueryClient();
 
-  useEffect(() => {
-    const syncFromHash = () => setActiveTab(tabFromHash(window.location.hash));
-    syncFromHash();
-    window.addEventListener("hashchange", syncFromHash);
-    return () => window.removeEventListener("hashchange", syncFromHash);
-  }, []);
-
-  function selectTab(next: string): void {
-    setActiveTab(tabFromHash(`#${next}`));
+  function selectTab(): void {
+    // PageTabs owns the hash write; this page subscribes to hash changes.
   }
 
   const detailQ = useQuery({

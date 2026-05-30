@@ -43,8 +43,8 @@ type LoginLocationState = {
 
 export default function LoginPage() {
   const { isAuthenticated, loginWithPasskey, user } = useAuth();
-  const location = useLocation();
-  const initialNotice = loginNotice(location.state);
+  const { search, state } = useLocation();
+  const initialNotice = loginNotice(state);
   const [form, setForm] = useState<FormState>(
     initialNotice ? { kind: "error", message: initialNotice, tone: "info" } : { kind: "idle" },
   );
@@ -67,9 +67,9 @@ export default function LoginPage() {
   // filter, but a user can arrive here via a hand-crafted phishing
   // link that skips both.
   const safeNext = useMemo(() => {
-    const params = new URLSearchParams(location.search);
+    const params = new URLSearchParams(search);
     return sanitizeNext(params.get("next"));
-  }, [location.search]);
+  }, [search]);
 
   const onPasskey = useCallback(async () => {
     if (inflightRef.current) return;

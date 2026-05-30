@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import type { Dispatch, MutableRefObject, ReactNode, SetStateAction } from "react";
 import { CheckCircle2, RotateCcw } from "lucide-react";
 import {
@@ -17,6 +17,7 @@ import {
   useInlineTableInfiniteRows,
 } from "@/components/InlineTableForm";
 import type { ListEnvelope } from "@/lib/listResponse";
+import { usePatchReducer } from "@/lib/usePatchReducer";
 
 type Priority = "low" | "normal" | "high";
 
@@ -108,6 +109,18 @@ interface WorkspacePage extends ListEnvelope<WorkspaceRecord> {
   cursor: string | null;
 }
 
+interface InlineTableFormsDemoState {
+  tasks: InlineTableRow<TaskDraft>[];
+  checklist: InlineTableRow<ChecklistDraft>[];
+  assignments: InlineTableRow<AssignmentDraft>[];
+  defaultRows: InlineTableRow<DefaultDraft>[];
+  workspacePages: WorkspacePage[];
+  workspaceLoading: boolean;
+  workspaceLoadError: ReactNode;
+  taskSearch: string;
+  emptySearch: string;
+}
+
 const workspaceCursorPages: WorkspacePage[] = [
   {
     cursor: null,
@@ -146,15 +159,52 @@ function nextDemoRowId(prefix: string) {
 }
 
 export default function InlineTableFormsDemoPage() {
-  const [tasks, setTasks] = useState<InlineTableRow<TaskDraft>[]>(initialTasks);
-  const [checklist, setChecklist] = useState<InlineTableRow<ChecklistDraft>[]>(initialChecklist);
-  const [assignments, setAssignments] = useState<InlineTableRow<AssignmentDraft>[]>(initialAssignments);
-  const [defaultRows, setDefaultRows] = useState<InlineTableRow<DefaultDraft>[]>(initialDefaultRows);
-  const [workspacePages, setWorkspacePages] = useState<WorkspacePage[]>(() => [workspaceCursorPages[0]!]);
-  const [workspaceLoading, setWorkspaceLoading] = useState(false);
-  const [workspaceLoadError, setWorkspaceLoadError] = useState<ReactNode>(null);
-  const [taskSearch, setTaskSearch] = useState("linen");
-  const [emptySearch, setEmptySearch] = useState("no match");
+  const [demoState, setDemoState] = usePatchReducer<InlineTableFormsDemoState>(() => ({
+    tasks: initialTasks,
+    checklist: initialChecklist,
+    assignments: initialAssignments,
+    defaultRows: initialDefaultRows,
+    workspacePages: [workspaceCursorPages[0]!],
+    workspaceLoading: false,
+    workspaceLoadError: null,
+    taskSearch: "linen",
+    emptySearch: "no match",
+  }));
+  const {
+    tasks,
+    checklist,
+    assignments,
+    defaultRows,
+    workspacePages,
+    workspaceLoading,
+    workspaceLoadError,
+    taskSearch,
+    emptySearch,
+  } = demoState;
+  const setTasks: Dispatch<SetStateAction<InlineTableRow<TaskDraft>[]>> = (update) => {
+    setDemoState((current) => ({
+      ...current,
+      tasks: typeof update === "function" ? update(current.tasks) : update,
+    }));
+  };
+  const setChecklist: Dispatch<SetStateAction<InlineTableRow<ChecklistDraft>[]>> = (update) => {
+    setDemoState((current) => ({
+      ...current,
+      checklist: typeof update === "function" ? update(current.checklist) : update,
+    }));
+  };
+  const setAssignments: Dispatch<SetStateAction<InlineTableRow<AssignmentDraft>[]>> = (update) => {
+    setDemoState((current) => ({
+      ...current,
+      assignments: typeof update === "function" ? update(current.assignments) : update,
+    }));
+  };
+  const setDefaultRows: Dispatch<SetStateAction<InlineTableRow<DefaultDraft>[]>> = (update) => {
+    setDemoState((current) => ({
+      ...current,
+      defaultRows: typeof update === "function" ? update(current.defaultRows) : update,
+    }));
+  };
   const assignmentSaveTimers = useRef<number[]>([]);
   const workspaceLoadTimer = useRef<number | null>(null);
 
@@ -529,18 +579,23 @@ export default function InlineTableFormsDemoPage() {
   const emptySearchRows = useMemo(() => filterDefaultRows(defaultRows, emptySearch), [defaultRows, emptySearch]);
   const loadMoreWorkspaces = () => {
     if (workspaceLoading || !workspaceRows.hasMore) return;
-    setWorkspaceLoading(true);
+    setDemoState({ workspaceLoading: true });
     workspaceLoadTimer.current = window.setTimeout(() => {
       const nextCursor = workspaceRows.nextCursor;
       const nextPage = workspaceCursorPages.find((page) => page.cursor === nextCursor);
       if (!nextPage) {
-        setWorkspaceLoadError("The next cursor did not resolve.");
-        setWorkspaceLoading(false);
+        setDemoState({
+          workspaceLoadError: "The next cursor did not resolve.",
+          workspaceLoading: false,
+        });
         return;
       }
-      setWorkspacePages((pages) => [...pages, nextPage]);
-      setWorkspaceLoadError(null);
-      setWorkspaceLoading(false);
+      setDemoState((current) => ({
+        ...current,
+        workspacePages: [...current.workspacePages, nextPage],
+        workspaceLoadError: null,
+        workspaceLoading: false,
+      }));
     }, 260);
   };
 
@@ -564,7 +619,7 @@ export default function InlineTableFormsDemoPage() {
             saveMode="explicit"
             search={{
               value: taskSearch,
-              onChange: setTaskSearch,
+              onChange: (value) => setDemoState({ taskSearch: value }),
               label: "Search task rows",
               placeholder: "Search tasks, assignees, properties",
               resultSummary: `${searchedTasks.length} of ${tasks.length} tasks`,
@@ -663,7 +718,7 @@ export default function InlineTableFormsDemoPage() {
                 loadedCount={workspaceRows.loadedRowCount}
                 onLoadMore={loadMoreWorkspaces}
                 onRetry={() => {
-                  setWorkspaceLoadError(null);
+                  setDemoState({ workspaceLoadError: null });
                   loadMoreWorkspaces();
                 }}
               />
@@ -701,7 +756,7 @@ export default function InlineTableFormsDemoPage() {
             rows={emptySearchRows}
             search={{
               value: emptySearch,
-              onChange: setEmptySearch,
+              onChange: (value) => setDemoState({ emptySearch: value }),
               label: "Search default rows",
               placeholder: "Search default rows",
               resultSummary: `${emptySearchRows.length} of ${defaultRows.length} rows`,

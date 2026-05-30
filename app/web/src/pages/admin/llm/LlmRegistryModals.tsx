@@ -1,4 +1,4 @@
-import { useId, useMemo, useRef, useState } from "react";
+import { useId, useMemo, useRef } from "react";
 import type { FormEvent } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import AutoGrowTextarea from "@/components/AutoGrowTextarea";
@@ -10,6 +10,7 @@ import SearchableSelect, { type SearchableSelectOption } from "@/components/Sear
 import { ApiError, fetchJson } from "@/lib/api";
 import { formatDecimal, formatInteger } from "@/lib/numberFormat";
 import { qk } from "@/lib/queryKeys";
+import { usePatchReducer } from "@/lib/usePatchReducer";
 import type {
   LlmAudioInputTransform,
   LlmImageInputFormat,
@@ -476,18 +477,40 @@ function ProviderForm(props: ProviderFormProps) {
   // code-health: ignore[ccn] Provider form keeps validation beside the provider payload and API mutation it drives.
   const { mode, provider, providerModels, models, titleId, onClose } = props;
   const qc = useQueryClient();
-  const [name, setName] = useState(provider?.name ?? "");
-  const [providerType, setProviderType] = useState<LlmProviderType>(
-    provider?.provider_type ?? "openrouter",
-  );
-  const [apiEndpoint, setApiEndpoint] = useState(provider?.endpoint ?? "");
-  const [apiKey, setApiKey] = useState("");
-  const [defaultModel, setDefaultModel] = useState(provider?.default_model ?? "");
-  const [timeout, setTimeoutValue] = useState(String(provider?.timeout_s ?? 60));
-  const [rpm, setRpm] = useState(String(provider?.requests_per_minute ?? 60));
-  const [enabled, setEnabled] = useState(provider?.is_enabled ?? true);
-  const [clientErr, setClientErr] = useState<string | null>(null);
-  const [serverErr, setServerErr] = useState<string | null>(null);
+  const [formState, setFormState] = usePatchReducer({
+    name: provider?.name ?? "",
+    providerType: provider?.provider_type ?? "openrouter" as LlmProviderType,
+    apiEndpoint: provider?.endpoint ?? "",
+    apiKey: "",
+    defaultModel: provider?.default_model ?? "",
+    timeout: String(provider?.timeout_s ?? 60),
+    rpm: String(provider?.requests_per_minute ?? 60),
+    enabled: provider?.is_enabled ?? true,
+    clientErr: null as string | null,
+    serverErr: null as string | null,
+  });
+  const {
+    name,
+    providerType,
+    apiEndpoint,
+    apiKey,
+    defaultModel,
+    timeout,
+    rpm,
+    enabled,
+    clientErr,
+    serverErr,
+  } = formState;
+  const setName = (name: string) => setFormState({ name });
+  const setProviderType = (providerType: LlmProviderType) => setFormState({ providerType });
+  const setApiEndpoint = (apiEndpoint: string) => setFormState({ apiEndpoint });
+  const setApiKey = (apiKey: string) => setFormState({ apiKey });
+  const setDefaultModel = (defaultModel: string) => setFormState({ defaultModel });
+  const setTimeoutValue = (timeout: string) => setFormState({ timeout });
+  const setRpm = (rpm: string) => setFormState({ rpm });
+  const setEnabled = (enabled: boolean) => setFormState({ enabled });
+  const setClientErr = (clientErr: string | null) => setFormState({ clientErr });
+  const setServerErr = (serverErr: string | null) => setFormState({ serverErr });
 
   const defaultModelOptions = useMemo(() => {
     if (!provider) return [];
@@ -811,55 +834,85 @@ function ModelForm({
 }) {
   const qc = useQueryClient();
   const openRouterInputId = useId();
-  const [canonicalName, setCanonicalName] = useState(model?.canonical_name ?? "");
-  const [displayName, setDisplayName] = useState(model?.display_name ?? "");
-  const [capabilities, setCapabilities] = useState<string[]>(model?.capabilities ?? []);
-  const [contextWindow, setContextWindow] = useState(
-    model?.context_window === null || model?.context_window === undefined
+  const [formState, setFormState] = usePatchReducer({
+    canonicalName: model?.canonical_name ?? "",
+    displayName: model?.display_name ?? "",
+    capabilities: model?.capabilities ?? [] as string[],
+    contextWindow: model?.context_window === null || model?.context_window === undefined
       ? ""
       : String(model.context_window),
-  );
-  const [maxOutput, setMaxOutput] = useState(
-    model?.max_output_tokens === null || model?.max_output_tokens === undefined
+    maxOutput: model?.max_output_tokens === null || model?.max_output_tokens === undefined
       ? ""
       : String(model.max_output_tokens),
-  );
-  const [embeddingDimensions, setEmbeddingDimensions] = useState(
-    model?.embedding_dimensions === null || model?.embedding_dimensions === undefined
+    embeddingDimensions: model?.embedding_dimensions === null || model?.embedding_dimensions === undefined
       ? ""
       : String(model.embedding_dimensions),
-  );
-  const [temperature, setTemperature] = useState(
-    model?.temperature === null || model?.temperature === undefined
+    temperature: model?.temperature === null || model?.temperature === undefined
       ? ""
       : String(model.temperature),
-  );
-  const [priceSource, setPriceSource] = useState<LlmPriceSource>(
-    model?.price_source ?? "",
-  );
-  const [thinkingLevel, setThinkingLevel] = useState<LlmThinkingLevel>(
-    model?.thinking_level ?? "disabled",
-  );
-  const [thinkingStrategy, setThinkingStrategy] = useState<LlmThinkingStrategy>(
-    model?.thinking_strategy ?? "none",
-  );
-  const [priceSourceModel, setPriceSourceModel] = useState(
-    model?.price_source_model_id ?? "",
-  );
-  const [active, setActive] = useState(model?.is_active ?? true);
-  const [notes, setNotes] = useState(model?.notes ?? "");
-  const [openRouterModel, setOpenRouterModel] = useState(
-    mode === "edit" && model
+    priceSource: model?.price_source ?? "" as LlmPriceSource,
+    thinkingLevel: model?.thinking_level ?? "disabled" as LlmThinkingLevel,
+    thinkingStrategy: model?.thinking_strategy ?? "none" as LlmThinkingStrategy,
+    priceSourceModel: model?.price_source_model_id ?? "",
+    active: model?.is_active ?? true,
+    notes: model?.notes ?? "",
+    openRouterModel: mode === "edit" && model
       ? (model.price_source_model_id ?? model.canonical_name)
       : "",
-  );
-  const [openRouterErr, setOpenRouterErr] = useState<string | null>(null);
-  const [openRouterStatus, setOpenRouterStatus] = useState<string | null>(null);
-  const [openRouterPricing, setOpenRouterPricing] =
-    useState<OpenRouterPricingPreview | null>(null);
-  const [clientErr, setClientErr] = useState<string | null>(null);
-  const [serverErr, setServerErr] = useState<string | null>(null);
-  const [creatingProviderId, setCreatingProviderId] = useState<string | null>(null);
+    openRouterErr: null as string | null,
+    openRouterStatus: null as string | null,
+    openRouterPricing: null as OpenRouterPricingPreview | null,
+    clientErr: null as string | null,
+    serverErr: null as string | null,
+    creatingProviderId: null as string | null,
+  });
+  const {
+    canonicalName,
+    displayName,
+    capabilities,
+    contextWindow,
+    maxOutput,
+    embeddingDimensions,
+    temperature,
+    priceSource,
+    thinkingLevel,
+    thinkingStrategy,
+    priceSourceModel,
+    active,
+    notes,
+    openRouterModel,
+    openRouterErr,
+    openRouterStatus,
+    openRouterPricing,
+    clientErr,
+    serverErr,
+    creatingProviderId,
+  } = formState;
+  const setCanonicalName = (canonicalName: string) => setFormState({ canonicalName });
+  const setDisplayName = (displayName: string) => setFormState({ displayName });
+  const setCapabilities = (update: string[] | ((current: string[]) => string[])) =>
+    setFormState((current) => ({
+      ...current,
+      capabilities: typeof update === "function" ? update(current.capabilities) : update,
+    }));
+  const setContextWindow = (contextWindow: string) => setFormState({ contextWindow });
+  const setMaxOutput = (maxOutput: string) => setFormState({ maxOutput });
+  const setEmbeddingDimensions = (embeddingDimensions: string) => setFormState({ embeddingDimensions });
+  const setTemperature = (temperature: string) => setFormState({ temperature });
+  const setPriceSource = (priceSource: LlmPriceSource) => setFormState({ priceSource });
+  const setThinkingLevel = (thinkingLevel: LlmThinkingLevel) => setFormState({ thinkingLevel });
+  const setThinkingStrategy = (thinkingStrategy: LlmThinkingStrategy) => setFormState({ thinkingStrategy });
+  const setPriceSourceModel = (priceSourceModel: string) => setFormState({ priceSourceModel });
+  const setActive = (active: boolean) => setFormState({ active });
+  const setNotes = (notes: string) => setFormState({ notes });
+  const setOpenRouterModel = (openRouterModel: string) => setFormState({ openRouterModel });
+  const setOpenRouterErr = (openRouterErr: string | null) => setFormState({ openRouterErr });
+  const setOpenRouterStatus = (openRouterStatus: string | null) => setFormState({ openRouterStatus });
+  const setOpenRouterPricing = (openRouterPricing: OpenRouterPricingPreview | null) =>
+    setFormState({ openRouterPricing });
+  const setClientErr = (clientErr: string | null) => setFormState({ clientErr });
+  const setServerErr = (serverErr: string | null) => setFormState({ serverErr });
+  const setCreatingProviderId = (creatingProviderId: string | null) => setFormState({ creatingProviderId });
   const supportsEmbeddings = capabilitiesInclude(capabilities, "embeddings");
   const supportsReasoning = capabilitiesInclude(capabilities, "reasoning");
   const supportsGeneration = capabilitiesSupportGeneration(capabilities);
@@ -1432,69 +1485,87 @@ function ProviderModelForm(props: ProviderModelFormProps) {
   const { mode, providerModel, providers, models, titleId, onClose } = props;
   const qc = useQueryClient();
   const priceSourceModelOverrideId = useId();
-  const [providerId, setProviderId] = useState(
-    providerModel?.provider_id ?? providers[0]?.id ?? "",
-  );
-  const [modelId, setModelId] = useState(providerModel?.model_id ?? models[0]?.id ?? "");
-  const [apiModelId, setApiModelId] = useState(providerModel?.api_model_id ?? "");
-  const [inputCost, setInputCost] = useState(
-    providerModel?.input_cost_per_million == null
+  const [formState, setFormState] = usePatchReducer({
+    providerId: providerModel?.provider_id ?? providers[0]?.id ?? "",
+    modelId: providerModel?.model_id ?? models[0]?.id ?? "",
+    apiModelId: providerModel?.api_model_id ?? "",
+    inputCost: providerModel?.input_cost_per_million == null
       ? ""
       : String(providerModel.input_cost_per_million),
-  );
-  const [outputCost, setOutputCost] = useState(
-    providerModel?.output_cost_per_million == null
+    outputCost: providerModel?.output_cost_per_million == null
       ? ""
       : String(providerModel.output_cost_per_million),
-  );
-  const [fixedCost, setFixedCost] = useState(
-    providerModel?.fixed_cost_per_call_usd == null
+    fixedCost: providerModel?.fixed_cost_per_call_usd == null
       ? ""
       : String(providerModel.fixed_cost_per_call_usd),
-  );
-  const [audioCost, setAudioCost] = useState(
-    providerModel?.audio_cost_per_hour_usd == null
+    audioCost: providerModel?.audio_cost_per_hour_usd == null
       ? ""
       : String(providerModel.audio_cost_per_hour_usd),
-  );
-  const [audioInputTransform, setAudioInputTransform] =
-    useState<LlmAudioInputTransform>(
-      providerModel?.audio_input_transform ?? "passthrough",
-    );
-  const [imageInputFormat, setImageInputFormat] = useState<LlmImageInputFormat>(
-    providerModel?.image_input_format ?? "preserve",
-  );
-  const [imageInputMaxEdgePx, setImageInputMaxEdgePx] = useState(
-    providerModel?.image_input_max_edge_px == null
+    audioInputTransform: providerModel?.audio_input_transform ?? "passthrough" as LlmAudioInputTransform,
+    imageInputFormat: providerModel?.image_input_format ?? "preserve" as LlmImageInputFormat,
+    imageInputMaxEdgePx: providerModel?.image_input_max_edge_px == null
       ? ""
       : String(providerModel.image_input_max_edge_px),
-  );
-  const [maxTokens, setMaxTokens] = useState(
-    providerModel?.max_tokens_override == null
+    maxTokens: providerModel?.max_tokens_override == null
       ? ""
       : String(providerModel.max_tokens_override),
-  );
-  const [supportsSystemPrompt, setSupportsSystemPrompt] = useState(
-    providerModel?.supports_system_prompt ?? true,
-  );
-  const [supportsTemperature, setSupportsTemperature] = useState(
-    providerModel?.supports_temperature ?? true,
-  );
-  const [thinkingStrategyOverride, setThinkingStrategyOverride] = useState<
-    LlmThinkingStrategy | "inherit"
-  >(providerModel?.thinking_strategy_override ?? "inherit");
-  const [priceSourceOverride, setPriceSourceOverride] =
-    useState<LlmPriceSourceOverride>(providerModel?.price_source_override ?? "");
-  const [priceSourceModelOverride, setPriceSourceModelOverride] = useState(
-    providerModel?.price_source_model_id_override ?? "",
-  );
-  const [extraApiParams, setExtraApiParams] = useState(
-    JSON.stringify(providerModel?.extra_api_params ?? {}, null, 2),
-  );
-  const [enabled, setEnabled] = useState(providerModel?.is_enabled ?? true);
-  const [clientErr, setClientErr] = useState<string | null>(null);
-  const [serverErr, setServerErr] = useState<string | null>(null);
-  const [syncErr, setSyncErr] = useState<string | null>(null);
+    supportsSystemPrompt: providerModel?.supports_system_prompt ?? true,
+    supportsTemperature: providerModel?.supports_temperature ?? true,
+    thinkingStrategyOverride: providerModel?.thinking_strategy_override ?? "inherit" as LlmThinkingStrategy | "inherit",
+    priceSourceOverride: providerModel?.price_source_override ?? "" as LlmPriceSourceOverride,
+    priceSourceModelOverride: providerModel?.price_source_model_id_override ?? "",
+    extraApiParams: JSON.stringify(providerModel?.extra_api_params ?? {}, null, 2),
+    enabled: providerModel?.is_enabled ?? true,
+    clientErr: null as string | null,
+    serverErr: null as string | null,
+    syncErr: null as string | null,
+  });
+  const {
+    providerId,
+    modelId,
+    apiModelId,
+    inputCost,
+    outputCost,
+    fixedCost,
+    audioCost,
+    audioInputTransform,
+    imageInputFormat,
+    imageInputMaxEdgePx,
+    maxTokens,
+    supportsSystemPrompt,
+    supportsTemperature,
+    thinkingStrategyOverride,
+    priceSourceOverride,
+    priceSourceModelOverride,
+    extraApiParams,
+    enabled,
+    clientErr,
+    serverErr,
+    syncErr,
+  } = formState;
+  const setProviderId = (providerId: string) => setFormState({ providerId });
+  const setModelId = (modelId: string) => setFormState({ modelId });
+  const setApiModelId = (apiModelId: string) => setFormState({ apiModelId });
+  const setInputCost = (inputCost: string) => setFormState({ inputCost });
+  const setOutputCost = (outputCost: string) => setFormState({ outputCost });
+  const setFixedCost = (fixedCost: string) => setFormState({ fixedCost });
+  const setAudioCost = (audioCost: string) => setFormState({ audioCost });
+  const setAudioInputTransform = (audioInputTransform: LlmAudioInputTransform) =>
+    setFormState({ audioInputTransform });
+  const setImageInputFormat = (imageInputFormat: LlmImageInputFormat) => setFormState({ imageInputFormat });
+  const setImageInputMaxEdgePx = (imageInputMaxEdgePx: string) => setFormState({ imageInputMaxEdgePx });
+  const setMaxTokens = (maxTokens: string) => setFormState({ maxTokens });
+  const setSupportsSystemPrompt = (supportsSystemPrompt: boolean) => setFormState({ supportsSystemPrompt });
+  const setSupportsTemperature = (supportsTemperature: boolean) => setFormState({ supportsTemperature });
+  const setThinkingStrategyOverride = (thinkingStrategyOverride: LlmThinkingStrategy | "inherit") =>
+    setFormState({ thinkingStrategyOverride });
+  const setPriceSourceOverride = (priceSourceOverride: LlmPriceSourceOverride) => setFormState({ priceSourceOverride });
+  const setPriceSourceModelOverride = (priceSourceModelOverride: string) => setFormState({ priceSourceModelOverride });
+  const setExtraApiParams = (extraApiParams: string) => setFormState({ extraApiParams });
+  const setEnabled = (enabled: boolean) => setFormState({ enabled });
+  const setClientErr = (clientErr: string | null) => setFormState({ clientErr });
+  const setServerErr = (serverErr: string | null) => setFormState({ serverErr });
+  const setSyncErr = (syncErr: string | null) => setFormState({ syncErr });
   const pricingSyncState = useRef({
     canSyncPricing: false,
     priceSourceDraftChanged: false,

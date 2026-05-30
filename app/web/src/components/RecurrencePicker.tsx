@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type FormEvent } from "react";
+import { useMemo, useState, type FormEvent } from "react";
 import { CalendarClock, Code2, Repeat2 } from "lucide-react";
 
 import FormField from "@/components/FormField";
@@ -37,6 +37,28 @@ const FRIENDLY_OPTIONS: readonly { value: FriendlyMode; label: string }[] = [
   { value: "yearly", label: "Yearly" },
 ];
 
+type RecurrenceEditorState = {
+  panel: RecurrencePickerPanel;
+  mode: FriendlyMode;
+  weekdays: RecurrenceWeekday[];
+  interval: number;
+  monthDay: number;
+  advanced: string;
+};
+
+function recurrenceEditorState(value: string | null): RecurrenceEditorState {
+  const parsed = parseRecurrenceRrule(value);
+  const frequency = frequencyFromRecurrence(value).toLowerCase() as FriendlyMode;
+  return {
+    panel: !parsed.value || parsed.valid && parsed.parts?.unsupported.length === 0 ? "friendly" : "advanced",
+    mode: parsed.value ? frequency : "none",
+    weekdays: parsed.parts?.byday.length ? parsed.parts.byday : ["MO"],
+    interval: parsed.parts?.interval ?? 1,
+    monthDay: parsed.parts?.bymonthday ?? 1,
+    advanced: value ?? "",
+  };
+}
+
 export default function RecurrencePicker({
   value,
   onChange,
@@ -48,24 +70,17 @@ export default function RecurrencePicker({
   allowNone = true,
 }: RecurrencePickerProps) {
   const [open, setOpen] = useState(false);
-  const [panel, setPanel] = useState<RecurrencePickerPanel>("friendly");
-  const [mode, setMode] = useState<FriendlyMode>("none");
-  const [weekdays, setWeekdays] = useState<RecurrenceWeekday[]>(["MO"]);
-  const [interval, setInterval] = useState(1);
-  const [monthDay, setMonthDay] = useState(1);
-  const [advanced, setAdvanced] = useState("");
+  const [editor, setEditor] = useState<RecurrenceEditorState>(() => recurrenceEditorState(value));
+  const { panel, mode, weekdays, interval, monthDay, advanced } = editor;
 
-  useEffect(() => {
-    if (!open) return;
-    const parsed = parseRecurrenceRrule(value);
-    const frequency = frequencyFromRecurrence(value).toLowerCase() as FriendlyMode;
-    setPanel(!parsed.value || parsed.valid && parsed.parts?.unsupported.length === 0 ? "friendly" : "advanced");
-    setMode(parsed.value ? frequency : "none");
-    setWeekdays(parsed.parts?.byday.length ? parsed.parts.byday : ["MO"]);
-    setInterval(parsed.parts?.interval ?? 1);
-    setMonthDay(parsed.parts?.bymonthday ?? 1);
-    setAdvanced(value ?? "");
-  }, [open, value]);
+  const updateEditor = (patch: Partial<RecurrenceEditorState>) => {
+    setEditor((current) => ({ ...current, ...patch }));
+  };
+
+  const openEditor = () => {
+    setEditor(recurrenceEditorState(value));
+    setOpen(true);
+  };
 
   const friendlyValue = useMemo(() => {
     if (mode === "none") return null;
@@ -105,7 +120,7 @@ export default function RecurrencePicker({
         className="recurrence-picker__trigger"
         disabled={disabled}
         aria-label={triggerLabel ?? label}
-        onClick={() => setOpen(true)}
+        onClick={openEditor}
       >
         <Repeat2 size={15} aria-hidden="true" />
         <span className="recurrence-picker__trigger-text">{summary}</span>
@@ -133,7 +148,7 @@ export default function RecurrencePicker({
             type="button"
             className={panel === "friendly" ? "recurrence-picker__tab is-active" : "recurrence-picker__tab"}
             aria-pressed={panel === "friendly"}
-            onClick={() => setPanel("friendly")}
+            onClick={() => updateEditor({ panel: "friendly" })}
           >
             <CalendarClock size={15} aria-hidden="true" />
             Friendly
@@ -142,7 +157,7 @@ export default function RecurrencePicker({
             type="button"
             className={panel === "advanced" ? "recurrence-picker__tab is-active" : "recurrence-picker__tab"}
             aria-pressed={panel === "advanced"}
-            onClick={() => setPanel("advanced")}
+            onClick={() => updateEditor({ panel: "advanced" })}
           >
             <Code2 size={15} aria-hidden="true" />
             Advanced
@@ -157,16 +172,16 @@ export default function RecurrencePicker({
             interval={interval}
             monthDay={monthDay}
             error={friendlyError}
-            onModeChange={setMode}
-            onWeekdaysChange={setWeekdays}
-            onIntervalChange={setInterval}
-            onMonthDayChange={setMonthDay}
+            onModeChange={(nextMode) => updateEditor({ mode: nextMode })}
+            onWeekdaysChange={(nextWeekdays) => updateEditor({ weekdays: nextWeekdays })}
+            onIntervalChange={(nextInterval) => updateEditor({ interval: nextInterval })}
+            onMonthDayChange={(nextMonthDay) => updateEditor({ monthDay: nextMonthDay })}
           />
         ) : (
           <AdvancedRecurrenceField
             value={advanced}
             error={advancedError}
-            onChange={setAdvanced}
+            onChange={(nextAdvanced) => updateEditor({ advanced: nextAdvanced })}
           />
         )}
 

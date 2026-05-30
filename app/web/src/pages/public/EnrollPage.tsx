@@ -48,14 +48,14 @@ type EnrollState =
   | { kind: "done" };
 
 export default function EnrollPage() {
-  const location = useLocation();
+  const { search } = useLocation();
   const navigate = useNavigate();
   const { isAuthenticated, user, refresh } = useAuth();
 
   const token = useMemo(() => {
-    const params = new URLSearchParams(location.search);
+    const params = new URLSearchParams(search);
     return params.get("token")?.trim() ?? "";
-  }, [location.search]);
+  }, [search]);
 
   const [verify, setVerify] = useState<VerifyState>({ kind: "idle" });
   const [enroll, setEnroll] = useState<EnrollState>({ kind: "idle" });

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ApiError, fetchJson } from "@/lib/api";
 import { qk } from "@/lib/queryKeys";
@@ -54,12 +54,8 @@ export default function AgentPreferencesPanel({
     queryFn: () => fetchJson<AgentPreference>(endpointFor(scope, scopeId)),
   });
 
-  const [draft, setDraft] = useState<string>("");
+  const [draftEdit, setDraftEdit] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    if (q.data) setDraft(q.data.body_md);
-  }, [q.data?.updated_at]);  // resync on server-confirmed updates
 
   const save = useMutation({
     mutationFn: (body_md: string) =>
@@ -75,6 +71,7 @@ export default function AgentPreferencesPanel({
       }),
     onSuccess: (next) => {
       qc.setQueryData(key, next);
+      setDraftEdit(null);
       setError(null);
     },
     onError: (e: unknown) => {
@@ -96,6 +93,7 @@ export default function AgentPreferencesPanel({
   });
 
   const pref = q.data;
+  const draft = draftEdit ?? pref?.body_md ?? "";
   const draftTokens = useTokenCount(draft);
   const dirty = pref ? draft !== pref.body_md : false;
 
@@ -160,7 +158,7 @@ export default function AgentPreferencesPanel({
             id={textareaId}
             className="agent-prefs__textarea"
             value={draft}
-            onChange={(e) => setDraft(e.target.value)}
+            onChange={(e) => setDraftEdit(e.target.value)}
             spellCheck
           />
           <div className={`agent-prefs__meta agent-prefs__meta--${counterTone}`}>

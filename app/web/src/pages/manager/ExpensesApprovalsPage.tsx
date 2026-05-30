@@ -98,18 +98,24 @@ function expensesExportPath(expenses: Expense[]): string | null {
 function ExpenseCorrectionButton({ expense, onApproved }: ExpenseCorrectionButtonProps) {
   const qc = useQueryClient();
   const [open, setOpen] = useState(false);
-  const [amount, setAmount] = useState(amountInputValue(expense.total_amount_cents));
-  const [currency, setCurrency] = useState(expense.currency);
-  const [category, setCategory] = useState(
-    isExpenseCategory(expense.category) ? expense.category : "other",
-  );
-  const [formError, setFormError] = useState<string | null>(null);
+  const [form, setForm] = useState(() => ({
+    amount: "",
+    currency: "",
+    category: "other" as ExpenseCategory,
+    error: null as string | null,
+  }));
+  const { amount, currency, category, error: formError } = form;
 
-  const reset = () => {
-    setAmount(amountInputValue(expense.total_amount_cents));
-    setCurrency(expense.currency);
-    setCategory(isExpenseCategory(expense.category) ? expense.category : "other");
-    setFormError(null);
+  const initialForm = () => ({
+    amount: amountInputValue(expense.total_amount_cents),
+    currency: expense.currency,
+    category: isExpenseCategory(expense.category) ? expense.category : "other",
+    error: null,
+  });
+
+  const openDialog = () => {
+    setForm(initialForm());
+    setOpen(true);
   };
 
   const approveWithEdits = useMutation({
@@ -133,7 +139,10 @@ function ExpenseCorrectionButton({ expense, onApproved }: ExpenseCorrectionButto
       setOpen(false);
     },
     onError: (error) => {
-      setFormError(error instanceof Error ? error.message : "Could not approve the correction.");
+      setForm((current) => ({
+        ...current,
+        error: error instanceof Error ? error.message : "Could not approve the correction.",
+      }));
     },
   });
 
@@ -167,7 +176,7 @@ function ExpenseCorrectionButton({ expense, onApproved }: ExpenseCorrectionButto
       <button
         className="btn btn--ghost"
         type="button"
-        onClick={() => setOpen(true)}
+        onClick={openDialog}
       >
         Correct and approve
       </button>
@@ -182,19 +191,20 @@ function ExpenseCorrectionButton({ expense, onApproved }: ExpenseCorrectionButto
         formClassName="expense-correction-form"
         onClose={() => {
           setOpen(false);
-          reset();
+          setForm(initialForm());
         }}
         onSubmit={(event) => {
           event.preventDefault();
-          setFormError(null);
+          setForm((current) => ({ ...current, error: null }));
           if (validationError !== null) {
-            setFormError(validationError);
+            setForm((current) => ({ ...current, error: validationError }));
             return;
           }
           if (!hasEdits) {
-            setFormError(
-              "Change the amount, currency, or category before approving with corrections.",
-            );
+            setForm((current) => ({
+              ...current,
+              error: "Change the amount, currency, or category before approving with corrections.",
+            }));
             return;
           }
           approveWithEdits.mutate(body);
@@ -226,7 +236,7 @@ function ExpenseCorrectionButton({ expense, onApproved }: ExpenseCorrectionButto
                   ? `expense-correction-amount-error-${expense.id}`
                   : undefined
               }
-              onChange={(event) => setAmount(event.target.value)}
+              onChange={(event) => setForm((current) => ({ ...current, amount: event.target.value }))}
              aria-label="Amount"/>
           {amountError !== null && (
             <p id={`expense-correction-amount-error-${expense.id}`} className="form-field-error">
@@ -246,7 +256,7 @@ function ExpenseCorrectionButton({ expense, onApproved }: ExpenseCorrectionButto
                   ? `expense-correction-currency-error-${expense.id}`
                   : undefined
               }
-              onChange={(event) => setCurrency(event.target.value)}
+              onChange={(event) => setForm((current) => ({ ...current, currency: event.target.value }))}
              aria-label="Currency"/>
           {currencyError !== null && (
             <p id={`expense-correction-currency-error-${expense.id}`} className="form-field-error">
@@ -265,7 +275,10 @@ function ExpenseCorrectionButton({ expense, onApproved }: ExpenseCorrectionButto
                   ? `expense-correction-category-error-${expense.id}`
                   : undefined
               }
-              onChange={(event) => setCategory(event.target.value as ExpenseCategory)} aria-label="Category"
+              onChange={(event) => setForm((current) => ({
+                ...current,
+                category: event.target.value as ExpenseCategory,
+              }))} aria-label="Category"
             >
               {EXPENSE_CATEGORIES.map((value) => (
                 <option key={value} value={value}>{expenseCategoryLabel(value)}</option>

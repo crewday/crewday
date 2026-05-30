@@ -42,7 +42,7 @@ export interface SignupEnrollHandoff {
 }
 
 export default function SignupVerifyPage(): ReactElement {
-  const location = useLocation();
+  const { search: routeSearch } = useLocation();
   const params = useParams<{ token?: string }>();
   const navigate = useNavigate();
   const { isAuthenticated, user } = useAuth();
@@ -53,9 +53,9 @@ export default function SignupVerifyPage(): ReactElement {
   // emits the path-param URL.
   const token = useMemo(() => {
     if (params.token && params.token.trim()) return params.token.trim();
-    const search = new URLSearchParams(location.search);
+    const search = new URLSearchParams(routeSearch);
     return search.get("token")?.trim() ?? "";
-  }, [params.token, location.search]);
+  }, [params.token, routeSearch]);
 
   const [verify, setVerify] = useState<VerifyState>({ kind: "idle" });
   // Burn the token at most once per mount. StrictMode double-mounts

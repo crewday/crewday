@@ -52,12 +52,16 @@ vi.mock("@/layouts/EmployeeLayout", async () => {
     "react-router-dom",
   );
   const { useEffect } = await vi.importActual<typeof import("react")>("react");
+  const { useQuery } = await vi.importActual<typeof import("@tanstack/react-query")>("@tanstack/react-query");
   function MockAgentSidebar({ agentRole }: { agentRole: "employee" | "manager" }): ReactElement {
     mockRenders.agentSidebar(agentRole);
+    useQuery({
+      queryKey: ["mock-agent-log", agentRole],
+      queryFn: () => fetch(`/w/ws_1/api/v1/agent/${agentRole}/log`),
+      enabled: mockRenders.agentFetches,
+    });
     useEffect(() => {
       mockRenders.agentSidebarMount(agentRole);
-      if (!mockRenders.agentFetches) return;
-      void fetch(`/w/ws_1/api/v1/agent/${agentRole}/log`);
     }, [agentRole]);
     return <aside data-testid="agent-sidebar">agent:{agentRole}</aside>;
   }
@@ -79,14 +83,16 @@ vi.mock("@/layouts/ManagerLayout", async () => {
     "react-router-dom",
   );
   const { useEffect } = await vi.importActual<typeof import("react")>("react");
+  const { useQuery } = await vi.importActual<typeof import("@tanstack/react-query")>("@tanstack/react-query");
   function MockAgentSidebar({ agentRole }: { agentRole: "employee" | "manager" }): ReactElement {
     mockRenders.agentSidebar(agentRole);
+    useQuery({
+      queryKey: ["mock-agent-log", agentRole],
+      queryFn: () => fetch(`/w/ws_1/api/v1/agent/${agentRole}/log`),
+      enabled: mockRenders.agentFetches,
+    });
     useEffect(() => {
       mockRenders.agentSidebarMount(agentRole);
-    }, [agentRole]);
-    useEffect(() => {
-      if (!mockRenders.agentFetches) return;
-      void fetch(`/w/ws_1/api/v1/agent/${agentRole}/log`);
     }, [agentRole]);
     return <aside data-testid="agent-sidebar">agent:{agentRole}</aside>;
   }

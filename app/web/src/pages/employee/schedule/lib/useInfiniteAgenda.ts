@@ -148,6 +148,8 @@ export function useInfiniteAgendaCore<Page, Merged, Cell extends { iso: string }
   const innerContainerRef = useRef<HTMLDivElement | null>(null);
   const innerTopSentinelRef = useRef<HTMLDivElement | null>(null);
   const innerBottomSentinelRef = useRef<HTMLDivElement | null>(null);
+  const topObserverRef = useRef<IntersectionObserver | null>(null);
+  const bottomObserverRef = useRef<IntersectionObserver | null>(null);
 
   // `null` ⇒ the document is the scroll container (phone only, where
   // `.phone__body { display: contents }` defers overflow to `<html>`).
@@ -167,12 +169,6 @@ export function useInfiniteAgendaCore<Page, Merged, Cell extends { iso: string }
   const setContainerEl = useCallback((node: HTMLDivElement | null) => {
     innerContainerRef.current = node;
     if (node) setScrollRoot(findScrollRoot(node));
-  }, []);
-  const setTopSentinelEl = useCallback((node: HTMLDivElement | null) => {
-    innerTopSentinelRef.current = node;
-  }, []);
-  const setBottomSentinelEl = useCallback((node: HTMLDivElement | null) => {
-    innerBottomSentinelRef.current = node;
   }, []);
 
   // `null` root = use `window` / document. Any non-null root is an
@@ -201,68 +197,86 @@ export function useInfiniteAgendaCore<Page, Merged, Cell extends { iso: string }
   // either (a) all the auto-prefetches have settled or (b) the
   // worker has scrolled today out of view themselves.
   const settledRef = useRef(false);
+  const paginationRef = useRef({
+    hasNextPage: q.hasNextPage,
+    isFetchingNextPage: q.isFetchingNextPage,
+    hasPreviousPage: q.hasPreviousPage,
+    isFetchingPreviousPage: q.isFetchingPreviousPage,
+    isFetching: q.isFetching,
+    fetchNextPage: q.fetchNextPage,
+    fetchPreviousPage: q.fetchPreviousPage,
+    getScrollHeight,
+  });
+  paginationRef.current = {
+    hasNextPage: q.hasNextPage,
+    isFetchingNextPage: q.isFetchingNextPage,
+    hasPreviousPage: q.hasPreviousPage,
+    isFetchingPreviousPage: q.isFetchingPreviousPage,
+    isFetching: q.isFetching,
+    fetchNextPage: q.fetchNextPage,
+    fetchPreviousPage: q.fetchPreviousPage,
+    getScrollHeight,
+  };
 
   // Bottom sentinel — extend the future when the worker thumbs down.
   // `root` is the scrollRoot element or `null` (document).
-  useEffect(() => {
-    const node = innerBottomSentinelRef.current;
+  const setBottomSentinelEl = useCallback((node: HTMLDivElement | null) => {
+    innerBottomSentinelRef.current = node;
+    bottomObserverRef.current?.disconnect();
+    bottomObserverRef.current = null;
     if (!node) return;
     const obs = new IntersectionObserver(
       (entries) => {
         for (const e of entries) {
+          const pagination = paginationRef.current;
           if (
             e.isIntersecting
-            && q.hasNextPage
-            && !q.isFetchingNextPage
-            && !q.isFetching
+            && pagination.hasNextPage
+            && !pagination.isFetchingNextPage
+            && !pagination.isFetching
           ) {
-            q.fetchNextPage();
+            pagination.fetchNextPage();
           }
         }
       },
       { root: scrollRoot, rootMargin: "600px 0px 600px 0px" },
     );
     obs.observe(node);
-    return () => obs.disconnect();
-  }, [
-    scrollRoot,
-    q.hasNextPage,
-    q.isFetchingNextPage,
-    q.isFetching,
-    q.fetchNextPage,
-  ]);
+    bottomObserverRef.current = obs;
+  }, [scrollRoot]);
 
   // Top sentinel — extend the past, capturing scroll height so we
   // can compensate after the prepend.
-  useEffect(() => {
-    const node = innerTopSentinelRef.current;
+  const setTopSentinelEl = useCallback((node: HTMLDivElement | null) => {
+    innerTopSentinelRef.current = node;
+    topObserverRef.current?.disconnect();
+    topObserverRef.current = null;
     if (!node) return;
     const obs = new IntersectionObserver(
       (entries) => {
         for (const e of entries) {
+          const pagination = paginationRef.current;
           if (
             e.isIntersecting
-            && q.hasPreviousPage
-            && !q.isFetchingPreviousPage
-            && !q.isFetching
+            && pagination.hasPreviousPage
+            && !pagination.isFetchingPreviousPage
+            && !pagination.isFetching
           ) {
-            heightBeforePrependRef.current = getScrollHeight();
-            q.fetchPreviousPage();
+            heightBeforePrependRef.current = pagination.getScrollHeight();
+            pagination.fetchPreviousPage();
           }
         }
       },
       { root: scrollRoot, rootMargin: "600px 0px 600px 0px" },
     );
     obs.observe(node);
-    return () => obs.disconnect();
-  }, [
-    scrollRoot,
-    getScrollHeight,
-    q.hasPreviousPage,
-    q.isFetchingPreviousPage,
-    q.isFetching,
-    q.fetchPreviousPage,
-  ]);
+    topObserverRef.current = obs;
+  }, [scrollRoot]);
+
+  useEffect(() => () => {
+    topObserverRef.current?.disconnect();
+    bottomObserverRef.current?.disconnect();
+  }, []);
 
   // After a prepend lands and we are *past* the initial settle, keep
   // the worker's visual position by compensating for the scroll

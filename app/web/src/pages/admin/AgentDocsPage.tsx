@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useReducer, useRef, useState } from "react";
+import type { Dispatch, SetStateAction } from "react";
 import { RotateCcw } from "lucide-react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
@@ -47,7 +48,14 @@ const SAFETY_WARNING =
 export default function AdminAgentDocsPage() {
   const queryClient = useQueryClient();
   const [activeSlug, setActiveSlug] = useState<string | null>(null);
-  const [rows, setRows] = useState<InlineTableRow<AgentDocDraft>[]>([]);
+  const [rows, dispatchRows] = useReducer(
+    (
+      current: InlineTableRow<AgentDocDraft>[],
+      update: SetStateAction<InlineTableRow<AgentDocDraft>[]>,
+    ) => (typeof update === "function" ? update(current) : update),
+    [] as InlineTableRow<AgentDocDraft>[],
+  );
+  const setRows: Dispatch<SetStateAction<InlineTableRow<AgentDocDraft>[]>> = (update) => dispatchRows(update);
   const rowsRef = useRef<InlineTableRow<AgentDocDraft>[]>([]);
 
   const listQ = useQuery({

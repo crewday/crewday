@@ -58,6 +58,7 @@ function setHashKey(key: string): void {
   const nextHash = `#${encodeURIComponent(key)}`;
   if (window.location.hash !== nextHash) {
     window.location.hash = nextHash;
+    window.dispatchEvent(new HashChangeEvent("hashchange"));
   }
 }
 
@@ -108,15 +109,10 @@ function InPlacePageTabs(props: InPlacePageTabsProps & { className: string }) {
   } = props;
   const fallbackKey = useMemo(() => enabledKey(tabs, defaultKey), [defaultKey, tabs]);
   const initialKey = hashBacked ? readHashKey(tabs, fallbackKey) : fallbackKey;
-  const [internalKey, setInternalKey] = useState(initialKey);
+  const [internalKey, setInternalKey] = useState(hashBacked ? initialKey : "");
   const tabRefs = useRef(new Map<string, HTMLButtonElement>());
-  const activeKey = selectedKey ?? internalKey;
+  const activeKey = selectedKey ?? (internalKey || fallbackKey);
   const selected = enabledKey(tabs, activeKey || fallbackKey);
-
-  useEffect(() => {
-    if (selectedKey !== undefined || hashBacked) return;
-    setInternalKey(fallbackKey);
-  }, [fallbackKey, hashBacked, selectedKey]);
 
   useEffect(() => {
     if (!hashBacked) return;

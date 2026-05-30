@@ -136,11 +136,11 @@ function ClientPortalGuard() {
 }
 
 function WorkspacePathAdopter() {
-  const location = useLocation();
+  const { pathname } = useLocation();
   const { workspaceId, setWorkspaceId } = useWorkspace();
   const slug = useMemo(() => {
-    return workspaceSlugFromRoutePath(location.pathname);
-  }, [location.pathname]);
+    return workspaceSlugFromRoutePath(pathname);
+  }, [pathname]);
 
   useEffect(() => {
     if (!slug) return;

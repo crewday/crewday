@@ -72,6 +72,7 @@ function WorkspaceProviderInner({ children, routePathname }: { children: ReactNo
   // mount when the cookie already resolves to a tenant.
   const slugRef = useRef<string | null>(effectiveWorkspaceId);
   slugRef.current = effectiveWorkspaceId;
+  const lastRouteWorkspaceIdRef = useRef<string | null>(routeWorkspaceId);
 
   // Register synchronously (not in `useEffect`) so children mounting
   // below this provider see the getter *before* their render fires
@@ -111,13 +112,11 @@ function WorkspaceProviderInner({ children, routePathname }: { children: ReactNo
   }, [clearWorkspaceId]);
 
   useEffect(() => {
-    if (!routeWorkspaceId || routeWorkspaceId === workspaceId) return;
-    setWorkspaceIdState(routeWorkspaceId);
-    queryClient.invalidateQueries();
-  }, [queryClient, routeWorkspaceId, workspaceId]);
-
-  useEffect(() => {
     if (!effectiveWorkspaceId || routeWorkspaceId !== effectiveWorkspaceId) return;
+    if (routeWorkspaceId !== lastRouteWorkspaceIdRef.current) {
+      lastRouteWorkspaceIdRef.current = routeWorkspaceId;
+      queryClient.invalidateQueries();
+    }
     persistWorkspace(effectiveWorkspaceId);
     void drainOfflineQueue({ workspaceSlug: effectiveWorkspaceId }).catch((err: unknown) => {
       console.debug("Workspace offline queue drain skipped", err);
@@ -125,7 +124,7 @@ function WorkspaceProviderInner({ children, routePathname }: { children: ReactNo
     void registerWorkspaceServiceWorker(effectiveWorkspaceId).catch((err: unknown) => {
       console.debug("Workspace service worker registration skipped", err);
     });
-  }, [effectiveWorkspaceId, routeWorkspaceId]);
+  }, [effectiveWorkspaceId, queryClient, routeWorkspaceId]);
 
   const value = useMemo(
     () => ({ workspaceId: effectiveWorkspaceId, setWorkspaceId, clearWorkspaceId }),

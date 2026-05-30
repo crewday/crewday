@@ -1,4 +1,4 @@
-import { useEffect, useId, useMemo, useRef, useState } from "react";
+import { useId, useMemo, useRef, useState } from "react";
 import type { KeyboardEvent } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Link, useLocation } from "react-router-dom";
@@ -127,9 +127,8 @@ function BroadcastRecipientPicker({
   const inputId = useId();
   const listId = useId();
   const inputRef = useRef<HTMLInputElement>(null);
-  const [query, setQuery] = useState("");
-  const [open, setOpen] = useState(false);
-  const [activeIndex, setActiveIndex] = useState(0);
+  const [picker, setPicker] = useState({ query: "", open: false, activeIndex: 0 });
+  const { query, open } = picker;
   const options = useMemo(() => broadcastAudienceOptions(groups, people), [groups, people]);
   const selected = useMemo(() => new Set(selectedTokens), [selectedTokens]);
   const selectedOptions = options.filter((option) => selected.has(option.token));
@@ -142,22 +141,12 @@ function BroadcastRecipientPicker({
       (option.detail?.toLowerCase().includes(normalizedQuery) ?? false)
     );
   });
+  const activeIndex = Math.min(picker.activeIndex, Math.max(filteredOptions.length - 1, 0));
   const activeOption = filteredOptions[activeIndex] ?? null;
-
-  useEffect(() => {
-    setActiveIndex(0);
-  }, [normalizedQuery, selectedTokens.length]);
-
-  useEffect(() => {
-    if (activeIndex >= filteredOptions.length) {
-      setActiveIndex(Math.max(filteredOptions.length - 1, 0));
-    }
-  }, [activeIndex, filteredOptions.length]);
 
   const selectOption = (option: BroadcastAudienceOption) => {
     onChange([...selectedTokens, option.token]);
-    setQuery("");
-    setOpen(true);
+    setPicker({ query: "", open: true, activeIndex: 0 });
     inputRef.current?.focus();
   };
 
@@ -169,22 +158,28 @@ function BroadcastRecipientPicker({
   const handleKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
     if (event.key === "ArrowDown") {
       event.preventDefault();
-      setOpen(true);
       if (!open) {
-        setActiveIndex(0);
+        setPicker((current) => ({ ...current, open: true, activeIndex: 0 }));
         return;
       }
-      setActiveIndex((index) => Math.min(index + 1, Math.max(filteredOptions.length - 1, 0)));
+      setPicker((current) => ({
+        ...current,
+        open: true,
+        activeIndex: Math.min(activeIndex + 1, Math.max(filteredOptions.length - 1, 0)),
+      }));
       return;
     }
     if (event.key === "ArrowUp") {
       event.preventDefault();
-      setOpen(true);
       if (!open) {
-        setActiveIndex(Math.max(filteredOptions.length - 1, 0));
+        setPicker((current) => ({
+          ...current,
+          open: true,
+          activeIndex: Math.max(filteredOptions.length - 1, 0),
+        }));
         return;
       }
-      setActiveIndex((index) => Math.max(index - 1, 0));
+      setPicker((current) => ({ ...current, open: true, activeIndex: Math.max(activeIndex - 1, 0) }));
       return;
     }
     if (event.key === "Enter" && open && activeOption) {
@@ -198,7 +193,7 @@ function BroadcastRecipientPicker({
       return;
     }
     if (event.key === "Escape") {
-      setOpen(false);
+      setPicker((current) => ({ ...current, open: false }));
     }
   };
 
@@ -206,7 +201,9 @@ function BroadcastRecipientPicker({
     <div
       className="broadcast-recipient-picker"
       onBlur={(event) => {
-        if (!event.currentTarget.contains(event.relatedTarget)) setOpen(false);
+        if (!event.currentTarget.contains(event.relatedTarget)) {
+          setPicker((current) => ({ ...current, open: false }));
+        }
       }}
     >
       <div
@@ -248,10 +245,9 @@ function BroadcastRecipientPicker({
           aria-describedby={`${inputId}-summary`}
           value={query}
           onChange={(event) => {
-            setQuery(event.target.value);
-            setOpen(true);
+            setPicker({ query: event.target.value, open: true, activeIndex: 0 });
           }}
-          onFocus={() => setOpen(true)}
+          onFocus={() => setPicker((current) => ({ ...current, open: true }))}
           onKeyDown={handleKeyDown}
           placeholder={selectedOptions.length === 0 ? "Search groups or people" : ""}
           className="broadcast-recipient-picker__input"
@@ -283,7 +279,7 @@ function BroadcastRecipientPicker({
                     event.preventDefault();
                     selectOption(option);
                   }}
-                  onMouseEnter={() => setActiveIndex(index)}
+                  onMouseEnter={() => setPicker((current) => ({ ...current, activeIndex: index }))}
                 >
                   <span className="broadcast-recipient-picker__option-main">
                     <span className="broadcast-recipient-picker__option-label">{option.label}</span>
@@ -310,11 +306,20 @@ export default function DashboardPage() {
   const d = useQuery({ queryKey: qk.dashboard(), queryFn: () => fetchJson<Dashboard>("/api/v1/dashboard") });
   const me = useQuery({ queryKey: qk.me(), queryFn: () => fetchJson<Me>("/api/v1/me") });
   const qc = useQueryClient();
-  const [broadcastOpen, setBroadcastOpen] = useState(false);
-  const [selectedAudienceTokens, setSelectedAudienceTokens] = useState<string[]>(["group:everyone"]);
-  const [broadcastSubject, setBroadcastSubject] = useState("");
-  const [broadcastBody, setBroadcastBody] = useState("");
-  const [broadcastNotice, setBroadcastNotice] = useState<string | null>(null);
+  const [broadcast, setBroadcast] = useState({
+    open: false,
+    selectedAudienceTokens: ["group:everyone"],
+    subject: "",
+    body: "",
+    notice: null as string | null,
+  });
+  const {
+    open: broadcastOpen,
+    selectedAudienceTokens,
+    subject: broadcastSubject,
+    body: broadcastBody,
+    notice: broadcastNotice,
+  } = broadcast;
 
   const decideApproval = useMutation({
     mutationFn: ({ id, decision }: { id: string; decision: "approve" | "reject" }) =>
@@ -355,26 +360,30 @@ export default function DashboardPage() {
     onSuccess: (result) => {
       qc.invalidateQueries({ queryKey: qk.dashboard() });
       if (result.status === "pending_approval") {
-        setBroadcastNotice(`Queued for approval before sending to ${result.recipient_count} recipients.`);
+        setBroadcast((current) => ({
+          ...current,
+          notice: `Queued for approval before sending to ${result.recipient_count} recipients.`,
+        }));
         return;
       }
-      setBroadcastOpen(false);
+      setBroadcast((current) => ({ ...current, open: false }));
     },
   });
 
   const resetBroadcast = () => {
-    setSelectedAudienceTokens(["group:everyone"]);
-    setBroadcastSubject("");
-    setBroadcastBody("");
-    setBroadcastNotice(null);
-    setBroadcastOpen(false);
+    setBroadcast({
+      open: false,
+      selectedAudienceTokens: ["group:everyone"],
+      subject: "",
+      body: "",
+      notice: null,
+    });
     sendBroadcast.reset();
   };
 
   const openBroadcast = () => {
-    setBroadcastNotice(null);
+    setBroadcast((current) => ({ ...current, open: true, notice: null }));
     sendBroadcast.reset();
-    setBroadcastOpen(true);
   };
 
   if (d.isPending || me.isPending) return <DeskPage title="Dashboard"><Loading /></DeskPage>;
@@ -422,7 +431,11 @@ export default function DashboardPage() {
         }}
         actions={
           <>
-            <button type="button" className="btn btn--ghost" onClick={() => setBroadcastOpen(false)}>
+            <button
+              type="button"
+              className="btn btn--ghost"
+              onClick={() => setBroadcast((current) => ({ ...current, open: false }))}
+            >
               Cancel
             </button>
             <button
@@ -467,7 +480,10 @@ export default function DashboardPage() {
               groups={broadcastRecipients.data?.groups ?? []}
               people={broadcastRecipients.data?.people ?? []}
               selectedTokens={selectedAudienceTokens}
-              onChange={setSelectedAudienceTokens}
+              onChange={(nextTokens) => setBroadcast((current) => ({
+                ...current,
+                selectedAudienceTokens: nextTokens,
+              }))}
               loading={broadcastRecipients.isPending}
               resolvedCount={recipientCount}
             />
@@ -478,7 +494,7 @@ export default function DashboardPage() {
               required
               maxLength={160}
               value={broadcastSubject}
-              onChange={(e) => setBroadcastSubject(e.target.value)}
+              onChange={(e) => setBroadcast((current) => ({ ...current, subject: e.target.value }))}
               placeholder="e.g. Storm watch"
               aria-label="Subject"
             />
@@ -490,7 +506,7 @@ export default function DashboardPage() {
               rows={6}
               maxLength={20000}
               value={broadcastBody}
-              onChange={(e) => setBroadcastBody(e.target.value)}
+              onChange={(e) => setBroadcast((current) => ({ ...current, body: e.target.value }))}
               placeholder="Write the message staff will receive."
             />
           </FormField>

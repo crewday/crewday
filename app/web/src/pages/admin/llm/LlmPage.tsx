@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import { useQuery } from "@tanstack/react-query";
 import DeskPage from "@/components/DeskPage";
 import { Loading } from "@/components/common";
@@ -17,6 +17,7 @@ import { buildHighlighted, emptyHighlighted } from "./lib/highlight";
 import { buildLlmGraphLayout } from "./lib/graphLayout";
 import { filterLlmGraphBySearch, selectionIsVisible } from "./lib/graphSearch";
 import { buildLlmIndexes } from "./lib/llmIndexes";
+import { usePatchReducer } from "@/lib/usePatchReducer";
 import { useLlmGraphEdges } from "./useLlmGraphEdges";
 import type { Column, EdgeLayout, Selection } from "./types";
 import type { RegistryDialogState } from "./LlmRegistryModals";
@@ -25,6 +26,14 @@ const sub =
   "Deployment-wide LLM graph/config: providers, models, and capability assignment chains. Shared by every workspace.";
 const title = "LLM graph";
 
+interface LlmGraphPageState {
+  selection: Selection | null;
+  hover: Selection | null;
+  searchQuery: string;
+  registryDialog: RegistryDialogState | null;
+  assignmentDialogCapability: string | null;
+}
+
 export default function AdminLlmPage() {
   // code-health: ignore[nloc] LLM graph route already delegates columns, alerts, registry modals, assignments, and drawers.
   const graphQ = useQuery({
@@ -32,16 +41,17 @@ export default function AdminLlmPage() {
     queryFn: () => fetchJson<LlmGraphPayload>("/admin/api/v1/llm/graph"),
   });
 
-  const [selection, setSelection] = useState<Selection | null>(null);
-  const [hover, setHover] = useState<Selection | null>(null);
-  const [searchQuery, setSearchQuery] = useState("");
+  const [pageState, setPageState] = usePatchReducer<LlmGraphPageState>({
+    selection: null,
+    hover: null,
+    searchQuery: "",
+    registryDialog: null,
+    assignmentDialogCapability: null,
+  });
+  const { selection, hover, searchQuery, registryDialog, assignmentDialogCapability } = pageState;
+  const setSelection = (selection: Selection | null) => setPageState({ selection });
+  const setHover = (hover: Selection | null) => setPageState({ hover });
   const searchRef = useRef<HTMLInputElement | null>(null);
-  const [registryDialog, setRegistryDialog] = useState<RegistryDialogState | null>(
-    null,
-  );
-  const [assignmentDialogCapability, setAssignmentDialogCapability] = useState<
-    string | null
-  >(null);
 
   const sourceGraph = graphQ.data;
   const sourceIndexes = useMemo(
@@ -176,14 +186,14 @@ export default function AdminLlmPage() {
 
   const openCapabilityDialog = (capability: string) => {
     setSelection({ column: "capability", id: capability });
-    setAssignmentDialogCapability(capability);
+    setPageState({ assignmentDialogCapability: capability });
   };
 
   const openAssignmentDialog = (assignmentId: string) => {
     const assignment = sourceGraph?.assignments.find((item) => item.id === assignmentId);
     if (!assignment) return;
     setSelection({ column: "assignment", id: assignmentId });
-    setAssignmentDialogCapability(assignment.capability);
+    setPageState({ assignmentDialogCapability: assignment.capability });
   };
 
   const clearSelectionFromGraphBackground = (event: MouseEvent<HTMLDivElement>) => {
@@ -238,7 +248,7 @@ export default function AdminLlmPage() {
             label="Search LLM graph"
             placeholder="Providers, models, assignments, capabilities"
             value={searchQuery}
-            onChange={(event) => setSearchQuery(event.currentTarget.value)}
+            onChange={(event) => setPageState({ searchQuery: event.currentTarget.value })}
           />
         </div>
 
@@ -278,7 +288,7 @@ export default function AdminLlmPage() {
             <button
               type="button"
               className="btn btn--ghost btn--sm"
-              onClick={() => setRegistryDialog({ kind: "provider", mode: "create" })}
+              onClick={() => setPageState({ registryDialog: { kind: "provider", mode: "create" } })}
             >
               + New provider
             </button>
@@ -291,7 +301,7 @@ export default function AdminLlmPage() {
             <button
               type="button"
               className="btn btn--ghost btn--sm"
-              onClick={() => setRegistryDialog({ kind: "model", mode: "create" })}
+              onClick={() => setPageState({ registryDialog: { kind: "model", mode: "create" } })}
             >
               + New model
             </button>
@@ -307,7 +317,7 @@ export default function AdminLlmPage() {
               type="button"
               className="btn btn--ghost btn--sm"
               onClick={() =>
-                setRegistryDialog({ kind: "providerModel", mode: "create" })
+                setPageState({ registryDialog: { kind: "providerModel", mode: "create" } })
               }
             >
               + New provider-model
@@ -319,7 +329,7 @@ export default function AdminLlmPage() {
             setHover={setHover}
             setSelection={setSelection}
             onEditProvider={(id) =>
-              setRegistryDialog({ kind: "provider", mode: "edit", id })
+              setPageState({ registryDialog: { kind: "provider", mode: "edit", id } })
             }
             nodeClass={nodeClass}
             setProviderRef={setRef(providerRefs)}
@@ -331,9 +341,9 @@ export default function AdminLlmPage() {
             nodeClass={nodeClass}
             setModelRef={setRef(modelRefs)}
             setProviderModelRef={setRef(providerModelRefs)}
-            onEditModel={(id) => setRegistryDialog({ kind: "model", mode: "edit", id })}
+            onEditModel={(id) => setPageState({ registryDialog: { kind: "model", mode: "edit", id } })}
             onEditProviderModel={(id) =>
-              setRegistryDialog({ kind: "providerModel", mode: "edit", id })
+              setPageState({ registryDialog: { kind: "providerModel", mode: "edit", id } })
             }
             indexes={indexes}
             providerModelsByModelId={layout.providerModelsByModelId}
@@ -353,7 +363,7 @@ export default function AdminLlmPage() {
             onOpenCapability={openCapabilityDialog}
             onOpenAssignment={openAssignmentDialog}
             onOpenProviderModel={(id) =>
-              setRegistryDialog({ kind: "providerModel", mode: "edit", id })
+              setPageState({ registryDialog: { kind: "providerModel", mode: "edit", id } })
             }
           />
           {searchResult?.hasQuery && !searchResult.hasMatches ? (
@@ -370,17 +380,19 @@ export default function AdminLlmPage() {
           providerModels={sourceGraph.provider_models}
           indexes={sourceIndexes}
           onOpenProviderModel={(providerModel) =>
-            setRegistryDialog({
-              kind: "providerModel",
-              mode: "edit",
-              id: providerModel.id,
-              providerModel,
+            setPageState({
+              registryDialog: {
+                kind: "providerModel",
+                mode: "edit",
+                id: providerModel.id,
+                providerModel,
+              },
             })
           }
           onClose={() => {
             setHover(null);
             setSelection(null);
-            setRegistryDialog(null);
+            setPageState({ registryDialog: null });
           }}
         />
         <LlmAssignmentModal
@@ -390,7 +402,7 @@ export default function AdminLlmPage() {
           onClose={() => {
             setHover(null);
             setSelection(null);
-            setAssignmentDialogCapability(null);
+            setPageState({ assignmentDialogCapability: null });
           }}
         />
       </div>

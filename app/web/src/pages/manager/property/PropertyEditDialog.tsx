@@ -1,4 +1,4 @@
-import { useEffect, useState, type FormEvent } from "react";
+import { useState, type FormEvent } from "react";
 import AutoGrowTextarea from "@/components/AutoGrowTextarea";
 import CountrySelect from "@/components/CountrySelect";
 import FormField from "@/components/FormField";
@@ -186,6 +186,12 @@ export function buildPropertyCreateBody(draft: PropertyEditDraft): PropertyCreat
 }
 
 export default function PropertyEditDialog(props: PropertyEditDialogProps) {
+  if (!props.open) return null;
+  const key = props.property?.id ?? props.initialDraft?.name ?? "new-property";
+  return <PropertyEditDialogForm key={key} {...props} />;
+}
+
+function PropertyEditDialogForm(props: PropertyEditDialogProps) {
   // code-health: ignore[nloc] Property edit dialog is one promoted form surface; field order mirrors the property API shape.
   const {
     open,
@@ -200,10 +206,6 @@ export default function PropertyEditDialog(props: PropertyEditDialogProps) {
   const [draft, setDraft] = useState<PropertyEditDraft>(() =>
     property ? draftFromProperty(property) : blankPropertyDraft(initialDraft)
   );
-
-  useEffect(() => {
-    if (open) setDraft(property ? draftFromProperty(property) : blankPropertyDraft(initialDraft));
-  }, [initialDraft, open, property]);
 
   function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();

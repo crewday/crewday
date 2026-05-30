@@ -1,4 +1,4 @@
-import { type ReactNode, useEffect, useMemo, useState } from "react";
+import { type ReactNode, type SetStateAction, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 import { fetchJson } from "@/lib/api";
@@ -237,11 +237,17 @@ export default function InstructionsPage() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [rowEdits, setRowEdits] = useState<ReadonlyMap<string, InlineTableRow<InstructionDraft>>>(new Map());
-  const [createRow, setCreateRow] = useState<InlineTableRow<InstructionDraft>>(() => newCreateRow(pid));
-
-  useEffect(() => {
-    setCreateRow(newCreateRow(pid));
-  }, [pid]);
+  const [createRowState, setCreateRowState] = useState(() => ({ pid, row: newCreateRow(pid) }));
+  const createRow = createRowState.pid === pid ? createRowState.row : newCreateRow(pid);
+  const setCreateRow = (next: SetStateAction<InlineTableRow<InstructionDraft>>) => {
+    setCreateRowState((current) => {
+      const currentRow = current.pid === pid ? current.row : newCreateRow(pid);
+      return {
+        pid,
+        row: typeof next === "function" ? next(currentRow) : next,
+      };
+    });
+  };
 
   const instrQ = useQuery({
     queryKey: qk.instructionsList(pid),

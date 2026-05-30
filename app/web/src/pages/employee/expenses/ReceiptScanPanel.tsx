@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useLayoutEffect, useState } from "react";
 import { Search } from "lucide-react";
 import FileDropZone from "@/components/FileDropZone";
 import { EmptyState } from "@/components/common";
@@ -91,7 +91,7 @@ export default function ReceiptScanPanel({
   // path itself keeps the error visible because the parent flips
   // from `processing` straight back to `upload` (where the notice
   // belongs).
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (phase !== "upload" && phase !== "processing") {
       setError(null);
     }

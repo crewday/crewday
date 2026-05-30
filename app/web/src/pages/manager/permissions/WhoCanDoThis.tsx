@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import SearchableSelect, { type SearchableSelectOption } from "@/components/SearchableSelect";
 import { fetchJson } from "@/lib/api";
@@ -23,26 +23,14 @@ export default function WhoCanDoThis({
   scopeId: string;
 }) {
   // code-health: ignore[nloc] Permission explanation panel is declarative render composition over computed rows.
-  const [userId, setUserId] = useState<string>(users[0]?.id ?? "");
-  const [actionKey, setActionKey] = useState<string>(actions[0]?.key ?? "");
+  const [selectedUserId, setSelectedUserId] = useState<string | null>(null);
+  const [selectedActionKey, setSelectedActionKey] = useState<string | null>(null);
   const userOptions = useMemo(() => users.map(userOption), [users]);
   const actionOptions = useMemo(() => actions.map(actionOption), [actions]);
-
-  useEffect(() => {
-    if (users.length === 0) {
-      if (userId) setUserId("");
-      return;
-    }
-    if (!users.some((u) => u.id === userId)) setUserId(users[0]?.id ?? "");
-  }, [userId, users]);
-
-  useEffect(() => {
-    if (actions.length === 0) {
-      if (actionKey) setActionKey("");
-      return;
-    }
-    if (!actions.some((a) => a.key === actionKey)) setActionKey(actions[0]?.key ?? "");
-  }, [actionKey, actions]);
+  const userId = users.some((user) => user.id === selectedUserId) ? selectedUserId ?? "" : users[0]?.id ?? "";
+  const actionKey = actions.some((action) => action.key === selectedActionKey)
+    ? selectedActionKey ?? ""
+    : actions[0]?.key ?? "";
 
   const resolved = useQuery({
     queryKey: qk.permissionResolved(userId, actionKey, scopeKind, scopeId),
@@ -74,14 +62,14 @@ export default function WhoCanDoThis({
           label="User"
           value={userId}
           options={userOptions}
-          onChange={setUserId}
+          onChange={setSelectedUserId}
           required
         />
         <SearchableSelect
           label="Action"
           value={actionKey}
           options={actionOptions}
-          onChange={setActionKey}
+          onChange={setSelectedActionKey}
           required
         />
       </div>

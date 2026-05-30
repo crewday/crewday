@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from "react";
+import { type FormEvent } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useLocation, useSearchParams } from "react-router-dom";
 import { PackageSearch, SearchX } from "lucide-react";
@@ -13,6 +13,7 @@ import SearchableSelect, { type SearchableSelectOption } from "@/components/Sear
 import { Checkbox, Chip, EmptyState, FilterChipGroup, Loading } from "@/components/common";
 import { AssetIcon } from "@/components/AssetIcon";
 import { ASSET_CONDITION_TONE, ASSET_STATUS_TONE } from "@/lib/tones";
+import { usePatchReducer } from "@/lib/usePatchReducer";
 import { workspaceRouteForPathname } from "@/lib/workspaceRoutes";
 import { type ListEnvelope, unwrapList as unwrapEnvelope } from "@/lib/listResponse";
 import type {
@@ -87,6 +88,32 @@ interface QueuedAssetDocument {
   file: File;
   kind: DocumentKind;
   title: string;
+}
+
+interface NewAssetFormState {
+  dialogOpen: boolean;
+  name: string;
+  propertyId: string;
+  assetTypeId: string;
+  areaId: string;
+  make: string;
+  model: string;
+  serialNumber: string;
+  condition: AssetCondition;
+  status: AssetStatus;
+  installedOn: string;
+  purchasedOn: string;
+  purchasePrice: string;
+  purchaseCurrency: string;
+  purchaseVendor: string;
+  warrantyExpiresOn: string;
+  expectedLifespanYears: string;
+  guestVisible: boolean;
+  guestInstructions: string;
+  notes: string;
+  queuedDocuments: QueuedAssetDocument[];
+  createdAssetAfterUploadFailure: Asset | null;
+  formError: string | null;
 }
 
 class AssetDocumentUploadError extends Error {
@@ -185,30 +212,85 @@ function NewAssetButton({
 }) {
   // code-health: ignore[ccn nloc] Asset creation is a boundary dialog: form state, retryable document uploads, and field copy stay together.
   const queryClient = useQueryClient();
-  const [dialogOpen, setDialogOpen] = useState(false);
-  const [name, setName] = useState("");
-  const [propertyId, setPropertyId] = useState("");
-  const [assetTypeId, setAssetTypeId] = useState("");
-  const [areaId, setAreaId] = useState("");
-  const [make, setMake] = useState("");
-  const [model, setModel] = useState("");
-  const [serialNumber, setSerialNumber] = useState("");
-  const [condition, setCondition] = useState<AssetCondition>("good");
-  const [status, setStatus] = useState<AssetStatus>("active");
-  const [installedOn, setInstalledOn] = useState("");
-  const [purchasedOn, setPurchasedOn] = useState("");
-  const [purchasePrice, setPurchasePrice] = useState("");
-  const [purchaseCurrency, setPurchaseCurrency] = useState("");
-  const [purchaseVendor, setPurchaseVendor] = useState("");
-  const [warrantyExpiresOn, setWarrantyExpiresOn] = useState("");
-  const [expectedLifespanYears, setExpectedLifespanYears] = useState("");
-  const [guestVisible, setGuestVisible] = useState(false);
-  const [guestInstructions, setGuestInstructions] = useState("");
-  const [notes, setNotes] = useState("");
-  const [queuedDocuments, setQueuedDocuments] = useState<QueuedAssetDocument[]>([]);
-  const [createdAssetAfterUploadFailure, setCreatedAssetAfterUploadFailure] =
-    useState<Asset | null>(null);
-  const [formError, setFormError] = useState<string | null>(null);
+  const [formState, setFormState] = usePatchReducer<NewAssetFormState>({
+    dialogOpen: false,
+    name: "",
+    propertyId: "",
+    assetTypeId: "",
+    areaId: "",
+    make: "",
+    model: "",
+    serialNumber: "",
+    condition: "good",
+    status: "active",
+    installedOn: "",
+    purchasedOn: "",
+    purchasePrice: "",
+    purchaseCurrency: "",
+    purchaseVendor: "",
+    warrantyExpiresOn: "",
+    expectedLifespanYears: "",
+    guestVisible: false,
+    guestInstructions: "",
+    notes: "",
+    queuedDocuments: [],
+    createdAssetAfterUploadFailure: null,
+    formError: null,
+  });
+  const {
+    dialogOpen,
+    name,
+    propertyId,
+    assetTypeId,
+    areaId,
+    make,
+    model,
+    serialNumber,
+    condition,
+    status,
+    installedOn,
+    purchasedOn,
+    purchasePrice,
+    purchaseCurrency,
+    purchaseVendor,
+    warrantyExpiresOn,
+    expectedLifespanYears,
+    guestVisible,
+    guestInstructions,
+    notes,
+    queuedDocuments,
+    createdAssetAfterUploadFailure,
+    formError,
+  } = formState;
+  const setDialogOpen = (dialogOpen: boolean) => setFormState({ dialogOpen });
+  const setName = (name: string) => setFormState({ name });
+  const setPropertyId = (propertyId: string) => setFormState({ propertyId });
+  const setAssetTypeId = (assetTypeId: string) => setFormState({ assetTypeId });
+  const setAreaId = (areaId: string) => setFormState({ areaId });
+  const setMake = (make: string) => setFormState({ make });
+  const setModel = (model: string) => setFormState({ model });
+  const setSerialNumber = (serialNumber: string) => setFormState({ serialNumber });
+  const setCondition = (condition: AssetCondition) => setFormState({ condition });
+  const setStatus = (status: AssetStatus) => setFormState({ status });
+  const setInstalledOn = (installedOn: string) => setFormState({ installedOn });
+  const setPurchasedOn = (purchasedOn: string) => setFormState({ purchasedOn });
+  const setPurchasePrice = (purchasePrice: string) => setFormState({ purchasePrice });
+  const setPurchaseCurrency = (purchaseCurrency: string) => setFormState({ purchaseCurrency });
+  const setPurchaseVendor = (purchaseVendor: string) => setFormState({ purchaseVendor });
+  const setWarrantyExpiresOn = (warrantyExpiresOn: string) => setFormState({ warrantyExpiresOn });
+  const setExpectedLifespanYears = (expectedLifespanYears: string) => setFormState({ expectedLifespanYears });
+  const setGuestVisible = (guestVisible: boolean) => setFormState({ guestVisible });
+  const setGuestInstructions = (guestInstructions: string) => setFormState({ guestInstructions });
+  const setNotes = (notes: string) => setFormState({ notes });
+  const setQueuedDocuments = (
+    update: QueuedAssetDocument[] | ((current: QueuedAssetDocument[]) => QueuedAssetDocument[]),
+  ) => setFormState((current) => ({
+    ...current,
+    queuedDocuments: typeof update === "function" ? update(current.queuedDocuments) : update,
+  }));
+  const setCreatedAssetAfterUploadFailure = (createdAssetAfterUploadFailure: Asset | null) =>
+    setFormState({ createdAssetAfterUploadFailure });
+  const setFormError = (formError: string | null) => setFormState({ formError });
 
   const areasQ = useQuery({
     queryKey: qk.propertyAreas(propertyId),

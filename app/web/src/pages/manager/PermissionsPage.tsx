@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useSyncExternalStore } from "react";
 import DeskPage from "@/components/DeskPage";
 import PageTabs, { type PageTab } from "@/components/PageTabs";
 import GroupsTab from "./permissions/GroupsTab";
@@ -24,17 +24,20 @@ function renderTabPanel(tab: Tab) {
   return <GroupsTab />;
 }
 
+function subscribeHashChange(onStoreChange: () => void): () => void {
+  window.addEventListener("hashchange", onStoreChange);
+  return () => window.removeEventListener("hashchange", onStoreChange);
+}
+
 export default function PermissionsPage() {
-  const [tab, setTab] = useState<Tab>(() => tabFromHash(window.location.hash));
+  const tab = useSyncExternalStore(
+    subscribeHashChange,
+    () => tabFromHash(window.location.hash),
+    (): Tab => "groups",
+  );
 
-  useEffect(() => {
-    const syncFromHash = () => setTab(tabFromHash(window.location.hash));
-    window.addEventListener("hashchange", syncFromHash);
-    return () => window.removeEventListener("hashchange", syncFromHash);
-  }, []);
-
-  function selectTab(next: string): void {
-    setTab(tabFromHash(`#${next}`));
+  function selectTab(): void {
+    // PageTabs owns the hash write; this page subscribes to hash changes.
   }
 
   const sub =
