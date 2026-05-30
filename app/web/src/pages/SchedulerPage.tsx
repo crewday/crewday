@@ -175,8 +175,8 @@ function SchedulerCell({
         </div>
       ))}
       {scope !== "client" && rotas.length > 0 && tasks.length === 0 && (
-        <span className="rota-slot__warning" title="Rota slot with no task assigned">
-          gap
+        <span className="rota-slot__warning" title="Scheduled shift with no task assigned">
+          No task
         </span>
       )}
     </div>
@@ -374,8 +374,8 @@ export default function SchedulerPage() {
     scope === "client"
       ? "Who's booked at your properties, week view."
       : scope === "employee"
-        ? "Your rota and scheduled tasks for the week."
-        : "Who is booked where, rota + materialised tasks (§06).";
+        ? "Your scheduled shifts and tasks for the week."
+        : "Who is booked where, with scheduled shifts and assigned tasks.";
 
   const title = "Scheduler";
 
@@ -399,11 +399,11 @@ export default function SchedulerPage() {
         <div ref={containerRef} className="panel">
           <EmptyState
             icon={CalendarDays}
-            title="No rota data yet"
+            title="No schedule data yet"
             copy={
               scope === "manager"
-                ? "Assign employees to properties and attach a schedule ruleset to see the grid."
-                : "Ask your manager to set up the rota."
+                ? "Assign employees to properties and set up schedules to see the grid."
+                : "Ask your manager to set up your schedule."
             }
             variant="compact"
           />
@@ -438,9 +438,9 @@ export default function SchedulerPage() {
           </div>
           {scope !== "client" && (
             <p className="muted schedule__intro-help">
-              Tip: <em>rota gap</em> markers surface weekday slots with no task yet.
-              Managers edit rulesets on the Schedules page; workers request overrides
-              via Leave.
+              Tip: <em>No task</em> markers show scheduled shifts that do not have
+              assigned work yet. Managers update schedules on the Schedules page;
+              workers request time away through Leave.
             </p>
           )}
         </div>

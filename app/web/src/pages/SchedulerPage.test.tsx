@@ -254,6 +254,29 @@ describe("<SchedulerPage>", () => {
     }
   });
 
+  it("renders scheduler guidance without visible spec markers or implementation terms", async () => {
+    const fake = installFetch({ ...CALENDAR, tasks: [] });
+    try {
+      render(<Harness />);
+
+      expect(
+        await screen.findByText("Who is booked where, with scheduled shifts and assigned tasks."),
+      ).toBeInTheDocument();
+      expect(await screen.findAllByText("No task")).toHaveLength(2);
+
+      const visibleText = document.body.textContent ?? "";
+      expect(visibleText).toContain(
+        "No task markers show scheduled shifts that do not have assigned work yet.",
+      );
+      expect(visibleText).not.toContain("§");
+      expect(visibleText).not.toMatch(/\bmaterialised\b/i);
+      expect(visibleText).not.toMatch(/\brota gap\b/i);
+      expect(visibleText).not.toMatch(/\bruleset\b/i);
+    } finally {
+      fake.restore();
+    }
+  });
+
   it("does not repeat a scheduler row name when first and display names match", async () => {
     const fake = installFetch({
       ...CALENDAR,
@@ -341,7 +364,7 @@ describe("<SchedulerPage>", () => {
 
       await screen.findByText("Alex Rivera");
       await act(async () => {
-        await new Promise((resolve) => window.setTimeout(resolve, 250));
+        await new Promise((resolve) => window.setTimeout(resolve, 400));
       });
 
       scrollHeight = 1_000;
@@ -489,7 +512,7 @@ describe("<SchedulerPage>", () => {
       render(<Harness />);
 
       expect(await screen.findByText("Test User")).toBeInTheDocument();
-      expect(screen.queryByText("No rota data yet")).toBeNull();
+      expect(screen.queryByText("No schedule data yet")).toBeNull();
     } finally {
       fake.restore();
     }
@@ -501,7 +524,12 @@ describe("<SchedulerPage>", () => {
     try {
       render(<Harness />);
 
-      expect(await screen.findByText("No rota data yet")).toBeInTheDocument();
+      expect(await screen.findByText("No schedule data yet")).toBeInTheDocument();
+      const visibleText = document.body.textContent ?? "";
+      expect(visibleText).not.toContain("§");
+      expect(visibleText).not.toMatch(/\bmaterialised\b/i);
+      expect(visibleText).not.toMatch(/\brota gap\b/i);
+      expect(visibleText).not.toMatch(/\bruleset\b/i);
       expect(screen.queryByText("Test User")).toBeNull();
       expect(screen.queryByText("test@example.com")).toBeNull();
     } finally {
