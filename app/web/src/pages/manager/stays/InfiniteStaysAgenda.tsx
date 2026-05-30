@@ -47,6 +47,7 @@ interface InfiniteStaysAgendaProps {
   employees: Employee[];
   payload: StaysPayload;
   guestNameForStay: (stay: PageStay) => string;
+  showLeaveLayer?: boolean;
 }
 
 export function InfiniteStaysAgenda(props: InfiniteStaysAgendaProps) {
@@ -59,6 +60,7 @@ export function InfiniteStaysAgenda(props: InfiniteStaysAgendaProps) {
     employees,
     payload,
     guestNameForStay,
+    showLeaveLayer = true,
   } = props;
   const payloadSignature = useMemo(() => {
     const stays = payload.stays.map((stay) => [
@@ -167,10 +169,12 @@ export function InfiniteStaysAgenda(props: InfiniteStaysAgendaProps) {
             <span className="schedule__legend-swatch" aria-hidden />
             Closure
           </span>
-          <span className="schedule__legend-item stays-legend__item--leave">
-            <span className="schedule__legend-swatch" aria-hidden />
-            Approved leave
-          </span>
+          {showLeaveLayer ? (
+            <span className="schedule__legend-item stays-legend__item--leave">
+              <span className="schedule__legend-swatch" aria-hidden />
+              Approved leave
+            </span>
+          ) : null}
         </div>
       </div>
 
@@ -201,6 +205,7 @@ export function InfiniteStaysAgenda(props: InfiniteStaysAgendaProps) {
                 properties={properties}
                 employeesById={employeesById}
                 guestNameForStay={guestNameForStay}
+                showLeaveLayer={showLeaveLayer}
                 hideLabel={gi > 0}
               />
             ) : (
@@ -210,6 +215,7 @@ export function InfiniteStaysAgenda(props: InfiniteStaysAgendaProps) {
                 properties={properties}
                 employeesById={employeesById}
                 guestNameForStay={guestNameForStay}
+                showLeaveLayer={showLeaveLayer}
               />
             )}
           </Fragment>
@@ -248,9 +254,18 @@ function StaysWeekGrid(props: {
   properties: Property[];
   employeesById: Map<string, Employee>;
   guestNameForStay: (stay: PageStay) => string;
+  showLeaveLayer: boolean;
   hideLabel: boolean;
 }) {
-  const { group, today, properties, employeesById, guestNameForStay, hideLabel } = props;
+  const {
+    group,
+    today,
+    properties,
+    employeesById,
+    guestNameForStay,
+    showLeaveLayer,
+    hideLabel,
+  } = props;
   return (
     <div className="schedule-week stays-week" role="grid" aria-label={group.weekLabel}>
       {!hideLabel && <div className="schedule-week__label">{group.weekLabel}</div>}
@@ -274,6 +289,7 @@ function StaysWeekGrid(props: {
             properties={properties}
             employeesById={employeesById}
             guestNameForStay={guestNameForStay}
+            showLeaveLayer={showLeaveLayer}
           />
         ))}
       </div>
@@ -287,8 +303,9 @@ function StaysPhoneWeek(props: {
   properties: Property[];
   employeesById: Map<string, Employee>;
   guestNameForStay: (stay: PageStay) => string;
+  showLeaveLayer: boolean;
 }) {
-  const { group, today, properties, employeesById, guestNameForStay } = props;
+  const { group, today, properties, employeesById, guestNameForStay, showLeaveLayer } = props;
   return (
     <>
       {group.cells.map((cell) => (
@@ -299,6 +316,7 @@ function StaysPhoneWeek(props: {
             properties={properties}
             employeesById={employeesById}
             guestNameForStay={guestNameForStay}
+            showLeaveLayer={showLeaveLayer}
           />
         </div>
       ))}
@@ -312,14 +330,15 @@ function StaysDayCell(props: {
   properties: Property[];
   employeesById: Map<string, Employee>;
   guestNameForStay: (stay: PageStay) => string;
+  showLeaveLayer: boolean;
 }) {
-  const { cell, today, properties, employeesById, guestNameForStay } = props;
+  const { cell, today, properties, employeesById, guestNameForStay, showLeaveLayer } = props;
   const isToday = isoDate(today) === cell.iso;
   const hasEvents =
     cell.stays.length > 0 ||
     cell.turnovers.length > 0 ||
     cell.closures.length > 0 ||
-    cell.leaves.length > 0;
+    (showLeaveLayer && cell.leaves.length > 0);
   const { weekday, day, month } = dayLabel(cell.date);
   return (
     <article
@@ -361,18 +380,20 @@ function StaysDayCell(props: {
               title={`Closure: ${closure.reason}`}
             />
           ))}
-          {cell.leaves.map((leave) => {
-            const employee = employeesById.get(leave.employee_id);
-            return (
-              <StaysEvent
-                key={`leave-${leave.id}`}
-                modifier="leave"
-                label={employee?.avatar_initials ?? "Leave"}
-                meta={`${employee?.name ?? "Employee"} · ${leave.category}`}
-                title={`${employee?.name ?? "Employee"} approved leave`}
-              />
-            );
-          })}
+          {showLeaveLayer
+            ? cell.leaves.map((leave) => {
+                const employee = employeesById.get(leave.employee_id);
+                return (
+                  <StaysEvent
+                    key={`leave-${leave.id}`}
+                    modifier="leave"
+                    label={employee?.avatar_initials ?? "Leave"}
+                    meta={`${employee?.name ?? "Employee"} · ${leave.category}`}
+                    title={`${employee?.name ?? "Employee"} approved leave`}
+                  />
+                );
+              })
+            : null}
         </div>
       ) : (
         <div className="schedule-day__empty">

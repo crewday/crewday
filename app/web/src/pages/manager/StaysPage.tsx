@@ -244,9 +244,12 @@ function leafRowsFromEnvelope(envelope: unknown): LeaveListPayload[] {
   return Array.isArray(data) ? (data as LeaveListPayload[]) : [];
 }
 
-async function fetchStaysPayload(): Promise<StaysPayload> {
+async function fetchStaysPayload(propertyId?: string | null): Promise<StaysPayload> {
+  const reservationsPath = propertyId
+    ? "/api/v1/stays/reservations?property_id=" + encodeURIComponent(propertyId) + "&limit=500"
+    : "/api/v1/stays/reservations?limit=500";
   const [reservations, leaves] = await Promise.all([
-    fetchJson<ListEnvelope<ReservationPayload>>("/api/v1/stays/reservations?limit=500"),
+    fetchJson<ListEnvelope<ReservationPayload>>(reservationsPath),
     fetchJson<unknown>("/api/v1/user_leaves?approved=true&limit=500"),
   ]);
   return {
@@ -270,13 +273,18 @@ async function fetchPropertyMemberships(propertyId: string): Promise<PropertyWor
   return rows.data.map(mapMembership);
 }
 
-async function fetchIcalFeeds(): Promise<IcalFeedPayload[]> {
-  return fetchJson<IcalFeedPayload[]>("/api/v1/stays/ical-feeds");
+async function fetchIcalFeeds(propertyId?: string | null): Promise<IcalFeedPayload[]> {
+  const path = propertyId
+    ? "/api/v1/stays/ical-feeds?property_id=" + encodeURIComponent(propertyId)
+    : "/api/v1/stays/ical-feeds";
+  return fetchJson<IcalFeedPayload[]>(path);
 }
 
-function initialManualForm(properties: Property[], units: UnitPayload[]): ManualStayForm {
+function initialManualForm(properties: Property[], units: UnitPayload[], preferredPropertyId?: string | null): ManualStayForm {
   // code-health: ignore[ccn] Initial form factory has two defaulting branches; lizard over-counts the surrounding TSX module.
-  const propertyId = properties[0]?.id ?? "";
+  const propertyId = preferredPropertyId && properties.some((property) => property.id === preferredPropertyId)
+    ? preferredPropertyId
+    : properties[0]?.id ?? "";
   const propertyUnits = units.filter((unit) => unit.property_id === propertyId);
   return {
     propertyId,
@@ -289,8 +297,10 @@ function initialManualForm(properties: Property[], units: UnitPayload[]): Manual
   };
 }
 
-function initialIcalForm(properties: Property[], units: UnitPayload[]): IcalForm {
-  const propertyId = properties[0]?.id ?? "";
+function initialIcalForm(properties: Property[], units: UnitPayload[], preferredPropertyId?: string | null): IcalForm {
+  const propertyId = preferredPropertyId && properties.some((property) => property.id === preferredPropertyId)
+    ? preferredPropertyId
+    : properties[0]?.id ?? "";
   const propertyUnits = units.filter((unit) => unit.property_id === propertyId);
   return {
     propertyId,
@@ -408,20 +418,27 @@ function describedBy(...ids: Array<string | false | null | undefined>): string |
 export default function StaysPage() {
   // code-health: ignore[nloc] Stays page is declarative reservation/closure composition over promoted route data.
   const { pid } = useParams<{ pid?: string }>();
+  const routePropertyId = pid ?? null;
   const { pathname } = useLocation();
   const { workspaceId } = useWorkspace();
   const isPhone = useIsPhone();
   const queryClient = useQueryClient();
   const today = useMemo(() => new Date(), []);
   const todayIso = useMemo(() => isoDate(today), [today]);
+  const staysQueryKey = routePropertyId
+    ? ([...qk.stays(), "property", routePropertyId] as const)
+    : qk.stays();
+  const feedsQueryKey = routePropertyId
+    ? ([...qk.icalFeeds(), "property", routePropertyId] as const)
+    : qk.icalFeeds();
   const [manualForm, setManualForm] = useState<ManualStayForm | null>(null);
   const [icalForm, setIcalForm] = useState<IcalForm | null>(null);
   const [manualNotice, setManualNotice] = useState<FormNotice | null>(null);
   const [icalNotice, setIcalNotice] = useState<FormNotice | null>(null);
 
   const dataQ = useQuery({
-    queryKey: qk.stays(),
-    queryFn: fetchStaysPayload,
+    queryKey: staysQueryKey,
+    queryFn: () => fetchStaysPayload(routePropertyId),
   });
   const propsQ = useQuery({
     queryKey: qk.properties(),
@@ -440,18 +457,19 @@ export default function StaysPage() {
     queryFn: () => fetchJson<{ workspace_id: string; slug: string; name: string }[]>("/api/v1/me/workspaces"),
   });
   const feedsQ = useQuery({
-    queryKey: qk.icalFeeds(),
-    queryFn: fetchIcalFeeds,
+    queryKey: feedsQueryKey,
+    queryFn: () => fetchIcalFeeds(routePropertyId),
   });
   const propertyIds = propsQ.data?.map((property) => property.id) ?? [];
+  const metadataPropertyIds = routePropertyId ? [routePropertyId] : propertyIds;
   const unitQs = useQueries({
-    queries: propertyIds.map((propertyId) => ({
+    queries: metadataPropertyIds.map((propertyId) => ({
       queryKey: qk.propertyUnits(propertyId),
       queryFn: () => fetchPropertyUnits(propertyId),
     })),
   });
   const membershipQs = useQueries({
-    queries: propertyIds.map((propertyId) => ({
+    queries: metadataPropertyIds.map((propertyId) => ({
       queryKey: qk.propertyWorkspaces(propertyId),
       queryFn: () => fetchPropertyMemberships(propertyId),
     })),
@@ -475,7 +493,7 @@ export default function StaysPage() {
       source: StaySource;
     }) => fetchJson<ReservationPayload>("/api/v1/stays", { method: "POST", body }),
     onSuccess: (reservation) => {
-      queryClient.setQueryData<StaysPayload>(qk.stays(), (current) => {
+      queryClient.setQueryData<StaysPayload>(staysQueryKey, (current) => {
         if (!current) return current;
         return { ...current, stays: [mapReservation(reservation), ...current.stays] };
       });
@@ -499,7 +517,7 @@ export default function StaysPage() {
       provider_override: IcalProvider;
     }) => fetchJson<IcalFeedPayload>("/api/v1/stays/ical-feeds", { method: "POST", body }),
     onSuccess: (feed) => {
-      queryClient.setQueryData<IcalFeedPayload[]>(qk.icalFeeds(), (current) => {
+      queryClient.setQueryData<IcalFeedPayload[]>(feedsQueryKey, (current) => {
         return current ? [feed, ...current] : [feed];
       });
       void queryClient.invalidateQueries({ queryKey: qk.icalFeeds() });
@@ -543,11 +561,24 @@ export default function StaysPage() {
     return <DeskPage title="Stays">Failed to load.</DeskPage>;
   }
 
-  const data = normalizeStaysPayload(dataQ.data);
-  const { stays } = data;
+  const loadedData = normalizeStaysPayload(dataQ.data);
   const properties = propsQ.data;
   const units = unitQs.flatMap((query) => query.data ?? []);
   const memberships = membershipQs.flatMap((query) => query.data ?? []);
+  const pageProperties = routePropertyId
+    ? properties.filter((property) => property.id === routePropertyId)
+    : properties;
+  const pageFeeds = routePropertyId
+    ? feedsQ.data.filter((feed) => feed.property_id === routePropertyId)
+    : feedsQ.data;
+  const data = routePropertyId
+    ? {
+        ...loadedData,
+        stays: loadedData.stays.filter((stay) => stay.property_id === routePropertyId),
+        leaves: [],
+      }
+    : loadedData;
+  const { stays } = data;
   const propsById = new Map(properties.map((p) => [p.id, p]));
   const unitsByProperty = new Map<string, UnitPayload[]>();
   for (const unit of units) {
@@ -576,17 +607,17 @@ export default function StaysPage() {
   const manualOverlap = manualForm ? overlapWarning(manualForm, stays, guestNameForStay) : null;
   const selectedManualUnits = manualForm ? unitsByProperty.get(manualForm.propertyId) ?? [] : [];
   const selectedIcalUnits = icalForm ? unitsByProperty.get(icalForm.propertyId) ?? [] : [];
-  const icalDuplicate = icalForm ? duplicateFeedNotice(icalForm, feedsQ.data) : null;
+  const icalDuplicate = icalForm ? duplicateFeedNotice(icalForm, pageFeeds) : null;
 
   function openManualDialog(): void {
-    const next = initialManualForm(properties, units);
+    const next = initialManualForm(pageProperties, units, routePropertyId);
     setManualForm(next);
     setManualNotice(null);
     createStay.reset();
   }
 
   function openIcalDialog(): void {
-    const next = initialIcalForm(properties, units);
+    const next = initialIcalForm(pageProperties, units, routePropertyId);
     setIcalForm(next);
     setIcalNotice(null);
     createIcalFeed.reset();
@@ -644,7 +675,11 @@ export default function StaysPage() {
   return (
     <DeskPage
       title="Stays"
-      sub="Imported from Airbnb, VRBO, and direct bookings. Four layers: stays, turnover bundles, closures, employee leave."
+      sub={
+        routePropertyId
+          ? "Imported from Airbnb, VRBO, and direct bookings. Property view: stays, turnover bundles, and closures."
+          : "Imported from Airbnb, VRBO, and direct bookings. Four layers: stays, turnover bundles, closures, employee leave."
+      }
       actions={
         <button type="button" className="btn btn--moss" onClick={openIcalDialog}>
           Import iCal
@@ -702,7 +737,7 @@ export default function StaysPage() {
                 label="Property"
                 className="stay-create-form__field sheet-form__field"
                 value={manualForm.propertyId}
-                options={properties.map(propertySelectOption)}
+                options={pageProperties.map(propertySelectOption)}
                 required
                 onChange={updateManualProperty}
               />
@@ -821,7 +856,7 @@ export default function StaysPage() {
                 label="Property"
                 className="ical-feed-form__field sheet-form__field"
                 value={icalForm.propertyId}
-                options={properties.map(propertySelectOption)}
+                options={pageProperties.map(propertySelectOption)}
                 required
                 onChange={updateIcalProperty}
               />
@@ -911,7 +946,7 @@ export default function StaysPage() {
       <div className="panel">
         <header className="panel__head">
           <h2>iCal feeds</h2>
-          <span className="muted">{feedsQ.data.length} connected</span>
+          <span className="muted">{pageFeeds.length} connected</span>
         </header>
         <table className="table table--roomy">
           <thead>
@@ -925,7 +960,7 @@ export default function StaysPage() {
             </tr>
           </thead>
           <tbody>
-            {feedsQ.data.map((feed) => {
+            {pageFeeds.map((feed) => {
               const property = propsById.get(feed.property_id);
               const unit = units.find((entry) => entry.id === feed.unit_id);
               return (
@@ -943,7 +978,7 @@ export default function StaysPage() {
                 </tr>
               );
             })}
-            {feedsQ.data.length === 0 ? (
+            {pageFeeds.length === 0 ? (
               <tr>
                 <td colSpan={6} className="muted">No iCal feeds connected yet.</td>
               </tr>
@@ -956,10 +991,11 @@ export default function StaysPage() {
         variant={isPhone ? "phone" : "desktop"}
         today={today}
         todayIso={todayIso}
-        properties={properties}
+        properties={pageProperties}
         employees={empsQ.data}
         payload={data}
         guestNameForStay={guestNameForStay}
+        showLeaveLayer={!routePropertyId}
       />
     </DeskPage>
   );

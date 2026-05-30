@@ -1,7 +1,7 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { MemoryRouter } from "react-router-dom";
+import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { WorkspaceProvider } from "@/context/WorkspaceContext";
 import { __resetApiProvidersForTests } from "@/lib/api";
 import { qk, __resetQueryKeyGetterForTests } from "@/lib/queryKeys";
@@ -23,6 +23,15 @@ const property = {
   settings_override: {},
   client_org_id: null,
   owner_user_id: "usr_1",
+};
+
+const secondProperty = {
+  ...property,
+  id: "prop_2",
+  name: "Beach House",
+  city: "Cannes",
+  color: "sky",
+  owner_user_id: "usr_2",
 };
 
 const unit = {
@@ -47,6 +56,13 @@ const secondUnit = {
   name: "Roof Studio",
 };
 
+const otherPropertyUnit = {
+  ...unit,
+  id: "unit_3",
+  property_id: "prop_2",
+  name: "Cabana",
+};
+
 const existingReservation = {
   id: "res_existing",
   workspace_id: "ws_1",
@@ -64,6 +80,14 @@ const existingReservation = {
   created_at: "2026-04-01T00:00:00Z",
 };
 
+const otherPropertyReservation = {
+  ...existingReservation,
+  id: "res_other_property",
+  property_id: "prop_2",
+  unit_id: "unit_3",
+  guest_name: "Other Guest",
+};
+
 function isoOffset(days: number): string {
   const date = new Date();
   date.setUTCDate(date.getUTCDate() + days);
@@ -71,8 +95,9 @@ function isoOffset(days: number): string {
 }
 
 function installFetch(options: {
+  properties?: unknown[];
   reservations?: unknown[];
-  units?: unknown[];
+  units?: Record<string, unknown[]> | unknown[];
   feeds?: unknown[];
   leaves?: unknown[];
   leavesResponse?: unknown;
@@ -84,6 +109,11 @@ function installFetch(options: {
 } = {}) {
   const reservations = [...(options.reservations ?? [])];
   const feeds = [...(options.feeds ?? [])];
+  const properties = options.properties ?? [property];
+  const unitsByProperty = Array.isArray(options.units)
+    ? { prop_1: options.units }
+    : options.units ?? { prop_1: [unit] };
+  const unitsFor = (propertyId: string) => unitsByProperty[propertyId] ?? [];
   return installFetchRouteHandlers([
     {
       path: "/api/v1/auth/me",
@@ -118,15 +148,47 @@ function installFetch(options: {
       respond: { body: { data: reservations } },
     },
     {
+      path: "/w/acme/api/v1/stays/reservations?property_id=prop_1&limit=500",
+      respond: {
+        body: {
+          data: reservations.filter((row) => row && typeof row === "object" && "property_id" in row && row.property_id === "prop_1"),
+        },
+      },
+    },
+    {
+      path: "/w/acme/api/v1/stays/reservations?property_id=prop_2&limit=500",
+      respond: {
+        body: {
+          data: reservations.filter((row) => row && typeof row === "object" && "property_id" in row && row.property_id === "prop_2"),
+        },
+      },
+    },
+    {
       path: "/w/acme/api/v1/user_leaves?approved=true&limit=500",
       respond: { body: options.leavesResponse ?? { data: options.leaves ?? [] } },
     },
-    { path: "/w/acme/api/v1/properties", respond: { body: [property] } },
+    { path: "/w/acme/api/v1/properties", respond: { body: properties } },
     { path: "/w/acme/api/v1/employees", respond: { body: options.employees ?? [] } },
     { path: "/w/acme/api/v1/stays/ical-feeds", respond: { body: feeds } },
     {
+      path: "/w/acme/api/v1/stays/ical-feeds?property_id=prop_1",
+      respond: {
+        body: feeds.filter((row) => row && typeof row === "object" && "property_id" in row && row.property_id === "prop_1"),
+      },
+    },
+    {
+      path: "/w/acme/api/v1/stays/ical-feeds?property_id=prop_2",
+      respond: {
+        body: feeds.filter((row) => row && typeof row === "object" && "property_id" in row && row.property_id === "prop_2"),
+      },
+    },
+    {
       path: "/w/acme/api/v1/properties/prop_1/units?limit=100",
-      respond: { body: { data: options.units ?? [unit] } },
+      respond: { body: { data: unitsFor("prop_1") } },
+    },
+    {
+      path: "/w/acme/api/v1/properties/prop_2/units?limit=100",
+      respond: { body: { data: unitsFor("prop_2") } },
     },
     {
       path: "/w/acme/api/v1/properties/prop_1/share",
@@ -135,6 +197,24 @@ function installFetch(options: {
           data: [
             {
               property_id: "prop_1",
+              workspace_id: "ws_1",
+              label: "Acme",
+              membership_role: options.membershipRole ?? "owner_workspace",
+              status: "active",
+              share_guest_identity: options.shareGuestIdentity ?? false,
+              created_at: "2026-04-01T00:00:00Z",
+            },
+          ],
+        },
+      },
+    },
+    {
+      path: "/w/acme/api/v1/properties/prop_2/share",
+      respond: {
+        body: {
+          data: [
+            {
+              property_id: "prop_2",
               workspace_id: "ws_1",
               label: "Acme",
               membership_role: options.membershipRole ?? "owner_workspace",
@@ -205,13 +285,16 @@ function installFetch(options: {
   ]);
 }
 
-function Harness({ queryClient }: { queryClient?: QueryClient } = {}) {
+function Harness({ queryClient, initial = "/w/acme/stays" }: { queryClient?: QueryClient; initial?: string } = {}) {
   const qc = queryClient ?? new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return (
     <QueryClientProvider client={qc}>
-      <MemoryRouter>
+      <MemoryRouter initialEntries={[initial]}>
         <WorkspaceProvider>
-          <StaysPage />
+          <Routes>
+            <Route path="/w/:slug/stays" element={<StaysPage />} />
+            <Route path="/w/:slug/property/:pid/stays" element={<StaysPage />} />
+          </Routes>
         </WorkspaceProvider>
       </MemoryRouter>
     </QueryClientProvider>
@@ -257,6 +340,110 @@ afterEach(() => {
 });
 
 describe("<StaysPage>", () => {
+  it("keeps top-level stays unfiltered while the property route fetches and renders only that property", async () => {
+    const fake = installFetch({
+      properties: [property, secondProperty],
+      reservations: [existingReservation, otherPropertyReservation],
+      units: { prop_1: [unit], prop_2: [otherPropertyUnit] },
+      feeds: [
+        {
+          id: "feed_prop_1",
+          property_id: "prop_1",
+          unit_id: "unit_1",
+          provider: "airbnb",
+          provider_override: "airbnb",
+          url_preview: "https://calendar.airbnb.com",
+          enabled: true,
+          poll_cadence: "*/15 * * * *",
+          last_polled_at: null,
+          last_error: null,
+        },
+        {
+          id: "feed_prop_2",
+          property_id: "prop_2",
+          unit_id: "unit_3",
+          provider: "vrbo",
+          provider_override: "vrbo",
+          url_preview: "https://ical.vrbo.com",
+          enabled: true,
+          poll_cadence: "*/15 * * * *",
+          last_polled_at: null,
+          last_error: null,
+        },
+      ],
+    });
+    try {
+      render(<Harness />);
+
+      expect(await screen.findByText("Ada Existing")).toBeInTheDocument();
+      expect(screen.getByText("Other Guest")).toBeInTheDocument();
+      expect(fake.requests.some((request) => request.path === "/w/acme/api/v1/stays/reservations?limit=500")).toBe(true);
+
+      cleanup();
+      render(<Harness initial="/w/acme/property/prop_2/stays" />);
+
+      expect(await screen.findByText("Other Guest")).toBeInTheDocument();
+      expect(screen.queryByText("Ada Existing")).not.toBeInTheDocument();
+      expect(
+        screen.getByText("Imported from Airbnb, VRBO, and direct bookings. Property view: stays, turnover bundles, and closures."),
+      ).toBeInTheDocument();
+      expect(
+        screen.queryByText("Imported from Airbnb, VRBO, and direct bookings. Four layers: stays, turnover bundles, closures, employee leave."),
+      ).not.toBeInTheDocument();
+      expect(screen.getByRole("link", { name: "Stays" })).toHaveAttribute("aria-current", "page");
+      expect(fake.requests.some((request) => request.path === "/w/acme/api/v1/stays/reservations?property_id=prop_2&limit=500")).toBe(true);
+      expect(fake.requests.some((request) => request.path === "/w/acme/api/v1/stays/ical-feeds?property_id=prop_2")).toBe(true);
+      expect(screen.getAllByText("Beach House").length).toBeGreaterThan(0);
+      expect(screen.queryByText("Villa Rosa")).not.toBeInTheDocument();
+      expect(screen.queryByText("Approved leave")).not.toBeInTheDocument();
+    } finally {
+      fake.restore();
+    }
+  });
+
+  it("defaults property-route stay and iCal forms to the active property's units", async () => {
+    const fake = installFetch({
+      properties: [property, secondProperty],
+      reservations: [otherPropertyReservation],
+      units: { prop_1: [unit], prop_2: [otherPropertyUnit] },
+    });
+    try {
+      render(<Harness initial="/w/acme/property/prop_2/stays" />);
+
+      fireEvent.click(await screen.findByRole("button", { name: "More actions" }));
+      fireEvent.click(screen.getByRole("menuitem", { name: "Add stay" }));
+
+      const stayDialog = await screen.findByRole("dialog", { name: "Add stay" });
+      expect(within(stayDialog).getByRole("combobox", { name: /^Property\b/ })).toHaveValue("Beach House");
+      expect(within(stayDialog).getByRole("combobox", { name: /^Unit\b/ })).toHaveValue("Cabana");
+      fireEvent.change(within(stayDialog).getByLabelText(/^Guest name\b/), { target: { value: "Beach Guest" } });
+      fireEvent.change(within(stayDialog).getByLabelText(/^Check-in\b/), { target: { value: "2026-04-21" } });
+      fireEvent.change(within(stayDialog).getByLabelText(/^Check-out\b/), { target: { value: "2026-04-23" } });
+      fireEvent.click(within(stayDialog).getByRole("button", { name: "Create stay" }));
+
+      await waitFor(() => {
+        const createRequest = fake.requests.find((request) => request.method === "POST" && request.path === "/w/acme/api/v1/stays");
+        expect(createRequest?.body).toMatchObject({ property_id: "prop_2", unit_id: "unit_3" });
+      });
+
+      fireEvent.click(await screen.findByRole("button", { name: "Import iCal" }));
+      const icalDialog = await screen.findByRole("dialog", { name: "Import iCal" });
+      expect(within(icalDialog).getByRole("combobox", { name: /^Property\b/ })).toHaveValue("Beach House");
+      expect(within(icalDialog).getByRole("combobox", { name: /^Unit\b/ })).toHaveValue("Cabana");
+      fireEvent.change(within(icalDialog).getByLabelText(/^Feed URL\b/), {
+        target: { value: "https://ical.vrbo.com/property.ics" },
+      });
+      fireEvent.click(within(icalDialog).getByRole("button", { name: "Add feed" }));
+
+      await waitFor(() => {
+        const feedRequest = fake.requests.find((request) => request.method === "POST" && request.path === "/w/acme/api/v1/stays/ical-feeds");
+        expect(feedRequest?.body).toMatchObject({ property_id: "prop_2", unit_id: "unit_3" });
+      });
+    } finally {
+      fake.restore();
+    }
+  });
+
   it("renders stays in the shared infinite agenda instead of the old static April grid", async () => {
     const fake = installFetch({ reservations: [existingReservation] });
     try {
