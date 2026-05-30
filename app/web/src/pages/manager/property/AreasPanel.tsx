@@ -265,7 +265,7 @@ export default function AreasPanel({ propertyId }: { propertyId: string }) {
     },
   });
 
-  const areas = areasQ.data ?? [];
+  const areas = useMemo(() => areasQ.data ?? [], [areasQ.data]);
   const areasById = useMemo(() => new Map(areas.map((area) => [area.id, area])), [areas]);
   let activeSavedDrafts = savedDrafts;
   const normalizedSavedDrafts = normalizeSavedAreaDrafts(savedDrafts, areasById);
@@ -276,10 +276,11 @@ export default function AreasPanel({ propertyId }: { propertyId: string }) {
 
   const reorderAreas = useMutation<Area[], Error, AreaReorderVariables, AreaReorderContext>({
     mutationFn: async ({ orderedRows }) => {
-      const updates = orderedRows
-        .map((row, index) => ({ row, orderHint: index }))
-        .filter(({ row }) => row.id !== CREATE_ROW_ID && row.draft.id)
-        .filter(({ row, orderHint }) => row.draft.order_hint !== orderHint);
+      const updates = orderedRows.flatMap((row, orderHint) =>
+        row.id !== CREATE_ROW_ID && row.draft.id && row.draft.order_hint !== orderHint
+          ? [{ row, orderHint }]
+          : [],
+      );
       const results = await Promise.allSettled(
         updates.map(({ row, orderHint }) =>
           fetchJson<Area>("/api/v1/areas/" + row.id, {

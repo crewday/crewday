@@ -154,8 +154,8 @@ export default function AdminDashboardPage() {
             </tr>
           </thead>
           <tbody>
-            {audit.map((row, idx) => (
-              <AdminAuditRow key={idx} row={row} />
+            {audit.map((row) => (
+              <AdminAuditRow key={`${row.at}-${row.action}-${row.target}`} row={row} />
             ))}
           </tbody>
         </table>

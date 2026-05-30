@@ -21,6 +21,7 @@ export function AssetIcon({
 }) {
   const iconName = isAssetIconName(name) ? name : null;
   const eagerIcon = iconName ? ASSET_ICON_REGISTRY[iconName] : undefined;
+  // react-doctor-disable-next-line react-doctor/rerender-state-only-in-handlers -- The lazy import result is rendered as the active icon once it resolves.
   const [lazyIcon, setLazyIcon] = useState<LoadedLazyIcon | null>(null);
   const cachedLazyIcon = iconName ? loadedLazyIcons.get(iconName) : undefined;
   const activeLazyIcon = lazyIcon?.name === iconName ? lazyIcon.icon : null;

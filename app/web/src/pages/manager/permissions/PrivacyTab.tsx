@@ -45,9 +45,9 @@ function nextConsent(
   const selected = new Set(current);
   if (selected.has(token)) selected.delete(token);
   else selected.add(token);
-  return CONSENT_CHOICES
-    .map((choice) => choice.token)
-    .filter((candidate) => selected.has(candidate));
+  return CONSENT_CHOICES.flatMap((choice) =>
+    selected.has(choice.token) ? [choice.token] : [],
+  );
 }
 
 export default function PrivacyTab() {

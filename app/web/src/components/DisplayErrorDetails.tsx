@@ -131,8 +131,8 @@ function ErrorFieldList({
       <h2 className={`${classNamePrefix}__block-title`}>Field errors</h2>
       {fieldErrors.length > 0 ? (
         <ul className={`${classNamePrefix}__list`}>
-          {fieldErrors.map((fieldError, index) => (
-            <li key={`${fieldError.loc?.join(".") ?? "field"}-${index}`}>
+          {fieldErrors.map((fieldError) => (
+            <li key={`${fieldError.loc?.join(".") ?? "field"}-${fieldError.type ?? ""}-${fieldError.msg ?? ""}`}>
               <span>{fieldError.msg ?? "Invalid field"}</span>
               {fieldError.loc?.length ? (
                 <code>{fieldError.loc.map(String).join(".")}</code>

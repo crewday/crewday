@@ -97,6 +97,7 @@ export default function EmployeeAssetPage() {
                   {a.interval_days ? `${a.interval_days}d` : "\u2014"}
                 </span>
                 <button
+                  type="button"
                   className="btn btn--sm btn--moss"
                   onClick={() => markDone.mutate(a.id)}
                   disabled={markDone.isPending}

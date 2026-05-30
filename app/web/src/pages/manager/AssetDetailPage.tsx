@@ -143,7 +143,7 @@ export default function AssetDetailPage() {
   const { asset, asset_type, property, actions, documents, linked_tasks } = detailQ.data;
   const subText = property.name + (asset.area ? " / " + asset.area : "");
 
-  const sortedActions = [...actions].sort((a, b) => {
+  const sortedActions = actions.slice().sort((a, b) => {
     if (!a.next_due_on) return 1;
     if (!b.next_due_on) return -1;
     return a.next_due_on.localeCompare(b.next_due_on);
@@ -153,7 +153,7 @@ export default function AssetDetailPage() {
     <DeskPage
       title={asset.name}
       sub={subText}
-      actions={<button className="btn btn--ghost">Edit</button>}
+      actions={<button type="button" className="btn btn--ghost">Edit</button>}
     >
       <PageTabs
         ariaLabel="Asset sections"
@@ -303,6 +303,7 @@ function ActionsTab({
             <DateTime value={ac.last_performed_at} showTime className="muted mono" empty="," />
             <Chip tone={dueTone(ac.next_due_on)} size="sm">{fmtDate(ac.next_due_on)}</Chip>
             <button
+              type="button"
               className="btn btn--sm btn--moss"
               onClick={() => completeMut.mutate(ac.id)}
               disabled={completeMut.isPending}

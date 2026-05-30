@@ -84,10 +84,10 @@ function welcomeText(
 
 function lines(value: string | null): string[] {
   if (!value) return [];
-  return value
-    .split(/\r?\n/)
-    .map((line) => line.trim())
-    .filter(Boolean);
+  return value.split(/\r?\n/).flatMap((line) => {
+    const trimmed = line.trim();
+    return trimmed ? [trimmed] : [];
+  });
 }
 
 function wifiDetails(welcome: Record<string, unknown>) {

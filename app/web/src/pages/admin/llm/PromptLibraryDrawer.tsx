@@ -39,7 +39,7 @@ export default function PromptLibraryDrawer({
       <aside className="llm-prompt-drawer">
         <header className="llm-prompt-drawer__head">
           <h2>Prompt library</h2>
-          <button className="btn btn--ghost" onClick={onClose}>
+          <button type="button" className="btn btn--ghost" onClick={onClose}>
             Close
           </button>
         </header>

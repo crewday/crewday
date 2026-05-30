@@ -284,7 +284,7 @@ export default function SchedulesPage() {
     queryFn: () => fetchJson<Employee[]>("/api/v1/employees"),
   });
 
-  const templates = templatesQ.data?.data ?? [];
+  const templates = useMemo(() => templatesQ.data?.data ?? [], [templatesQ.data?.data]);
   const templatesById = useMemo(() => {
     const byId = new Map(templates.map((template) => [template.id, template]));
     for (const template of Object.values(schedQ.data?.templates_by_id ?? {})) {
@@ -599,18 +599,19 @@ export default function SchedulesPage() {
       <div className="panel">
         <header className="panel__head"><h2>Preview, next 7 days</h2></header>
         <ul className="task-list task-list--desk">
-          {schedules.filter((s) => !s.paused).map((s) => {
+          {schedules.flatMap((s) => {
+            if (s.paused) return [];
             const p = s.property_id ? propsById.get(s.property_id) : undefined;
             const tpl = templates_by_id[s.template_id];
             const duration = s.duration_minutes ?? tpl?.duration_minutes;
-            return (
+            return [(
               <li key={s.id} className="task-row">
                 <span className="task-row__time mono">{s.rrule_human}</span>
                 <span className="task-row__title"><strong>{s.name}</strong></span>
                 {p && <Chip tone={p.color} size="sm">{p.name}</Chip>}
                 {duration && <Chip tone="ghost" size="sm">{duration}m</Chip>}
               </li>
-            );
+            )];
           })}
         </ul>
       </div>

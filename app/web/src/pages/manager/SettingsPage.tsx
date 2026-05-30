@@ -163,13 +163,24 @@ function errorMessage(err: unknown, fallback: string): string {
   return fallback;
 }
 
+const deadlineFormatter = new Intl.DateTimeFormat(undefined, {
+  dateStyle: "medium",
+  timeStyle: "short",
+});
+
+function settingsSub(pathname: string) {
+  return (
+    <>
+      Workspace-wide configuration only. Personal profile, approval mode, and private agent
+      preferences live under <Link to={workspaceRouteForPathname(pathname, "/me")} className="link">My profile</Link>.
+    </>
+  );
+}
+
 function formatDeadline(value: string): string {
   const date = new Date(value);
   if (Number.isNaN(date.valueOf())) return value;
-  return new Intl.DateTimeFormat(undefined, {
-    dateStyle: "medium",
-    timeStyle: "short",
-  }).format(date);
+  return deadlineFormatter.format(date);
 }
 
 function triggerBrowserDownload(blob: Blob, filename: string): void {
@@ -835,12 +846,7 @@ export default function SettingsPage() {
       setDeleteError(errorMessage(err, "Workspace deletion could not be scheduled."));
     },
   });
-  const sub = (
-    <>
-      Workspace-wide configuration only. Personal profile, approval mode, and private agent
-      preferences live under <Link to={workspaceRouteForPathname(pathname, "/me")} className="link">My profile</Link>.
-    </>
-  );
+  const sub = settingsSub(pathname);
 
   if (
     settingsQ.isPending ||
@@ -849,10 +855,24 @@ export default function SettingsPage() {
     empsQ.isPending ||
     usageQ.isPending
   ) {
-    return <DeskPage title="Workspace settings" sub={sub}><Loading /></DeskPage>;
+    return (
+      <DeskPage
+        title="Workspace settings"
+        sub={sub}
+      >
+        <Loading />
+      </DeskPage>
+    );
   }
   if (!settingsQ.data || !catalogQ.data || !propsQ.data || !empsQ.data || !usageQ.data) {
-    return <DeskPage title="Workspace settings" sub={sub}>Failed to load.</DeskPage>;
+    return (
+      <DeskPage
+        title="Workspace settings"
+        sub={sub}
+      >
+        Failed to load.
+      </DeskPage>
+    );
   }
 
   const ws = settingsQ.data;
@@ -860,7 +880,10 @@ export default function SettingsPage() {
   const grouped = groupByNamespace(ws.defaults, catalog);
 
   return (
-    <DeskPage title="Workspace settings" sub={sub}>
+    <DeskPage
+      title="Workspace settings"
+      sub={sub}
+    >
       {/* §11, Agent preferences (workspace layer). Soft guidance stacked
           into every composition-capability system prompt. */}
       <AgentPreferencesPanel

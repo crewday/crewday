@@ -228,8 +228,8 @@ export default function AdminAuditPage() {
               </tr>
             </thead>
             <tbody>
-              {rows.map((row, idx) => (
-                <AdminAuditRow key={idx} row={row} showVia />
+              {rows.map((row) => (
+                <AdminAuditRow key={`${row.at}-${row.action}-${row.target}`} row={row} showVia />
               ))}
             </tbody>
           </table>

@@ -67,11 +67,11 @@ export default function StyleguidePage() {
       <section className="styleguide__section">
         <h2>Buttons</h2>
         <div className="demo-row">
-          <button className="btn btn--moss">Primary</button>
-          <button className="btn btn--ghost">Ghost</button>
-          <button className="btn btn--rust">Destructive</button>
-          <button className="btn btn--moss btn--lg">Large primary</button>
-          <button className="btn btn--sm btn--ghost">Small ghost</button>
+          <button type="button" className="btn btn--moss">Primary</button>
+          <button type="button" className="btn btn--ghost">Ghost</button>
+          <button type="button" className="btn btn--rust">Destructive</button>
+          <button type="button" className="btn btn--moss btn--lg">Large primary</button>
+          <button type="button" className="btn btn--sm btn--ghost">Small ghost</button>
         </div>
       </section>
 
@@ -87,14 +87,14 @@ export default function StyleguidePage() {
         <div className="styleguide__demo-track">
           <h3>Default (inline, left)</h3>
           <div className="btn-group">
-            <button className="btn btn--moss">Save</button>
-            <button className="btn btn--ghost">Cancel</button>
+            <button type="button" className="btn btn--moss">Save</button>
+            <button type="button" className="btn btn--ghost">Cancel</button>
           </div>
 
           <h3>Modal footer (<code>--end</code>)</h3>
           <div className="btn-group btn-group--end">
-            <button className="btn btn--ghost">Cancel</button>
-            <button className="btn btn--moss">Confirm</button>
+            <button type="button" className="btn btn--ghost">Cancel</button>
+            <button type="button" className="btn btn--moss">Confirm</button>
           </div>
 
           <h3>Two-up, equal width (<code>--split</code> + <code>--block</code>)</h3>
@@ -103,19 +103,19 @@ export default function StyleguidePage() {
             share; <code>.btn--block</code> lifts the tap target to 44px.
           </p>
           <div className="btn-group btn-group--split">
-            <button className="btn btn--ghost btn--block">Adjust this day</button>
-            <button className="btn btn--ghost btn--block">Request leave</button>
+            <button type="button" className="btn btn--ghost btn--block">Adjust this day</button>
+            <button type="button" className="btn btn--ghost btn--block">Request leave</button>
           </div>
 
           <h3>Vertical stack (<code>--stack</code>)</h3>
           <div className="btn-group btn-group--stack">
             <button type="button" className="btn btn--moss btn--block">Continue sign in</button>
-            <button className="btn btn--ghost btn--block">Use a different account</button>
-            <button className="btn btn--ghost btn--block">Back</button>
+            <button type="button" className="btn btn--ghost btn--block">Use a different account</button>
+            <button type="button" className="btn btn--ghost btn--block">Back</button>
           </div>
 
           <h3>Standalone full-width (<code>.btn--block</code>)</h3>
-          <button className="btn btn--moss btn--block">Sign in</button>
+          <button type="button" className="btn btn--moss btn--block">Sign in</button>
         </div>
       </section>
 

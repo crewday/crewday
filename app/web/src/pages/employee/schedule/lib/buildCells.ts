@@ -94,13 +94,13 @@ function rotaForDay(
   assignmentProperty: Map<string, string>,
   weekday: number,
 ): DayCell["rota"] {
-  return slots
-    .filter((s) => s.weekday === weekday)
-    .map((s) => ({
-      slot: s,
-      property_id: assignmentProperty.get(s.schedule_ruleset_id) ?? "",
-    }))
-    .filter((r) => r.property_id);
+  const rota: DayCell["rota"] = [];
+  for (const slot of slots) {
+    if (slot.weekday !== weekday) continue;
+    const propertyId = assignmentProperty.get(slot.schedule_ruleset_id) ?? "";
+    if (propertyId) rota.push({ slot, property_id: propertyId });
+  }
+  return rota;
 }
 
 function byScheduledIso<T extends { scheduled_start: string }>(items: T[], iso: string): T[] {

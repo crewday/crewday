@@ -219,7 +219,7 @@ export default function PropertyClosuresPage() {
     enabled: pid !== "",
   });
   const meQ = useQuery({ queryKey: qk.me(), queryFn: () => fetchJson<Me>("/api/v1/me") });
-  const closures = dataQ.data?.closures ?? [];
+  const closures = useMemo(() => dataQ.data?.closures ?? [], [dataQ.data?.closures]);
   const closureById = useMemo(() => new Map(closures.map((closure) => [closure.id, closure])), [closures]);
 
   useEffect(() => {

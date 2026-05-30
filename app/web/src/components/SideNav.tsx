@@ -104,10 +104,10 @@ export default function SideNav({
       </div>
       <WorkspaceSwitcher />
       <nav className="desk__nav-group">
-        {items.map((item, i) =>
+        {items.map((item) =>
           item.type === "section" ? (
             <div
-              key={"s-" + i}
+              key={`section-${item.label}`}
               className={"nav-section" + (item.phoneHidden ? " nav-section--phone-hidden" : "")}
             >
               <span className="nav-section__text">{item.label}</span>

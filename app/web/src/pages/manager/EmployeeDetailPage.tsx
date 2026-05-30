@@ -136,23 +136,28 @@ async function saveEmployeeRoles({
   let savedChanges = 0;
 
   try {
-    for (const roleId of addRoleIds) {
-      await fetchJson<UserWorkRole>("/api/v1/user_work_roles", {
-        method: "POST",
-        body: {
-          user_id: employeeId,
-          work_role_id: roleId,
-          started_on: startedOn,
-        },
-      });
-      savedChanges += 1;
-    }
-    for (const linkId of removeLinkIds) {
-      await fetchJson<void>("/api/v1/user_work_roles/" + encodeURIComponent(linkId), {
-        method: "DELETE",
-      });
-      savedChanges += 1;
-    }
+    const requests = [
+      ...addRoleIds.map((roleId) =>
+        fetchJson<UserWorkRole>("/api/v1/user_work_roles", {
+          method: "POST",
+          body: {
+            user_id: employeeId,
+            work_role_id: roleId,
+            started_on: startedOn,
+          },
+        }).then(() => {
+          savedChanges += 1;
+        }),
+      ),
+      ...removeLinkIds.map((linkId) =>
+        fetchJson<void>("/api/v1/user_work_roles/" + encodeURIComponent(linkId), {
+          method: "DELETE",
+        }).then(() => {
+          savedChanges += 1;
+        }),
+      ),
+    ];
+    await Promise.all(requests);
   } catch (error) {
     throw new RoleSaveError(error, savedChanges > 0);
   }
@@ -341,9 +346,9 @@ export default function EmployeeDetailPage() {
 
   const { subject, subject_tasks, subject_expenses } = detailQ.data;
   const propsById = new Map(propsQ.data.map((p) => [p.id, p]));
-  const employeePayslips = (payslipsQ.data?.data ?? [])
-    .filter((p) => p.user_id === subject.id)
-    .map(mapPayrollPayslip);
+  const employeePayslips = (payslipsQ.data?.data ?? []).flatMap((p) =>
+    p.user_id === subject.id ? [mapPayrollPayslip(p)] : [],
+  );
   const roleRows = workRolesQ.data ?? [];
   const currentLinks = userWorkRolesQ.data ?? [];
   const currentRoleIds = new Set(currentLinks.map((link) => link.work_role_id));
@@ -376,9 +381,9 @@ export default function EmployeeDetailPage() {
   function submitRoleDialog(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const addRoleIds = [...selectedRoleIds].filter((roleId) => !currentRoleIds.has(roleId));
-    const removeLinkIds = currentLinks
-      .filter((link) => !selectedRoleIds.has(link.work_role_id))
-      .map((link) => link.id);
+    const removeLinkIds = currentLinks.flatMap((link) =>
+      selectedRoleIds.has(link.work_role_id) ? [] : [link.id],
+    );
     roleSave.mutate({
       employeeId: subject.id,
       startedOn: subject.started_on || todayIso(),

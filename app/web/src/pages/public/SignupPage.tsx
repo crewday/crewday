@@ -156,7 +156,7 @@ export default function SignupPage(): ReactElement {
         ...(captchaToken ? { captcha_token: captchaToken } : {}),
       });
     },
-    [email, slug, captchaSiteKey, captchaToken, mutation],
+    [email, slug, captchaToken, mutation],
   );
 
   const onCaptchaToken = useCallback((token: string) => {
@@ -165,17 +165,17 @@ export default function SignupPage(): ReactElement {
       captchaToken: token,
       form: current.form.kind === "error" ? { kind: "idle" } : current.form,
     }));
-  }, []);
+  }, [setState]);
 
   const onCaptchaStale = useCallback(() => {
     setState({ captchaToken: null });
-  }, []);
+  }, [setState]);
 
   const acceptSuggestion = useCallback(
     (suggestion: string) => {
       setState({ slug: suggestion, form: { kind: "idle" } });
     },
-    [],
+    [setState],
   );
 
   const pending = form.kind === "pending";

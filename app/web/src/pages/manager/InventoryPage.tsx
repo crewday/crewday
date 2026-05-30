@@ -469,6 +469,7 @@ export default function InventoryPage() {
               <div className="inv-panel__actions">
                 <span className="muted mono">{items.length} items</span>
                 <button
+                  type="button"
                   className="btn btn--ghost btn--sm"
                   onClick={() => startStocktake(pid)}
                 >

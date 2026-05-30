@@ -82,7 +82,7 @@ export default function NewTaskButton() {
     setForm((current) => (
       current.due === systemTodayIso ? { ...current, due: defaultDue } : current
     ));
-  }, [defaultDue, systemTodayIso]);
+  }, [defaultDue, setForm, systemTodayIso]);
 
   const reset = () => {
     setForm({

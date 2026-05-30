@@ -12,8 +12,13 @@ export function computePendingState(bookings: Booking[]): {
   const pendingProposal = bookings.filter((b) => b.status === "pending_approval");
   const pendingAmend = bookings.filter((b) => b.pending_amend_minutes != null);
   const allPending = [...pendingProposal, ...pendingAmend];
-  const firstPendingIso =
-    allPending.map((b) => b.scheduled_start.slice(0, 10)).sort()[0] ?? null;
+  let firstPendingIso: string | null = null;
+  for (const booking of allPending) {
+    const day = booking.scheduled_start.slice(0, 10);
+    if (firstPendingIso === null || day.localeCompare(firstPendingIso) < 0) {
+      firstPendingIso = day;
+    }
+  }
   const bannerParts: string[] = [];
   if (pendingProposal.length > 0) {
     bannerParts.push(`${pendingProposal.length} awaiting manager approval`);

@@ -103,21 +103,18 @@ function buildAssignmentGroups(
   graph: LlmGraphPayload,
   indexes: LlmIndexes,
 ): LlmAssignmentGroupLayout[] {
-  return graph.capabilities
-    .filter((capability) => {
-      const hasChain =
-        (indexes.assignmentsByCapability.get(capability.key) ?? []).length > 0;
-      return hasChain || !indexes.inheritanceByChild.has(capability.key);
-    })
-    .map((capability) => ({
-      capability,
-      chain: indexes.assignmentsByCapability.get(capability.key) ?? [],
-      inheritedChildren:
-        indexes.childrenByParent
-          .get(capability.key)
-          ?.map((key) => indexes.capabilitiesByKey.get(key))
-          .filter((child): child is LlmCapabilityEntry => Boolean(child)) ?? [],
-    }));
+  const groups: LlmAssignmentGroupLayout[] = [];
+  for (const capability of graph.capabilities) {
+    const chain = indexes.assignmentsByCapability.get(capability.key) ?? [];
+    if (chain.length === 0 && indexes.inheritanceByChild.has(capability.key)) continue;
+    const inheritedChildren: LlmCapabilityEntry[] = [];
+    for (const key of indexes.childrenByParent.get(capability.key) ?? []) {
+      const child = indexes.capabilitiesByKey.get(key);
+      if (child) inheritedChildren.push(child);
+    }
+    groups.push({ capability, chain, inheritedChildren });
+  }
+  return groups;
 }
 
 interface FallbackRanks {
@@ -204,10 +201,11 @@ function rankProviders(
 ): Map<string, number> {
   const ranks = new Map<string, number>();
   for (const provider of providers) {
-    const neighborRanks = indexes.providerModelsByProviderId
-      .get(provider.id)
-      ?.map((pm) => providerModelRanks.get(pm.id))
-      .filter(isNumber) ?? [];
+    const neighborRanks: number[] = [];
+    for (const pm of indexes.providerModelsByProviderId.get(provider.id) ?? []) {
+      const rank = providerModelRanks.get(pm.id);
+      if (isNumber(rank)) neighborRanks.push(rank);
+    }
     ranks.set(
       provider.id,
       neighborRanks.length
@@ -227,10 +225,11 @@ function rankModels(
 ): Map<string, number> {
   const ranks = new Map<string, number>();
   for (const model of models) {
-    const neighborRanks = indexes.providerModelsByModelId
-      .get(model.id)
-      ?.map((pm) => providerModelRanks.get(pm.id))
-      .filter(isNumber) ?? [];
+    const neighborRanks: number[] = [];
+    for (const pm of indexes.providerModelsByModelId.get(model.id) ?? []) {
+      const rank = providerModelRanks.get(pm.id);
+      if (isNumber(rank)) neighborRanks.push(rank);
+    }
     ranks.set(
       model.id,
       neighborRanks.length
@@ -249,12 +248,12 @@ function rankAssignmentGroups(
 ): Map<string, number> {
   const ranks = new Map<string, number>();
   for (const group of groups) {
-    const neighborRanks = group.chain
-      .map((assignment) => indexes.pmById.get(assignment.provider_model_id)?.id)
-      .map((providerModelId) =>
-        providerModelId ? providerModelRanks.get(providerModelId) : undefined,
-      )
-      .filter(isNumber);
+    const neighborRanks: number[] = [];
+    for (const assignment of group.chain) {
+      const providerModelId = indexes.pmById.get(assignment.provider_model_id)?.id;
+      const rank = providerModelId ? providerModelRanks.get(providerModelId) : undefined;
+      if (isNumber(rank)) neighborRanks.push(rank);
+    }
     ranks.set(
       group.capability.key,
       neighborRanks.length
@@ -312,7 +311,7 @@ function stableByRank<T>(
   fallback: Map<string, number>,
   idFor: (item: T) => string = itemId,
 ): T[] {
-  return [...items].sort((a, b) => {
+  return items.slice().sort((a, b) => {
     const aId = idFor(a);
     const bId = idFor(b);
     const rankDiff = (ranks.get(aId) ?? 0) - (ranks.get(bId) ?? 0);
@@ -336,7 +335,7 @@ function normalizeRanks<T>(
 }
 
 function median(values: number[]): number {
-  const sorted = [...values].sort((a, b) => a - b);
+  const sorted = values.slice().sort((a, b) => a - b);
   const midpoint = Math.floor(sorted.length / 2);
   if (sorted.length % 2 === 1) return sorted[midpoint] ?? 0;
   return ((sorted[midpoint - 1] ?? 0) + (sorted[midpoint] ?? 0)) / 2;

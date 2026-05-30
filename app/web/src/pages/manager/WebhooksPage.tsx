@@ -23,7 +23,10 @@ function statusText(status: string | number | null): string {
 }
 
 function splitEvents(raw: string): string[] {
-  return raw.split(/[,\s]+/).map((event) => event.trim()).filter(Boolean);
+  return raw.split(/[,\s]+/).flatMap((event) => {
+    const trimmed = event.trim();
+    return trimmed ? [trimmed] : [];
+  });
 }
 
 function deliveryResponseText(delivery: WebhookDelivery): string | number {

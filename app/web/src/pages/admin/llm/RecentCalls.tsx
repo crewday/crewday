@@ -41,8 +41,8 @@ export default function RecentCalls({ calls }: RecentCallsProps) {
           </tr>
         </thead>
         <tbody>
-          {calls.map((c, idx) => (
-            <tr key={idx}>
+          {calls.map((c) => (
+            <tr key={`${c.at}-${c.capability}-${c.model_id}-${c.status}`}>
               <td><DateTime value={c.at} showTime className="mono" /></td>
               <td>
                 <code className="inline-code">{c.capability}</code>

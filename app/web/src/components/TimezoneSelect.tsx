@@ -108,5 +108,6 @@ function timezoneOptions(): SearchableSelectOption[] {
 function supportedTimezones(): string[] {
   const supportedValuesOf = (Intl as IntlWithSupportedValues).supportedValuesOf;
   const platformZones = supportedValuesOf?.("timeZone") ?? [];
-  return [...new Set(["UTC", ...platformZones, ...FALLBACK_TIMEZONES])].sort((a, b) => a.localeCompare(b));
+  return Array.from(new Set(["UTC", ...platformZones, ...FALLBACK_TIMEZONES]))
+    .sort((a, b) => a.localeCompare(b));
 }

@@ -25,6 +25,8 @@ const DEFAULT_RELATIVE_WITHIN_DAYS = 7;
 const MINUTE_MS = 60 * 1000;
 const HOUR_MS = 60 * MINUTE_MS;
 const DAY_MS = 24 * HOUR_MS;
+const dateTimeFormatCache = new Map<string, Intl.DateTimeFormat>();
+const relativeTimeFormatCache = new Map<string, Intl.RelativeTimeFormat>();
 
 export function parseDateTime(value: DateTimeValue): Date | null {
   if (value === null || value === undefined || value === "") return null;
@@ -174,28 +176,59 @@ function dateTimeFormat(
   locale: string,
   options: Intl.DateTimeFormatOptions,
 ): Intl.DateTimeFormat {
+  const cacheKey = JSON.stringify([locale, options]);
+  const cached = dateTimeFormatCache.get(cacheKey);
+  if (cached) return cached;
+
   try {
-    return new Intl.DateTimeFormat(locale, options);
+    // react-doctor-disable-next-line react-doctor/js-hoist-intl -- Dynamic locale/time-zone formatters are cached by resolved option key.
+    const formatter = new Intl.DateTimeFormat(locale, options);
+    dateTimeFormatCache.set(cacheKey, formatter);
+    return formatter;
   } catch (error) {
     if (!(error instanceof RangeError)) throw error;
   }
 
   try {
-    return new Intl.DateTimeFormat(DEFAULT_LOCALE, options);
+    const fallbackKey = JSON.stringify([DEFAULT_LOCALE, options]);
+    const cachedFallback = dateTimeFormatCache.get(fallbackKey);
+    if (cachedFallback) return cachedFallback;
+    // react-doctor-disable-next-line react-doctor/js-hoist-intl -- Fallback formatters are cached by resolved option key.
+    const formatter = new Intl.DateTimeFormat(DEFAULT_LOCALE, options);
+    dateTimeFormatCache.set(fallbackKey, formatter);
+    return formatter;
   } catch (error) {
     if (!(error instanceof RangeError)) throw error;
   }
 
-  return new Intl.DateTimeFormat(DEFAULT_LOCALE, { ...options, timeZone: undefined });
+  const noTimeZoneOptions = { ...options, timeZone: undefined };
+  const noTimeZoneKey = JSON.stringify([DEFAULT_LOCALE, noTimeZoneOptions]);
+  const cachedNoTimeZone = dateTimeFormatCache.get(noTimeZoneKey);
+  if (cachedNoTimeZone) return cachedNoTimeZone;
+  // react-doctor-disable-next-line react-doctor/js-hoist-intl -- Fallback formatters are cached by resolved option key.
+  const formatter = new Intl.DateTimeFormat(DEFAULT_LOCALE, noTimeZoneOptions);
+  dateTimeFormatCache.set(noTimeZoneKey, formatter);
+  return formatter;
 }
 
 function relativeTimeFormat(locale: string): Intl.RelativeTimeFormat {
+  const cached = relativeTimeFormatCache.get(locale);
+  if (cached) return cached;
+
   try {
-    return new Intl.RelativeTimeFormat(locale, { numeric: "always" });
+    // react-doctor-disable-next-line react-doctor/js-hoist-intl -- Dynamic relative time formatters are cached by locale.
+    const formatter = new Intl.RelativeTimeFormat(locale, { numeric: "always" });
+    relativeTimeFormatCache.set(locale, formatter);
+    return formatter;
   } catch (error) {
     if (!(error instanceof RangeError)) throw error;
   }
-  return new Intl.RelativeTimeFormat(DEFAULT_LOCALE, { numeric: "always" });
+  const fallback = relativeTimeFormatCache.get(DEFAULT_LOCALE);
+  if (fallback) return fallback;
+  // react-doctor-disable-next-line react-doctor/js-hoist-intl -- Fallback relative time formatter is cached by locale.
+  const formatter = new Intl.RelativeTimeFormat(DEFAULT_LOCALE, { numeric: "always" });
+  relativeTimeFormatCache.set(DEFAULT_LOCALE, formatter);
+  return formatter;
 }
 
 function partValue(parts: Intl.DateTimeFormatPart[], type: Intl.DateTimeFormatPartTypes): string {

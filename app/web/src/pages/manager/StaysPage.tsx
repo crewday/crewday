@@ -393,7 +393,9 @@ function problemMessage(error: unknown, fallback: string): string {
   const lowerDetail = detail.toLowerCase();
   const problem = error.problem;
   const rawError = typeof problem?.error === "string" ? problem.error : "";
-  const fieldErrors = error.fieldErrors.map((fieldError) => fieldError.msg).filter(Boolean).join(" ");
+  const fieldErrors = error.fieldErrors.flatMap((fieldError) =>
+    fieldError.msg ? [fieldError.msg] : [],
+  ).join(" ");
   const combined = `${rawError} ${lowerDetail} ${fieldErrors}`.toLowerCase();
 
   if (combined.includes("duplicate") || combined.includes("already exists")) {
@@ -517,10 +519,13 @@ export default function StaysPage() {
       : false
   );
   const loadedUnits = useMemo(() => unitQs.flatMap((query) => query.data ?? []), [unitQs]);
-  const loadedProperties = propsQ.data ?? [];
-  const loadedPageProperties = routePropertyId
-    ? loadedProperties.filter((property) => property.id === routePropertyId)
-    : loadedProperties;
+  const loadedProperties = useMemo(() => propsQ.data ?? [], [propsQ.data]);
+  const loadedPageProperties = useMemo(
+    () => routePropertyId
+      ? loadedProperties.filter((property) => property.id === routePropertyId)
+      : loadedProperties,
+    [loadedProperties, routePropertyId],
+  );
   const defaultManualFormSignature = useMemo(() => {
     return JSON.stringify({
       properties: loadedPageProperties.map((property) => property.id),
@@ -540,6 +545,7 @@ export default function StaysPage() {
         committedDraft: nextForm,
       };
     });
+  // react-doctor-disable-next-line react-doctor/exhaustive-deps -- The signature tracks loaded property/unit contents; the useQueries result arrays are unstable by identity.
   }, [defaultManualFormSignature, metadataPending, propsQ.data, routePropertyId]);
 
   const createStay = useMutation({

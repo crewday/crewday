@@ -79,6 +79,7 @@ export async function fetchApprovals(): Promise<ApprovalRequest[]> {
     const path: string = cursor
       ? `/api/v1/approvals?${new URLSearchParams({ cursor }).toString()}`
       : "/api/v1/approvals";
+    // react-doctor-disable-next-line react-doctor/async-await-in-loop -- Approval cursors are response-dependent pagination state.
     const response: ApprovalsListResponse = await fetchJson<ApprovalsListResponse>(path);
     approvals.push(...response.data.map(approvalRequestFromPayload));
     cursor = response.has_more ? response.next_cursor : null;

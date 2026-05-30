@@ -177,7 +177,7 @@ export default function RulesTab() {
                     {entry.root_only ? (
                       <span className="muted">,</span>
                     ) : (
-                      <button className="btn btn--ghost btn--sm">
+                      <button type="button" className="btn btn--ghost btn--sm">
                         <Plus size={13} strokeWidth={2} /> Rule
                       </button>
                     )}

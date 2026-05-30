@@ -147,6 +147,40 @@ function canSubmitPatch(patch: InstructionPatch): boolean {
   return true;
 }
 
+function instructionEditAction(onEdit: () => void): ReactNode {
+  return (
+    <button type="button" className="btn btn--moss" onClick={onEdit}>
+      Edit
+    </button>
+  );
+}
+
+function instructionDetailSub({
+  contextPropertyId,
+  pathname,
+  scope,
+  scopeSummary,
+}: {
+  contextPropertyId: string | null | undefined;
+  pathname: string;
+  scope: InstructionScope;
+  scopeSummary: string;
+}): ReactNode {
+  return (
+    <>
+      <Link
+        to={contextPropertyId
+          ? workspaceRouteForPathname(pathname, "/property/" + contextPropertyId + "/instructions")
+          : workspaceRouteForPathname(pathname, "/instructions")}
+        className="link"
+      >
+        ← All instructions
+      </Link>{" "}·{" "}
+      <Chip tone={INSTRUCTION_SCOPE_TONE[scope]} size="sm">{scopeSummary}</Chip>
+    </>
+  );
+}
+
 function nextScopePatch(patch: InstructionPatch, scope: InstructionScope): InstructionPatch {
   const fallbackPropertyId = patch.property_ids[0] ?? patch.property_id;
   if (scope === "global") {
@@ -296,30 +330,16 @@ export default function InstructionDetailPage() {
     .sort((left, right) => left.localeCompare(right))
     .map((tag) => ({ value: tag, label: "#" + tag }));
 
-  const sub = (
-    <>
-      <Link
-        to={contextPropertyId
-          ? workspaceRouteForPathname(pathname, "/property/" + contextPropertyId + "/instructions")
-          : workspaceRouteForPathname(pathname, "/instructions")}
-        className="link"
-      >
-        ← All instructions
-      </Link>{" "}·{" "}
-      <Chip tone={INSTRUCTION_SCOPE_TONE[i.scope]} size="sm">{scopeSummary}</Chip>
-    </>
-  );
-  const actions = (
-    <button
-      className="btn btn--moss"
-      onClick={() => {
-        setDraft(toPatch(i));
-        setEditing(true);
-      }}
-    >
-      Edit
-    </button>
-  );
+  const sub = instructionDetailSub({
+    contextPropertyId,
+    pathname,
+    scope: i.scope,
+    scopeSummary,
+  });
+  const actions = instructionEditAction(() => {
+    setDraft(toPatch(i));
+    setEditing(true);
+  });
   const overflow = [
     { label: "View revisions", onSelect: () => setVersionsOpen(true) },
   ];
@@ -335,7 +355,12 @@ export default function InstructionDetailPage() {
   }
 
   return (
-    <DeskPage title={i.title} sub={sub} actions={actions} overflow={overflow}>
+    <DeskPage
+      title={i.title}
+      sub={sub}
+      actions={actions}
+      overflow={overflow}
+    >
       {editing ? (
         <form className="panel instruction-detail-editor" onSubmit={submitEdit}>
           <header className="panel__head">

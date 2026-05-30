@@ -515,9 +515,9 @@ function ProviderForm(props: ProviderFormProps) {
 
   const defaultModelOptions = useMemo(() => {
     if (!provider) return [];
-    return providerModels
-      .filter((pm) => pm.provider_id === provider.id)
-      .map((pm) => providerModelOption(pm, models, provider));
+    return providerModels.flatMap((pm) =>
+      pm.provider_id === provider.id ? [providerModelOption(pm, models, provider)] : [],
+    );
   }, [models, provider, providerModels]);
 
   function providerErrorCopy(error: Error, fallback: string): string {
@@ -918,11 +918,12 @@ function ModelForm({
 
   const modelProviderRows = useMemo(() => {
     if (mode !== "edit" || !model) return [];
-    const providerModelByProviderId = new Map(
-      providerModels
-        .filter((providerModel) => providerModel.model_id === model.id)
-        .map((providerModel) => [providerModel.provider_id, providerModel] as const),
-    );
+    const providerModelByProviderId = new Map<string, LlmProviderModel>();
+    for (const providerModel of providerModels) {
+      if (providerModel.model_id === model.id) {
+        providerModelByProviderId.set(providerModel.provider_id, providerModel);
+      }
+    }
     return providers
       .map((provider) => ({
         provider,

@@ -82,10 +82,14 @@ export default function EmployeeLayout() {
 
   const myEmpId = data?.employee.id;
   const now = Date.now();
-  const myNext = bookingsQ.data
-    ?.filter((b) => b.employee_id === myEmpId && b.status === "scheduled")
-    .filter((b) => new Date(b.scheduled_end).getTime() >= now)
-    .sort((a, b) => a.scheduled_start.localeCompare(b.scheduled_start))[0];
+  let myNext: Booking | undefined;
+  for (const booking of bookingsQ.data ?? []) {
+    if (booking.employee_id !== myEmpId || booking.status !== "scheduled") continue;
+    if (new Date(booking.scheduled_end).getTime() < now) continue;
+    if (!myNext || booking.scheduled_start < myNext.scheduled_start) {
+      myNext = booking;
+    }
+  }
 
   const footerName = data?.employee.name ?? "…";
   const footerRole = data?.employee.roles[0] ? roleLabel(data.employee.roles[0]) : "Employee";

@@ -176,16 +176,21 @@ export function InfiniteStaysAgenda(props: InfiniteStaysAgendaProps) {
     dragSelectionAnchorRef.current = null;
     setDragSelectionAnchor(null);
   }, []);
+  const cancelDateSelectionRef = useRef(cancelDateSelection);
+  useEffect(() => {
+    cancelDateSelectionRef.current = cancelDateSelection;
+  }, [cancelDateSelection]);
 
   useEffect(() => {
     if (!dragSelectionAnchor) return;
-    window.addEventListener("pointerup", cancelDateSelection);
-    window.addEventListener("pointercancel", cancelDateSelection);
+    const cancel = () => cancelDateSelectionRef.current();
+    window.addEventListener("pointerup", cancel);
+    window.addEventListener("pointercancel", cancel);
     return () => {
-      window.removeEventListener("pointerup", cancelDateSelection);
-      window.removeEventListener("pointercancel", cancelDateSelection);
+      window.removeEventListener("pointerup", cancel);
+      window.removeEventListener("pointercancel", cancel);
     };
-  }, [cancelDateSelection, dragSelectionAnchor]);
+  }, [dragSelectionAnchor]);
 
   if (q.isPending) {
     return (

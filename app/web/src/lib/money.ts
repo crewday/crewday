@@ -13,6 +13,22 @@ const MINOR_UNITS: Record<string, number> = {
   KWD: 3,
   OMR: 3,
 };
+const moneyFormatCache = new Map<string, Intl.NumberFormat>();
+
+function moneyFormat(locale: string, currency: string, digits: number): Intl.NumberFormat {
+  const key = `${locale}:${currency}:${digits}`;
+  const cached = moneyFormatCache.get(key);
+  if (cached) return cached;
+  // react-doctor-disable-next-line react-doctor/js-hoist-intl -- Currency formatters are cached by locale/currency/minor-unit key.
+  const formatter = new Intl.NumberFormat(locale, {
+    style: "currency",
+    currency,
+    minimumFractionDigits: digits,
+    maximumFractionDigits: digits,
+  });
+  moneyFormatCache.set(key, formatter);
+  return formatter;
+}
 
 export function formatMoney(
   minorAmount: number,
@@ -21,10 +37,5 @@ export function formatMoney(
 ): string {
   const digits = MINOR_UNITS[currency] ?? 2;
   const value = minorAmount / 10 ** digits;
-  return new Intl.NumberFormat(locale, {
-    style: "currency",
-    currency,
-    minimumFractionDigits: digits,
-    maximumFractionDigits: digits,
-  }).format(value);
+  return moneyFormat(locale, currency, digits).format(value);
 }

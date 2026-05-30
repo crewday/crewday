@@ -27,6 +27,37 @@ const ARCHIVE_SNAPSHOT_LIMIT = 500;
 const WORKSPACE_SEARCH_DEBOUNCE_MS = 250;
 const WORKSPACE_CAP_MAX_CENTS = 1_000_000;
 
+function workspaceLoadMoreControl({
+  hasMore,
+  isInitialLoading,
+  isFetchingMore,
+  error,
+  loadedCount,
+  onLoadMore,
+  onRetry,
+}: {
+  hasMore: boolean;
+  isInitialLoading: boolean;
+  isFetchingMore: boolean;
+  error: string | null;
+  loadedCount: number;
+  onLoadMore: () => void;
+  onRetry: () => void;
+}) {
+  return (
+    <InlineTableLoadMore
+      hasMore={hasMore}
+      isInitialLoading={isInitialLoading}
+      isFetchingMore={isFetchingMore}
+      error={error}
+      loadedCount={loadedCount}
+      onLoadMore={onLoadMore}
+      onRetry={onRetry}
+      allLoadedLabel="All active workspace rows loaded"
+    />
+  );
+}
+
 const VERIFICATION_TONE: Record<
   AdminWorkspaceRow["verification_state"],
   "moss" | "sky" | "sand" | "ghost"
@@ -560,6 +591,19 @@ export default function AdminWorkspacesPage() {
     }));
     setCap.mutate({ id: rowId, capCents });
   };
+  const workspaceLoadMore = workspaceLoadMoreControl({
+    hasMore: Boolean(rowsQ.hasNextPage),
+    isInitialLoading: rowsQ.isPending,
+    isFetchingMore: rowsQ.isFetchingNextPage,
+    error: workspaceLoadError,
+    loadedCount: workspaceRows.loadedRowCount,
+    onLoadMore: () => {
+      void rowsQ.fetchNextPage();
+    },
+    onRetry: () => {
+      void rowsQ.fetchNextPage();
+    },
+  });
 
   return (
     <DeskPage title="Workspaces" sub={sub}>
@@ -581,22 +625,7 @@ export default function AdminWorkspacesPage() {
             resultSummary: workspaceResultSummary,
             noResultsState: "No active workspaces match this search.",
           }}
-          loadMore={(
-            <InlineTableLoadMore
-              hasMore={rowsQ.hasNextPage}
-              isInitialLoading={rowsQ.isPending}
-              isFetchingMore={rowsQ.isFetchingNextPage}
-              error={workspaceLoadError}
-              loadedCount={workspaceRows.loadedRowCount}
-              onLoadMore={() => {
-                void rowsQ.fetchNextPage();
-              }}
-              onRetry={() => {
-                void rowsQ.fetchNextPage();
-              }}
-              allLoadedLabel="All active workspace rows loaded"
-            />
-          )}
+          loadMore={workspaceLoadMore}
           onDraftChange={workspaceRows.patchRowDraft}
           onEdit={(rowId) => {
             workspaceRows.updateRow(rowId, (row) => ({

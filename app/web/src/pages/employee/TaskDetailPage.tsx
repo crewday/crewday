@@ -28,6 +28,7 @@ import {
   type ApiTaskState,
   type CommentPayload,
   type RenderTaskStatus,
+  type ResolvedInventoryEffect,
   type TaskDetailResponse,
 } from "./lib/taskDetailMappers";
 
@@ -130,9 +131,10 @@ export default function TaskDetailPage() {
   const { skipReason, skipOpen, chatDraft, localEvidence, evidenceError } = localState;
 
   useEffect(() => {
+    const objectUrls = previewUrls.current;
     return () => {
-      for (const url of previewUrls.current) URL.revokeObjectURL(url);
-      previewUrls.current = [];
+      for (const url of objectUrls) URL.revokeObjectURL(url);
+      objectUrls.length = 0;
     };
   }, []);
 
@@ -318,12 +320,19 @@ export default function TaskDetailPage() {
   const property =
     detail.property ?? propertiesQ.data?.find((p) => p.id === task.property_id) ?? null;
   const effects = detail.inventory_effects;
-  const consumes = effects.filter((e) => e.kind === "consume");
-  const produces = effects.filter((e) => e.kind === "produce");
+  const consumes: typeof effects = [];
+  const produces: typeof effects = [];
+  for (const effect of effects) {
+    if (effect.kind === "consume") {
+      consumes.push(effect);
+    } else if (effect.kind === "produce") {
+      produces.push(effect);
+    }
+  }
   const terminal =
     task.status === "completed" || task.status === "skipped" || task.status === "cancelled";
   const serverPhotoIds =
-    evidenceQ.data?.data.filter((e) => e.kind === "photo").map((e) => e.id) ?? [];
+    evidenceQ.data?.data.flatMap((e) => e.kind === "photo" ? [e.id] : []) ?? [];
   const localPhotoIds = localEvidence.flatMap((e) =>
     e.status === "uploaded" && e.evidenceId ? [e.evidenceId] : [],
   );
@@ -461,11 +470,11 @@ export default function TaskDetailPage() {
             <div className="task-effects__group">
               <span className="task-effects__label">Uses</span>
               <ul>
-                {consumes.map((e, idx) => {
+                {consumes.map((e) => {
                   const short =
                     e.on_hand !== null && e.on_hand - e.qty < 0;
                   return (
-                    <li key={`c-${idx}`} className={short ? "task-effects__short" : ""}>
+                    <li key={inventoryEffectKey(e)} className={short ? "task-effects__short" : ""}>
                       <strong className="mono">{fmtQty(e.qty)} {e.unit}</strong>
                       <span>{e.item_name}</span>
                       {short && (
@@ -483,8 +492,8 @@ export default function TaskDetailPage() {
             <div className="task-effects__group">
               <span className="task-effects__label">Produces</span>
               <ul>
-                {produces.map((e, idx) => (
-                  <li key={`p-${idx}`}>
+                {produces.map((e) => (
+                  <li key={inventoryEffectKey(e)}>
                     <strong className="mono">{fmtQty(e.qty)} {e.unit}</strong>
                     <span>{e.item_name}</span>
                   </li>
@@ -645,4 +654,8 @@ export default function TaskDetailPage() {
       </section>
     </>
   );
+}
+
+function inventoryEffectKey(effect: ResolvedInventoryEffect): string {
+  return `${effect.kind}-${effect.item_id ?? effect.item_ref}-${effect.qty}-${effect.unit}`;
 }

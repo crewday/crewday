@@ -149,7 +149,7 @@ export default function SubmitExpenseForm({
       ...current,
       values: { ...current.values, [key]: value },
     }));
-  }, []);
+  }, [setFormState]);
 
   const dismissQuestion = useCallback(() => {
     setFormState((current) => ({
@@ -157,7 +157,7 @@ export default function SubmitExpenseForm({
       values: { ...current.values, note_md: foldReply(current.values.note_md, agentReply) },
       questionDismissed: true,
     }));
-  }, [agentReply]);
+  }, [agentReply, setFormState]);
 
   const handleSubmit = useCallback(
     (e: React.FormEvent) => {
@@ -193,7 +193,7 @@ export default function SubmitExpenseForm({
       }
       create.mutate(payload);
     },
-    [values, agentReply, questionDismissed, create, workEngagementId],
+    [values, agentReply, questionDismissed, create, setFormState, workEngagementId],
   );
 
   const agentQuestion = initialScan?.agent_question ?? null;

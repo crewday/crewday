@@ -40,11 +40,12 @@ export function buildLlmIndexes(graph: LlmGraphPayload): LlmIndexes {
   const inheritanceByChild = new Map(
     graph.inheritance.map((edge) => [edge.capability, edge.inherits_from]),
   );
-  const explicitInheritanceByChild = new Map(
-    graph.inheritance
-      .filter((edge) => edge.source === "explicit")
-      .map((edge) => [edge.capability, edge.inherits_from]),
-  );
+  const explicitInheritanceByChild = new Map<string, string>();
+  for (const edge of graph.inheritance) {
+    if (edge.source === "explicit") {
+      explicitInheritanceByChild.set(edge.capability, edge.inherits_from);
+    }
+  }
   const childrenByParent = new Map<string, string[]>();
   for (const edge of graph.inheritance) {
     const list = childrenByParent.get(edge.inherits_from) ?? [];

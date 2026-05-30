@@ -133,8 +133,8 @@ function OverflowMenu({ items }: { items: PageHeaderOverflowItem[] }) {
       </button>
       <dialog ref={ref} className="overflow-menu" aria-label="More actions">
         <ul className="overflow-menu__list" role="menu">
-          {items.map((it, idx) => (
-            <li key={idx} role="none">
+          {items.map((it) => (
+            <li key={`${it.label}-${it.destructive ? "destructive" : "default"}`} role="none">
               <button
                 type="button"
                 role="menuitem"

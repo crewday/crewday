@@ -77,16 +77,23 @@ function buildTaskLanes(
       tintSolid: propertySolid(r.property_id, data),
     })),
   ];
+  const containersByProperty = new Map<string, TaskContainer[]>();
+  for (const container of containers) {
+    const propertyId = container.propertyId ?? "";
+    const list = containersByProperty.get(propertyId) ?? [];
+    list.push(container);
+    containersByProperty.set(propertyId, list);
+  }
 
   const byContainer = new Map<string, SchedulerTaskView[]>();
   const orphans: SchedulerTaskView[] = [];
 
   for (const t of cell.tasks) {
     const tStart = isoToMinOfDay(t.scheduled_start);
-    const match = containers.find(
+    // react-doctor-disable-next-line react-doctor/js-index-maps -- Containers overlap by time range, so each property bucket still needs range matching.
+    const match = containersByProperty.get(t.property_id ?? "")?.find(
       (c) =>
-        c.propertyId === t.property_id
-        && tStart >= c.startMin
+        tStart >= c.startMin
         && tStart < c.endMin,
     );
     if (match) {

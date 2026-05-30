@@ -220,6 +220,7 @@ async function drainOfflineQueueOnce(
 
     result.attempted += 1;
     try {
+      // react-doctor-disable-next-line react-doctor/async-await-in-loop -- Offline mutations must replay in persisted order.
       await replayEntry(entry);
       await deleteEntry(entry.storageKey);
       result.succeeded += 1;
@@ -380,9 +381,14 @@ async function scheduleNextDueDrain(): Promise<void> {
   if (!isBrowserOnline()) return;
 
   const entries = await listEntries({ workspaceSlug: getActiveWorkspaceSlug() });
-  const nextAttemptAt = entries
-    .filter((entry) => entry.nextAttemptAt > Date.now())
-    .sort((a, b) => a.nextAttemptAt - b.nextAttemptAt)[0]?.nextAttemptAt;
+  const now = Date.now();
+  let nextAttemptAt: number | undefined;
+  for (const entry of entries) {
+    if (entry.nextAttemptAt <= now) continue;
+    nextAttemptAt = nextAttemptAt === undefined
+      ? entry.nextAttemptAt
+      : Math.min(nextAttemptAt, entry.nextAttemptAt);
+  }
   if (nextAttemptAt === undefined) return;
 
   const delay = Math.max(nextAttemptAt - Date.now(), BASE_BACKOFF_MS);

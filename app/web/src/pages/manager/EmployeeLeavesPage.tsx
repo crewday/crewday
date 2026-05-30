@@ -9,6 +9,16 @@ import { Chip, EmptyState, Loading } from "@/components/common";
 import type { Employee, Leave } from "@/types/api";
 import { fmtDayMonYear, inclusiveDays } from "./leaveDisplay";
 
+const ADD_LEAVE_ACTION = <button type="button" className="btn btn--moss">+ Add leave</button>;
+
+function employeeLeavesSub(pathname: string, subjectId: string) {
+  return (
+    <Link to={workspaceRouteForPathname(pathname, "/employee/" + subjectId)} className="link">
+      ← Back to profile
+    </Link>
+  );
+}
+
 interface LeavesPayload {
   subject: Employee;
   leaves: Leave[];
@@ -27,16 +37,13 @@ export default function EmployeeLeavesPage() {
   if (!dataQ.data) return <DeskPage title="Leave ledger">Failed to load.</DeskPage>;
 
   const { subject, leaves } = dataQ.data;
+  const sub = employeeLeavesSub(pathname, subject.id);
 
   return (
     <DeskPage
       title={subject.name + ", leave ledger"}
-      sub={
-        <Link to={workspaceRouteForPathname(pathname, "/employee/" + subject.id)} className="link">
-          ← Back to profile
-        </Link>
-      }
-      actions={<button className="btn btn--moss">+ Add leave</button>}
+      sub={sub}
+      actions={ADD_LEAVE_ACTION}
     >
       <div className="panel">
         <table className="table table--roomy">

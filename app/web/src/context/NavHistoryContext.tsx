@@ -79,9 +79,13 @@ export function NavHistoryProvider({ children }: { children: ReactNode }) {
   }, [location, navType]);
 
   const backTarget = useMemo(() => previousPathnameTarget(stack), [stack]);
+  const value = useMemo(
+    () => ({ canGoBack: stack.index > 0, backTarget }),
+    [backTarget, stack.index],
+  );
 
   return (
-    <Ctx.Provider value={{ canGoBack: stack.index > 0, backTarget }}>
+    <Ctx.Provider value={value}>
       {children}
     </Ctx.Provider>
   );

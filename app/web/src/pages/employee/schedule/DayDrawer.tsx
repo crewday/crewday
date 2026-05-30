@@ -5,7 +5,7 @@
 // propose-booking dialogs.
 
 import { Link, useLocation } from "react-router-dom";
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { fetchJson } from "@/lib/api";
 import { qk } from "@/lib/queryKeys";
@@ -40,6 +40,7 @@ interface DayDrawerProps {
 export function DayDrawer(props: DayDrawerProps) {
   // code-health: ignore[nloc] Drawer is declarative schedule section composition; mutations/helpers are already extracted.
   const { cell, data, onClose, onRequestLeave, onRequestOverride, onProposeBooking } = props;
+  const [nowMs] = useState(() => Date.now());
   const { pathname } = useLocation();
   const qc = useQueryClient();
 
@@ -226,7 +227,7 @@ export function DayDrawer(props: DayDrawerProps) {
                 {cell.bookings.map((b) => {
                   const isFutureScheduled =
                     b.status === "scheduled"
-                    && new Date(b.scheduled_end).getTime() > Date.now();
+                    && new Date(b.scheduled_end).getTime() > nowMs;
                   const canAmend =
                     (b.status === "scheduled"
                       || b.status === "completed"

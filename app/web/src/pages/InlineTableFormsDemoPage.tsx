@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef } from "react";
+import { useCallback, useEffect, useMemo, useRef } from "react";
 import type { Dispatch, MutableRefObject, ReactNode, SetStateAction } from "react";
 import { CheckCircle2, RotateCcw } from "lucide-react";
 import {
@@ -578,7 +578,7 @@ export default function InlineTableFormsDemoPage() {
   });
   const searchedTasks = useMemo(() => filterTaskRows(tasks, taskSearch), [tasks, taskSearch]);
   const emptySearchRows = useMemo(() => filterDefaultRows(defaultRows, emptySearch), [defaultRows, emptySearch]);
-  const loadMoreWorkspaces = () => {
+  const loadMoreWorkspaces = useCallback(() => {
     if (workspaceLoading || !workspaceRows.hasMore) return;
     setDemoState({ workspaceLoading: true });
     workspaceLoadTimer.current = window.setTimeout(() => {
@@ -598,7 +598,30 @@ export default function InlineTableFormsDemoPage() {
         workspaceLoading: false,
       }));
     }, 260);
-  };
+  }, [setDemoState, workspaceLoading, workspaceRows.hasMore, workspaceRows.nextCursor]);
+  const workspaceLoadMore = useMemo(
+    () => (
+      <InlineTableLoadMore
+        hasMore={workspaceRows.hasMore}
+        isFetchingMore={workspaceLoading}
+        error={workspaceLoadError}
+        loadedCount={workspaceRows.loadedRowCount}
+        onLoadMore={loadMoreWorkspaces}
+        onRetry={() => {
+          setDemoState({ workspaceLoadError: null });
+          loadMoreWorkspaces();
+        }}
+      />
+    ),
+    [
+      loadMoreWorkspaces,
+      setDemoState,
+      workspaceLoadError,
+      workspaceLoading,
+      workspaceRows.hasMore,
+      workspaceRows.loadedRowCount,
+    ],
+  );
 
   return (
     <main className="inline-table-demo">
@@ -711,19 +734,7 @@ export default function InlineTableFormsDemoPage() {
               editing: false,
             }))}
             getRowLabel={(row) => row.draft.name}
-            loadMore={(
-              <InlineTableLoadMore
-                hasMore={workspaceRows.hasMore}
-                isFetchingMore={workspaceLoading}
-                error={workspaceLoadError}
-                loadedCount={workspaceRows.loadedRowCount}
-                onLoadMore={loadMoreWorkspaces}
-                onRetry={() => {
-                  setDemoState({ workspaceLoadError: null });
-                  loadMoreWorkspaces();
-                }}
-              />
-            )}
+            loadMore={workspaceLoadMore}
             renderBatchActions={({ dirtyRows, canSubmit, discard }) => (
               <div className="inline-table-demo__note-line">
                 <span className="chip chip--ghost chip--sm">{dirtyRows.length} draft edits</span>

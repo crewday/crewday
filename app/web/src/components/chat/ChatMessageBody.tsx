@@ -12,11 +12,16 @@ type InlineToken =
   | { kind: "em"; children: InlineToken[] }
   | { kind: "link"; text: string; link: SafeLink | null };
 
+interface MarkdownLine {
+  key: string;
+  text: string;
+}
+
 type MarkdownBlock =
-  | { kind: "paragraph"; lines: string[] }
-  | { kind: "list"; items: string[] }
-  | { kind: "code"; code: string }
-  | { kind: "heading"; level: HeadingLevel; text: string };
+  | { kind: "paragraph"; key: string; lines: MarkdownLine[] }
+  | { kind: "list"; key: string; items: MarkdownLine[] }
+  | { kind: "code"; key: string; code: string }
+  | { kind: "heading"; key: string; level: HeadingLevel; text: string };
 
 type HeadingLevel = 1 | 2 | 3 | 4 | 5 | 6;
 
@@ -38,7 +43,7 @@ export default function ChatMessageBody({
 
   return (
     <div className={`${className} chat-markdown`}>
-      {blocks.map((block, index) => renderBlock(block, index))}
+      {blocks.map(renderBlock)}
     </div>
   );
 }
@@ -46,31 +51,34 @@ export default function ChatMessageBody({
 function parseBlocks(source: string): MarkdownBlock[] {
   const lines = source.replace(/\r\n?/g, "\n").split("\n");
   const blocks: MarkdownBlock[] = [];
-  let paragraph: string[] = [];
-  let listItems: string[] = [];
+  let paragraph: MarkdownLine[] = [];
+  let listItems: MarkdownLine[] = [];
   let codeLines: string[] = [];
+  let codeStartKey = "code:0";
   let inFence = false;
 
   const flushParagraph = () => {
     if (paragraph.length === 0) return;
-    blocks.push({ kind: "paragraph", lines: paragraph });
+    blocks.push({ kind: "paragraph", key: `paragraph:${paragraph[0]?.key ?? "0"}`, lines: paragraph });
     paragraph = [];
   };
   const flushList = () => {
     if (listItems.length === 0) return;
-    blocks.push({ kind: "list", items: listItems });
+    blocks.push({ kind: "list", key: `list:${listItems[0]?.key ?? "0"}`, items: listItems });
     listItems = [];
   };
 
-  for (const line of lines) {
+  for (const [lineIndex, line] of lines.entries()) {
+    const lineKey = `line:${lineIndex}`;
     if (line.trim().startsWith("```")) {
       if (inFence) {
-        blocks.push({ kind: "code", code: codeLines.join("\n") });
+        blocks.push({ kind: "code", key: codeStartKey, code: codeLines.join("\n") });
         codeLines = [];
         inFence = false;
       } else {
         flushParagraph();
         flushList();
+        codeStartKey = `code:${lineIndex}`;
         inFence = true;
       }
       continue;
@@ -87,6 +95,7 @@ function parseBlocks(source: string): MarkdownBlock[] {
       flushParagraph();
       blocks.push({
         kind: "heading",
+        key: `heading:${lineIndex}`,
         level: headingMatch[1].length as HeadingLevel,
         text: headingText,
       });
@@ -96,7 +105,7 @@ function parseBlocks(source: string): MarkdownBlock[] {
     const listMatch = line.match(/^\s*[-*+]\s+(.+)$/);
     if (listMatch?.[1]) {
       flushParagraph();
-      listItems.push(listMatch[1]);
+      listItems.push({ key: lineKey, text: listMatch[1] });
       continue;
     }
 
@@ -107,20 +116,22 @@ function parseBlocks(source: string): MarkdownBlock[] {
     }
 
     flushList();
-    paragraph.push(line);
+    paragraph.push({ key: lineKey, text: line });
   }
 
-  if (inFence) blocks.push({ kind: "code", code: codeLines.join("\n") });
+  if (inFence) blocks.push({ kind: "code", key: codeStartKey, code: codeLines.join("\n") });
   flushParagraph();
   flushList();
 
-  return blocks.length > 0 ? blocks : [{ kind: "paragraph", lines: [""] }];
+  return blocks.length > 0
+    ? blocks
+    : [{ kind: "paragraph", key: "paragraph:line:0", lines: [{ key: "line:0", text: "" }] }];
 }
 
-function renderBlock(block: MarkdownBlock, index: number): ReactElement {
+function renderBlock(block: MarkdownBlock): ReactElement {
   if (block.kind === "code") {
     return (
-      <pre key={index} className="chat-markdown__code">
+      <pre key={block.key} className="chat-markdown__code">
         <code>{block.code}</code>
       </pre>
     );
@@ -128,10 +139,10 @@ function renderBlock(block: MarkdownBlock, index: number): ReactElement {
 
   if (block.kind === "list") {
     return (
-      <ul key={index} className="chat-markdown__list">
-        {block.items.map((item, itemIndex) => (
+      <ul key={block.key} className="chat-markdown__list">
+        {block.items.map((item) => (
           // react-doctor-disable-next-line react-doctor/no-render-in-render -- Markdown inline token recursion is parser output, not component-local renderer churn.
-          <li key={itemIndex}>{renderInlineTokens(parseInline(item), "li")}</li>
+          <li key={item.key}>{renderInlineTokens(parseInline(item.text), item.key)}</li>
         ))}
       </ul>
     );
@@ -141,22 +152,22 @@ function renderBlock(block: MarkdownBlock, index: number): ReactElement {
     const HeadingTag = headingTagFor(block.level);
     return (
       <HeadingTag
-        key={index}
+        key={block.key}
         className={`chat-markdown__heading chat-markdown__heading--level-${block.level}`}
       >
         {/* react-doctor-disable-next-line react-doctor/no-render-in-render -- Markdown inline token recursion is parser output, not component-local renderer churn. */}
-        {renderInlineTokens(parseInline(block.text), `h-${index}`)}
+        {renderInlineTokens(parseInline(block.text), block.key)}
       </HeadingTag>
     );
   }
 
   return (
-    <p key={index} className="chat-markdown__paragraph">
+    <p key={block.key} className="chat-markdown__paragraph">
       {block.lines.map((line, lineIndex) => (
-        <span key={lineIndex}>
+        <span key={line.key}>
           {lineIndex > 0 && <br />}
           {/* react-doctor-disable-next-line react-doctor/no-render-in-render -- Markdown inline token recursion is parser output, not component-local renderer churn. */}
-          {renderInlineTokens(parseInline(line), `p-${lineIndex}`)}
+          {renderInlineTokens(parseInline(line.text), line.key)}
         </span>
       ))}
     </p>
@@ -231,10 +242,12 @@ function parseInline(source: string): InlineToken[] {
 }
 
 function nextMarkerIndex(source: string, start: number): number {
-  const indexes = TOKEN_MARKERS.map((marker) => source.indexOf(marker, start)).filter(
-    (index) => index >= 0,
-  );
-  return indexes.length === 0 ? source.length : Math.min(...indexes);
+  let next = source.length;
+  for (const marker of TOKEN_MARKERS) {
+    const index = source.indexOf(marker, start);
+    if (index >= 0) next = Math.min(next, index);
+  }
+  return next;
 }
 
 function safeLink(rawHref: string): SafeLink | null {

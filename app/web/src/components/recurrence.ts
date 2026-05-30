@@ -84,12 +84,12 @@ export function parseRecurrenceRrule(value: string | null | undefined): Recurren
   for (const token of body.split(";")) {
     const trimmed = token.trim();
     if (!trimmed) return invalid(raw, "Remove empty RRULE segments.", hasPrefix);
-    const equalsIndex = trimmed.indexOf("=");
-    if (equalsIndex <= 0 || equalsIndex === trimmed.length - 1) {
+    const [rawKey, rawFieldValue, extraSegment] = trimmed.split("=");
+    if (!rawKey || !rawFieldValue || extraSegment !== undefined) {
       return invalid(raw, "Use KEY=VALUE segments separated by semicolons.", hasPrefix);
     }
-    const key = trimmed.slice(0, equalsIndex).trim().toUpperCase();
-    const fieldValue = trimmed.slice(equalsIndex + 1).trim().toUpperCase();
+    const key = rawKey.trim().toUpperCase();
+    const fieldValue = rawFieldValue.trim().toUpperCase();
     if (!/^[A-Z]+$/.test(key)) return invalid(raw, "RRULE keys must use letters only.", hasPrefix);
     if (entries.has(key)) return invalid(raw, `RRULE repeats ${key}.`, hasPrefix);
     if (!RRULE_KEYS.has(key)) return invalid(raw, `RRULE key ${key} is not supported.`, hasPrefix);
@@ -342,11 +342,13 @@ function monthsBetween(start: Date, end: Date): number {
   return (end.getFullYear() - start.getFullYear()) * 12 + end.getMonth() - start.getMonth();
 }
 
+const previewDateFormat = new Intl.DateTimeFormat("en-GB", {
+  weekday: "short",
+  month: "short",
+  day: "numeric",
+  year: "numeric",
+});
+
 function formatPreviewDate(date: Date): string {
-  return new Intl.DateTimeFormat("en-GB", {
-    weekday: "short",
-    month: "short",
-    day: "numeric",
-    year: "numeric",
-  }).format(date);
+  return previewDateFormat.format(date);
 }

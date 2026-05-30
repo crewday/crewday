@@ -119,6 +119,7 @@ export default function SchedulerPage() {
     role === "client" ? "client" : role === "employee" ? "employee" : "manager";
 
   const [weekStart, setWeekStart] = useState<Date>(() => startOfIsoWeek(new Date()));
+  const resetToThisWeek = () => setWeekStart(startOfIsoWeek(new Date()));
   const from = fmtIsoDate(weekStart);
   const to = fmtIsoDate(addDays(weekStart, 6));
 
@@ -215,7 +216,7 @@ export default function SchedulerPage() {
       <button
         type="button"
         className="btn btn--ghost btn--sm"
-        onClick={() => setWeekStart(startOfIsoWeek(new Date()))}
+        onClick={resetToThisWeek}
       >
         This week
       </button>

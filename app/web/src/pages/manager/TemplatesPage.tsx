@@ -255,8 +255,7 @@ export default function TemplatesPage() {
                       <span className="tpl-effect__label">Uses</span>
                       <span>
                         {tpl.inventory_effects
-                          .filter((e) => e.kind === "consume")
-                          .map((e) => `${fmtQty(e.qty)} ${e.item_ref}`)
+                          .flatMap((e) => e.kind === "consume" ? [`${fmtQty(e.qty)} ${e.item_ref}`] : [])
                           .join(" · ")}
                       </span>
                     </div>
@@ -266,8 +265,7 @@ export default function TemplatesPage() {
                       <span className="tpl-effect__label">Produces</span>
                       <span>
                         {tpl.inventory_effects
-                          .filter((e) => e.kind === "produce")
-                          .map((e) => `${fmtQty(e.qty)} ${e.item_ref}`)
+                          .flatMap((e) => e.kind === "produce" ? [`${fmtQty(e.qty)} ${e.item_ref}`] : [])
                           .join(" · ")}
                       </span>
                     </div>
@@ -548,6 +546,7 @@ function ChecklistEditor({ template }: ChecklistEditorProps): ReactElement {
   // outside this component (cross-tab SSE invalidation, an unrelated
   // refetch). We only adopt the upstream order while no debounce is
   // in flight, so the user's in-progress reorder isn't clobbered.
+  // react-doctor-disable-next-line react-doctor/exhaustive-deps -- usePatchReducer dispatchers are stable like React's native reducer dispatch.
   useEffect(() => {
     if (pendingRef.current !== null) return;
     setRows((current) =>
@@ -559,17 +558,18 @@ function ChecklistEditor({ template }: ChecklistEditorProps): ReactElement {
   }, [template.checklist_template_json]);
 
   useEffect(() => {
+    const activeDebounce = debounceRef.current;
+    const flush = flushRef.current;
     return () => {
-      if (debounceRef.current !== null) {
-        clearTimeout(debounceRef.current);
-        debounceRef.current = null;
+      if (activeDebounce !== null) {
+        clearTimeout(activeDebounce);
       }
       // Don't strand the user's reorder if they navigate away during
       // the debounce window, fire the queued PATCH so the server
       // sees the final order. The mutation runs against the still-
       // alive QueryClient; the unmounted component is no longer the
       // observer of its result.
-      if (flushRef.current) flushRef.current();
+      if (flush) flush();
     };
   }, []);
 
@@ -735,9 +735,9 @@ function ChecklistEditor({ template }: ChecklistEditorProps): ReactElement {
   }
 
   function deleteRow(rowId: string): void {
-    const next = rows
-      .filter((row) => row.id !== rowId)
-      .map((row) => committedChecklistItem(row));
+    const next = rows.flatMap((row) =>
+      row.id === rowId ? [] : [committedChecklistItem(row)],
+    );
     commitChecklist(next);
   }
 

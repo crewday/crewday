@@ -362,9 +362,14 @@ function RecurrencePreview({
 
 function toggleWeekday(days: readonly RecurrenceWeekday[], day: RecurrenceWeekday): RecurrenceWeekday[] {
   if (days.includes(day)) return days.filter((candidate) => candidate !== day);
-  return RECURRENCE_WEEKDAYS
-    .map((candidate) => candidate.value)
-    .filter((candidate) => candidate === day || days.includes(candidate));
+  const selectedDays = new Set(days);
+  const next: RecurrenceWeekday[] = [];
+  for (const candidate of RECURRENCE_WEEKDAYS) {
+    if (candidate.value === day || selectedDays.has(candidate.value)) {
+      next.push(candidate.value);
+    }
+  }
+  return next;
 }
 
 function clampNumber(value: string, min: number, max: number): number {

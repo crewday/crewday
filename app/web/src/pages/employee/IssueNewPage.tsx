@@ -45,6 +45,13 @@ interface IssueFormState {
   submitError: string | null;
 }
 
+const ISSUE_PAGE_HEADER = (
+  <PageHeader
+    title="Report an issue"
+    sub="Tell the manager something is broken, missing, or unsafe. The more specific the better."
+  />
+);
+
 export default function IssueNewPage() {
   // code-health: ignore[nloc] Issue form is a single declarative workflow after shared query/offline helpers.
   const nav = useNavigate();
@@ -88,13 +95,8 @@ export default function IssueNewPage() {
     },
   });
 
-  const header = (
-    <PageHeader
-      title="Report an issue"
-      sub="Tell the manager something is broken, missing, or unsafe. The more specific the better."
-    />
-  );
-  const properties = propsQ.data ?? [];
+  const header = ISSUE_PAGE_HEADER;
+  const properties = useMemo(() => propsQ.data ?? [], [propsQ.data]);
   const propertyOptions = useMemo(() => properties.map(propertySelectOption), [properties]);
 
   if (propsQ.isPending) return <>{header}<section className="phone__section"><Loading /></section></>;

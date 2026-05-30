@@ -55,22 +55,33 @@ export async function fetchPropertyDetail(
   pid: string,
   activeWorkspaceSlug: string | null,
 ): Promise<PropertyDetail> {
-  const me = await fetchJson<AuthMe>("/api/v1/auth/me");
-  const workspaceEntries = await fetchJson<WorkspaceSwitcherEntry[]>("/api/v1/me/workspaces");
-  const properties = await fetchJson<Property[]>("/api/v1/properties");
-  const propertyRow = await fetchJson<PropertyDetailRow>("/api/v1/properties/" + pid);
-  const tasks = await emptyListOnNotFound(
-    fetchJson<ListEnvelope<TaskRow>>("/api/v1/tasks?property_id=" + encodeURIComponent(pid) + "&limit=100"),
-  );
-  const reservations = await emptyListOnNotFound(
-    fetchJson<ListEnvelope<ReservationRow>>(
-      "/api/v1/stays/reservations?property_id=" + encodeURIComponent(pid) + "&limit=100",
+  const [
+    me,
+    workspaceEntries,
+    properties,
+    propertyRow,
+    tasks,
+    reservations,
+    memberships,
+    organizations,
+  ] = await Promise.all([
+    fetchJson<AuthMe>("/api/v1/auth/me"),
+    fetchJson<WorkspaceSwitcherEntry[]>("/api/v1/me/workspaces"),
+    fetchJson<Property[]>("/api/v1/properties"),
+    fetchJson<PropertyDetailRow>("/api/v1/properties/" + pid),
+    emptyListOnNotFound(
+      fetchJson<ListEnvelope<TaskRow>>("/api/v1/tasks?property_id=" + encodeURIComponent(pid) + "&limit=100"),
     ),
-  );
-  const memberships = await fetchJson<ListEnvelope<MembershipRow>>("/api/v1/properties/" + pid + "/share");
-  const organizations = await emptyDataOnNotFound(
-    fetchJson<{ data: OrganizationRow[] }>("/api/v1/billing/organizations"),
-  );
+    emptyListOnNotFound(
+      fetchJson<ListEnvelope<ReservationRow>>(
+        "/api/v1/stays/reservations?property_id=" + encodeURIComponent(pid) + "&limit=100",
+      ),
+    ),
+    fetchJson<ListEnvelope<MembershipRow>>("/api/v1/properties/" + pid + "/share"),
+    emptyDataOnNotFound(
+      fetchJson<{ data: OrganizationRow[] }>("/api/v1/billing/organizations"),
+    ),
+  ]);
 
   const property = properties.find((p) => p.id === pid) ?? fallbackProperty(propertyRow);
   const propertyRecord = normalizePropertyRecord(propertyRow);

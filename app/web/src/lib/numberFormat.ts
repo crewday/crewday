@@ -21,6 +21,17 @@ export type PercentFormatOptions = DecimalFormatOptions & {
 
 const DEFAULT_LOCALE = "en-US";
 const DEFAULT_FALLBACK = "";
+const numberFormatCache = new Map<string, Intl.NumberFormat>();
+
+function numberFormat(locale: string, options: Intl.NumberFormatOptions): Intl.NumberFormat {
+  const key = JSON.stringify([locale, options]);
+  const cached = numberFormatCache.get(key);
+  if (cached) return cached;
+  // react-doctor-disable-next-line react-doctor/js-hoist-intl -- Numeric helper formatters are cached by locale/options key.
+  const formatter = new Intl.NumberFormat(locale, options);
+  numberFormatCache.set(key, formatter);
+  return formatter;
+}
 
 function resolveFractionDigits(
   minimumFractionDigits: number | undefined,
@@ -53,7 +64,7 @@ export function formatInteger(
   if (typeof resolved === "string") {
     return resolved;
   }
-  return new Intl.NumberFormat(options.locale ?? DEFAULT_LOCALE, {
+  return numberFormat(options.locale ?? DEFAULT_LOCALE, {
     maximumFractionDigits: 0,
   }).format(resolved);
 }
@@ -66,7 +77,7 @@ export function formatDecimal(
   if (typeof resolved === "string") {
     return resolved;
   }
-  return new Intl.NumberFormat(options.locale ?? DEFAULT_LOCALE, {
+  return numberFormat(options.locale ?? DEFAULT_LOCALE, {
     ...resolveFractionDigits(
       options.minimumFractionDigits,
       options.maximumFractionDigits,
@@ -83,7 +94,7 @@ export function formatCompactNumber(
   if (typeof resolved === "string") {
     return resolved;
   }
-  return new Intl.NumberFormat(options.locale ?? DEFAULT_LOCALE, {
+  return numberFormat(options.locale ?? DEFAULT_LOCALE, {
     notation: "compact",
     compactDisplay: "short",
     ...resolveFractionDigits(
@@ -103,7 +114,7 @@ export function formatPercent(
     return resolved;
   }
   const ratioValue = options.input === "percent" ? resolved / 100 : resolved;
-  return new Intl.NumberFormat(options.locale ?? DEFAULT_LOCALE, {
+  return numberFormat(options.locale ?? DEFAULT_LOCALE, {
     style: "percent",
     ...resolveFractionDigits(
       options.minimumFractionDigits,

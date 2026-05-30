@@ -178,6 +178,7 @@ export default function AgentPreferencesPanel({
           {dirty && (
             <div className="agent-prefs__actions">
               <button
+                type="button"
                 className="btn btn--moss"
                 disabled={hardOver || save.isPending}
                 onClick={() => save.mutate(draft)}

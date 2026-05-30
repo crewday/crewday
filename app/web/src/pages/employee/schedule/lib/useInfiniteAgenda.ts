@@ -328,7 +328,7 @@ export function useInfiniteAgendaCore<Page, Merged, Cell extends { iso: string }
       return;
     }
     node.scrollIntoView({ block: "start", behavior: "instant" as ScrollBehavior });
-  }, [cells, todayIso, scrollRoot]);
+  }, [cells, dataSelector, scrollRoot, todayIso]);
 
   // End the settle window 200ms after all initial fetches have
   // calmed down. Past that point auto-anchoring stops and the

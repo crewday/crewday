@@ -74,9 +74,10 @@ export default function AgentSidebar({ agentRole: role }: AgentSidebarProps) {
     queryFn: async (): Promise<AgentAction[]> => {
       if (isAdmin) return fetchJson<AgentAction[]>(actionsUrl);
       const approvals = await fetchApprovals();
-      return approvals
-        .filter((approval) => approval.inline_channel === "web_owner_sidebar")
-        .map((approval) => ({
+      const sidebarApprovals: AgentAction[] = [];
+      for (const approval of approvals) {
+        if (approval.inline_channel !== "web_owner_sidebar") continue;
+        sidebarApprovals.push({
           id: approval.id,
           title: approval.action,
           detail: approval.reason,
@@ -85,7 +86,9 @@ export default function AgentSidebar({ agentRole: role }: AgentSidebarProps) {
           card_fields: approval.card_fields,
           gate_source: approval.gate_source,
           inline_channel: "web_owner_sidebar",
-        }));
+        });
+      }
+      return sidebarApprovals;
     },
     enabled: showActions,
   });
@@ -294,10 +297,11 @@ function buildAgentPageHeader(
   params: Record<string, string | undefined>,
   role: Role,
 ): string {
-  const kv = Object.entries(params)
-    .filter(([, v]) => v)
-    .map(([k, v]) => `${k}=${v}`)
-    .join(",");
+  const kvParts: string[] = [];
+  for (const [key, value] of Object.entries(params)) {
+    if (value) kvParts.push(`${key}=${value}`);
+  }
+  const kv = kvParts.join(",");
   const pieces: string[] = [];
   pieces.push(`route=${pathname}`);
   if (kv) pieces.push(`params=${kv}`);

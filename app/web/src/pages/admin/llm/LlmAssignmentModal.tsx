@@ -118,12 +118,11 @@ function sortedParentOptions(
       (childCounts.get(edge.inherits_from) ?? 0) + 1,
     );
   }
-  return [
-    ...graph.capabilities.filter(
-      (cap) =>
-        cap.key !== capabilityKey && !indexes.inheritanceByChild.has(cap.key),
-    ),
-  ].sort((left, right) => {
+  const available = graph.capabilities.filter(
+    (cap) =>
+      cap.key !== capabilityKey && !indexes.inheritanceByChild.has(cap.key),
+  );
+  return available.sort((left, right) => {
     const countDiff =
       (childCounts.get(right.key) ?? 0) - (childCounts.get(left.key) ?? 0);
     return countDiff || left.key.localeCompare(right.key);
@@ -416,12 +415,11 @@ export default function LlmAssignmentModal({
   const selectedProviderModelIds = new Set(
     chain.map((assignment) => assignment.provider_model_id),
   );
-  const availableProviderModels = [
-    ...graph.provider_models.filter(
-      (pm) =>
-        providerModelIsAvailable(pm, indexes) && !selectedProviderModelIds.has(pm.id),
-    ),
-  ].sort((left, right) =>
+  const availableProviderModels = graph.provider_models.filter(
+    (pm) =>
+      providerModelIsAvailable(pm, indexes) && !selectedProviderModelIds.has(pm.id),
+  );
+  availableProviderModels.sort((left, right) =>
     compareAvailableProviderModels(
       left,
       right,

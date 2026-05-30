@@ -74,7 +74,7 @@ export function todayQueryParams(me: Me): URLSearchParams {
 }
 
 export function groupToday(tasks: Task[], nowIso: string): TodayPayload {
-  const sorted = [...tasks].sort((a, b) => a.scheduled_start.localeCompare(b.scheduled_start));
+  const sorted = tasks.slice().sort((a, b) => a.scheduled_start.localeCompare(b.scheduled_start));
   const completed = sorted.filter((task) => task.status === "completed");
   const active = sorted.filter((task) => !isTerminalStatus(task.status));
   const nowMs = new Date(nowIso).getTime();
@@ -130,15 +130,16 @@ export function normalizeTask(task: ApiTask, fallbackIso = new Date().toISOStrin
 }
 
 function normalizeChecklist(items: ApiChecklistItem[] | undefined): Task["checklist"] {
-  return (items ?? [])
-    .map((item) => ({
+  return (items ?? []).flatMap((item) => {
+    const normalized = {
       label: item.label ?? item.text ?? "",
       done: item.done ?? item.checked ?? false,
       guest_visible: item.guest_visible,
       key: item.key,
       required: item.required,
-    }))
-    .filter((item) => item.label);
+    };
+    return normalized.label ? [normalized] : [];
+  });
 }
 
 function scheduledStart(task: ApiTask, fallbackIso: string): string {

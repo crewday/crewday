@@ -154,7 +154,7 @@ export default function GroupsTab() {
                             {selectedIsDerived ? (
                               <span className="muted">read-only</span>
                             ) : (
-                              <button className="btn btn--ghost btn--sm">
+                              <button type="button" className="btn btn--ghost btn--sm">
                                 <Trash2 size={13} strokeWidth={2} /> Remove
                               </button>
                             )}
@@ -173,7 +173,7 @@ export default function GroupsTab() {
                 </table>
                 {selectedIsDerived ? null : (
                   <div className="panel__footer">
-                    <button className="btn btn--moss btn--sm">
+                    <button type="button" className="btn btn--moss btn--sm">
                       <UserPlus size={13} strokeWidth={2} /> Add member
                     </button>
                   </div>

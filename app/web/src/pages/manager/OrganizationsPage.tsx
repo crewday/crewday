@@ -161,7 +161,7 @@ export default function OrganizationsPage() {
     queryFn: fetchWorkRoles,
   });
   const usersById = useMemo(() => new Map<string, User>(), []);
-  const orgs = orgsQ.data ?? [];
+  const orgs = useMemo(() => orgsQ.data ?? [], [orgsQ.data]);
   const visibleOrgs = useMemo(() => orgs, [orgs]);
   const selectedOid = activeOid ?? visibleOrgs[0]?.id ?? null;
   const createButton = (
@@ -576,8 +576,8 @@ function OrganizationDetail({
           <p className="muted">No contacts on file.</p>
         ) : (
           <ul className="org-contacts">
-            {o.contacts.map((c, i) => (
-              <li key={i}>
+            {o.contacts.map((c) => (
+              <li key={`${c.name}-${c.role}-${c.email}-${c.phone_e164}`}>
                 <strong>{c.name}</strong>
                 <span className="muted"> · {c.role}</span>
                 <div className="muted mono">{c.email} · {c.phone_e164}</div>
@@ -694,17 +694,17 @@ function OrganizationDetail({
                   <td><DateTime value={v.billed_at} showTime className="table__mono" /></td>
                 </tr>
               ))}
-              {detail.vendor_invoices_billed_from
-                .filter((v) => !detail.vendor_invoices_billed_to.includes(v))
-                .map((v) => (
+              {detail.vendor_invoices_billed_from.flatMap((v) =>
+                detail.vendor_invoices_billed_to.includes(v) ? [] : [
                   <tr key={v.id}>
                     <td>{v.id}</td>
                     <td><Chip size="sm" tone="moss">they owe</Chip></td>
                     <td className="table__mono">{formatMoney(v.total_cents, v.currency)}</td>
                     <td><Chip size="sm" tone={v.status === "paid" ? "moss" : "ghost"}>{v.status}</Chip></td>
                     <td><DateTime value={v.billed_at} showTime className="table__mono" /></td>
-                  </tr>
-                ))}
+                  </tr>,
+                ],
+              )}
             </tbody>
           </table>
         )}

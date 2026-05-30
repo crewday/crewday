@@ -1,4 +1,4 @@
-import { createContext, use, type ReactNode } from "react";
+import { createContext, use, useMemo, type ReactNode } from "react";
 
 // Shared "is there a drawer, and how do I toggle it" handle that the
 // page header reads to decide whether to render a hamburger in its
@@ -22,8 +22,13 @@ interface ProviderProps extends ShellNavCtxValue {
 }
 
 export function ShellNavProvider({ hasDrawer, isOpen, toggle, children }: ProviderProps) {
+  const value = useMemo(
+    () => ({ hasDrawer, isOpen, toggle }),
+    [hasDrawer, isOpen, toggle],
+  );
+
   return (
-    <Ctx.Provider value={{ hasDrawer, isOpen, toggle }}>{children}</Ctx.Provider>
+    <Ctx.Provider value={value}>{children}</Ctx.Provider>
   );
 }
 

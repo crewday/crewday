@@ -49,8 +49,8 @@
 
 import { FRONTEND_ROUTES } from "./_manifest";
 
-export const AUTHENTICATED_ROUTES: readonly string[] = FRONTEND_ROUTES.filter(
-  (route) => route.authenticatedSurface,
-).map((route) => route.template);
+export const AUTHENTICATED_ROUTES: readonly string[] = FRONTEND_ROUTES.flatMap((route) =>
+  route.authenticatedSurface ? [route.template] : [],
+);
 
 export type AuthenticatedRoute = (typeof AUTHENTICATED_ROUTES)[number];

@@ -187,6 +187,7 @@ function QrSheetButton({
   const suffix = params.toString() ? "?" + params.toString() : "";
   return (
     <button
+      type="button"
       className="btn"
       onClick={() =>
         window.open(
@@ -315,9 +316,11 @@ function NewAssetButton({
     onSuccess: async (asset) => {
       setFormError(null);
       setCreatedAssetAfterUploadFailure(null);
-      await queryClient.invalidateQueries({ queryKey: qk.assets() });
-      await queryClient.invalidateQueries({ queryKey: qk.documents() });
-      await queryClient.invalidateQueries({ queryKey: qk.asset(asset.id) });
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: qk.assets() }),
+        queryClient.invalidateQueries({ queryKey: qk.documents() }),
+        queryClient.invalidateQueries({ queryKey: qk.asset(asset.id) }),
+      ]);
       setDialogOpen(false);
     },
     onError: (error) => {
@@ -822,13 +825,17 @@ async function uploadQueuedAssetDocuments(
   asset: Asset,
   documents: QueuedAssetDocument[],
 ): Promise<AssetDocument[]> {
+  const results = await Promise.allSettled(
+    documents.map((doc) => uploadAssetDocument(asset.id, doc)),
+  );
   const uploaded: AssetDocument[] = [];
   const failedDocuments: QueuedAssetDocument[] = [];
-  for (const doc of documents) {
-    try {
-      uploaded.push(await uploadAssetDocument(asset.id, doc));
-    } catch {
-      failedDocuments.push(doc);
+  for (const [index, result] of results.entries()) {
+    if (result.status === "fulfilled") {
+      uploaded.push(result.value);
+    } else {
+      const failedDocument = documents[index];
+      if (failedDocument) failedDocuments.push(failedDocument);
     }
   }
   if (failedDocuments.length > 0) {

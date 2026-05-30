@@ -187,7 +187,12 @@ function scheduledStart(task: ApiTask): string {
 }
 
 function normalizeChecklist(items: ApiChecklistItem[] | undefined): ChecklistItemView[] {
-  return (items ?? []).map(normalizeChecklistItem).filter((item) => item.label);
+  const normalized: ChecklistItemView[] = [];
+  for (const item of items ?? []) {
+    const view = normalizeChecklistItem(item);
+    if (view.label) normalized.push(view);
+  }
+  return normalized;
 }
 
 function normalizeChecklistItem(item: ApiChecklistItem): ChecklistItemView {

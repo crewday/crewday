@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { type FormEvent, useMemo } from "react";
+import { type FormEvent, useMemo, useState } from "react";
 import { Link, useLocation } from "react-router-dom";
 import { ApiError, fetchJson } from "@/lib/api";
 import { fetchAllList } from "@/lib/fetchAllList";
@@ -77,6 +77,7 @@ const EMPTY_WORK_ROLE_FORM: WorkRoleFormState = {
   icon_name: "",
 };
 const CREATE_WORK_ROLE_ROW_ID = "__new_work_role__";
+const INVITE_EMPLOYEE_ACTION = <InviteEmployeeAction />;
 
 function workRoleInitials(name: string): string {
   const initials = name
@@ -90,6 +91,8 @@ function workRoleInitials(name: string): string {
 }
 
 export default function EmployeesPage() {
+  const [nowMs] = useState(() => Date.now());
+
   const { pathname } = useLocation();
   const empsQ = useQuery({
     queryKey: qk.employees(),
@@ -103,7 +106,7 @@ export default function EmployeesPage() {
     queryKey: qk.bookings(),
     queryFn: () => fetchJson<Booking[]>("/api/v1/bookings"),
   });
-  const inviteAction = <InviteEmployeeAction />;
+  const inviteAction = INVITE_EMPLOYEE_ACTION;
 
   if (empsQ.isPending || propsQ.isPending) {
     return (
@@ -165,13 +168,12 @@ export default function EmployeesPage() {
                 <td className="table__mono">{e.phone}</td>
                 <td>
                   {(() => {
-                    const now = Date.now();
                     const active = bookingsQ.data?.find(
                       (b) =>
                         b.employee_id === e.id &&
                         b.status === "scheduled" &&
-                        new Date(b.scheduled_start).getTime() <= now &&
-                        new Date(b.scheduled_end).getTime() >= now,
+                        new Date(b.scheduled_start).getTime() <= nowMs &&
+                        new Date(b.scheduled_end).getTime() >= nowMs,
                     );
                     return active ? (
                       <Chip tone="moss" size="sm">
@@ -242,7 +244,7 @@ function WorkRoleCatalogManager() {
     ...current,
     rowErrors: typeof update === "function" ? update(current.rowErrors) : update,
   }));
-  const roles = rolesQ.data ?? [];
+  const roles = useMemo(() => rolesQ.data ?? [], [rolesQ.data]);
   const rolesById = useMemo(() => new Map(roles.map((role) => [role.id, role])), [roles]);
 
   const saveRole = useMutation({
@@ -259,8 +261,8 @@ function WorkRoleCatalogManager() {
         body: { ...payload, default_settings_json: {} },
       });
     },
-    onSuccess: async (_role, variables) => {
-      await Promise.all([
+    onSuccess: (_role, variables) => {
+      void Promise.all([
         queryClient.invalidateQueries({ queryKey: qk.workRoles() }),
         queryClient.invalidateQueries({ queryKey: qk.employees() }),
         queryClient.invalidateQueries({

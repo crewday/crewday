@@ -52,6 +52,7 @@ async function fetchUsersIndexRows(): Promise<UserIndexRow[]> {
       cursor === null
         ? "/api/v1/users?limit=500"
         : `/api/v1/users?limit=500&cursor=${encodeURIComponent(cursor)}`;
+    // react-doctor-disable-next-line react-doctor/async-await-in-loop -- User index cursors are response-dependent pagination state.
     const page: ListEnvelope<UserIndexRow> = await fetchJson(path);
     rows.push(...page.data);
     if (!page.has_more || page.next_cursor === null) return rows;

@@ -206,6 +206,7 @@ export default function AdminSettingsPage() {
         const parsed = parsedDraft(row);
         if (parsed.ok) {
           try {
+            // react-doctor-disable-next-line react-doctor/async-await-in-loop -- Saves stop at the first failure so unattempted drafts remain editable.
             await update.mutateAsync({ key: row.key, value: parsed.value });
           } finally {
             clearedKeys.add(row.key);

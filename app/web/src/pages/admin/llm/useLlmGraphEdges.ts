@@ -125,8 +125,9 @@ export function useLlmGraphEdges(
     window.addEventListener("resize", onWinResize);
     window.addEventListener("scroll", onScroll, true);
     requestRecompute();
+    const pendingFrame = frameRef.current;
     return () => {
-      if (frameRef.current !== null) window.cancelAnimationFrame(frameRef.current);
+      if (pendingFrame !== null) window.cancelAnimationFrame(pendingFrame);
       ro.disconnect();
       window.removeEventListener("resize", onWinResize);
       window.removeEventListener("scroll", onScroll, true);

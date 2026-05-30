@@ -168,11 +168,13 @@ function bookingScale(
 ): number {
   const bookingStart = isoToMinOfDay(booking.scheduled_start);
   const bookingEnd = isoToMinOfDay(booking.scheduled_end);
-  const starts = tasks
-    .filter((task) => task.property_id === booking.property_id)
-    .map((task) => isoToMinOfDay(task.scheduled_start))
-    .filter((start) => start >= bookingStart && start < bookingEnd)
-    .sort((a, b) => a - b);
+  const starts: number[] = [];
+  for (const task of tasks) {
+    if (task.property_id !== booking.property_id) continue;
+    const start = isoToMinOfDay(task.scheduled_start);
+    if (start >= bookingStart && start < bookingEnd) starts.push(start);
+  }
+  starts.sort((a, b) => a - b);
   if (starts.length === 0) return 0.5;
   return (TASK_CHIP_MIN_PX + TASK_CHIP_GAP_PX) / smallestGap(starts, bookingStart);
 }
