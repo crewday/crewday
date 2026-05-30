@@ -8,6 +8,7 @@ export function panelIdFor(tab: PropertyTab): string {
 export const PROPERTY_TABS = [
   { key: "overview", label: "Overview", panelId: panelIdFor("overview") },
   { key: "areas", label: "Areas", panelId: panelIdFor("areas") },
+  { key: "documents", label: "Documents", panelId: panelIdFor("documents") },
   { key: "sharing", label: "Sharing & client", panelId: panelIdFor("sharing") },
   { key: "settings", label: "Settings", panelId: panelIdFor("settings") },
 ] satisfies Array<PageTab & { key: PropertyTab }>;

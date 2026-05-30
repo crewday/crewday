@@ -8,6 +8,7 @@ import { workspaceRouteForPathname } from "@/lib/workspaceRoutes";
 import DeskPage from "@/components/DeskPage";
 import { EmptyState, FilterChipGroup, Loading } from "@/components/common";
 import DocumentLibraryTable from "./documents/DocumentLibrary";
+import { fetchDocumentList } from "./documents/DocumentLibrary.lib";
 import type {
   Asset,
   AssetDocument,
@@ -35,7 +36,7 @@ export default function DocumentsPage() {
 
   const docsQ = useQuery({
     queryKey: qk.documents(),
-    queryFn: () => fetchList<AssetDocument>("/api/v1/documents"),
+    queryFn: () => fetchDocumentList("/api/v1/documents"),
   });
   const assetsQ = useQuery({
     queryKey: qk.assets(),

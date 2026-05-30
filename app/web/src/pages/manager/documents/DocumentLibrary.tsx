@@ -1,6 +1,7 @@
-import { useState } from "react";
+import { useId, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import DateTime from "@/components/DateTime";
+import FileDropZone from "@/components/FileDropZone";
 import { Chip, Loading } from "@/components/common";
 import { fetchJson } from "@/lib/api";
 import { formatDecimal, formatInteger } from "@/lib/numberFormat";
@@ -9,6 +10,7 @@ import type {
   AssetDocument,
   DocumentExtraction,
   DocumentExtractionPage,
+  DocumentKind,
   FileExtractionStatus,
   PropertyColor,
 } from "@/types/api";
@@ -32,6 +34,32 @@ interface DocumentLibraryTableProps {
   showProperty?: boolean;
   showAmount?: boolean;
 }
+
+interface DocumentUploadStripProps {
+  scope: { kind: "asset" | "property"; id: string };
+  onUploaded?: (documents: AssetDocument[]) => void;
+}
+
+interface QueuedDocument {
+  id: string;
+  file: File;
+  kind: DocumentKind;
+  title: string;
+  notes: string;
+}
+
+const DOCUMENT_KIND_OPTIONS: { value: DocumentKind; label: string }[] = [
+  { value: "manual", label: "Manual" },
+  { value: "warranty", label: "Warranty" },
+  { value: "invoice", label: "Invoice" },
+  { value: "receipt", label: "Receipt" },
+  { value: "photo", label: "Photo" },
+  { value: "certificate", label: "Certificate" },
+  { value: "contract", label: "Contract" },
+  { value: "permit", label: "Permit" },
+  { value: "insurance", label: "Insurance" },
+  { value: "other", label: "Other" },
+];
 
 const WARN_CUTOFF = "2026-05-15";
 
@@ -72,6 +100,39 @@ function fmtNumber(n: number | null | undefined): string {
 
 function fmtExtractor(extractor: DocumentExtraction["extractor"]): string {
   return extractor ? extractor.replace("_", " ") : "\u2014";
+}
+
+function defaultDocumentTitle(file: File): string {
+  return file.name.replace(/\.[^.]+$/, "").trim() || file.name;
+}
+
+function scopePath(scope: DocumentUploadStripProps["scope"]): string {
+  if (scope.kind === "property") return `/api/v1/properties/${scope.id}/documents`;
+  return `/api/v1/assets/${scope.id}/documents`;
+}
+
+function scopeInvalidationKey(scope: DocumentUploadStripProps["scope"]) {
+  if (scope.kind === "property") return qk.propertyDocuments(scope.id);
+  return qk.asset(scope.id);
+}
+
+function uploadScopedDocument(
+  scope: DocumentUploadStripProps["scope"],
+  file: File,
+  kind: DocumentKind,
+  title: string,
+  notes: string,
+): Promise<AssetDocument> {
+  const body = new FormData();
+  body.append("category", kind);
+  body.append("title", title.trim() || defaultDocumentTitle(file));
+  body.append("notes_md", notes.trim());
+  body.append("file", file);
+  return fetchJson<AssetDocument>(scopePath(scope), { method: "POST", body });
+}
+
+function queuedDocumentId(file: File, index: number): string {
+  return `${file.name}-${file.size}-${file.lastModified}-${index}-${Math.random().toString(36).slice(2)}`;
 }
 
 function DocumentTextDisclosure({ documentId }: { documentId: string }) {
@@ -133,6 +194,9 @@ function ExtractionDisclosure({ doc }: { doc: AssetDocument }) {
       queryClient.invalidateQueries({ queryKey: qk.documents(), refetchType: "active" });
       queryClient.invalidateQueries({ queryKey: qk.documentExtraction(doc.id), refetchType: "active" });
       queryClient.invalidateQueries({ queryKey: qk.documentExtractionPages(doc.id), refetchType: "active" });
+      if (doc.property_id) {
+        queryClient.invalidateQueries({ queryKey: qk.propertyDocuments(doc.property_id), refetchType: "active" });
+      }
       if (doc.asset_id) {
         queryClient.invalidateQueries({ queryKey: qk.asset(doc.asset_id), refetchType: "active" });
       }
@@ -198,6 +262,169 @@ function ExtractionDisclosure({ doc }: { doc: AssetDocument }) {
         )}
       </div>
     </details>
+  );
+}
+
+export function DocumentUploadStrip({ scope, onUploaded }: DocumentUploadStripProps) {
+  const queryClient = useQueryClient();
+  const kindId = useId();
+  const titleId = useId();
+  const notesId = useId();
+  const [kind, setKind] = useState<DocumentKind>("permit");
+  const [title, setTitle] = useState("");
+  const [notes, setNotes] = useState("");
+  const [queued, setQueued] = useState<QueuedDocument[]>([]);
+  const upload = useMutation({
+    mutationFn: async (row: QueuedDocument) =>
+      uploadScopedDocument(scope, row.file, row.kind, row.title, row.notes),
+    onSuccess: async (document, row) => {
+      setQueued((current) => current.filter((item) => item.id !== row.id));
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: qk.documents() }),
+        queryClient.invalidateQueries({ queryKey: scopeInvalidationKey(scope) }),
+      ]);
+      onUploaded?.([document]);
+    },
+  });
+
+  function queueFiles(files: File[]): void {
+    setQueued((current) => [
+      ...current,
+      ...files.map((file, index) => ({
+        id: queuedDocumentId(file, index),
+        file,
+        kind,
+        title: title.trim() || defaultDocumentTitle(file),
+        notes,
+      })),
+    ]);
+    setTitle("");
+    setNotes("");
+  }
+
+  function updateQueued(id: string, patch: Partial<Pick<QueuedDocument, "kind" | "title" | "notes">>): void {
+    setQueued((current) => current.map((row) => (row.id === id ? { ...row, ...patch } : row)));
+  }
+
+  function removeQueued(id: string): void {
+    setQueued((current) => current.filter((row) => row.id !== id));
+  }
+
+  return (
+    <section className="document-upload" aria-label="Upload document">
+      <div className="document-upload__fields">
+        <label htmlFor={kindId}>
+          <span>Kind</span>
+          <select
+            id={kindId}
+            value={kind}
+            onChange={(event) => setKind(event.target.value as DocumentKind)}
+            disabled={upload.isPending}
+          >
+            {DOCUMENT_KIND_OPTIONS.map((option) => (
+              <option key={option.value} value={option.value}>{option.label}</option>
+            ))}
+          </select>
+        </label>
+        <label htmlFor={titleId}>
+          <span>Title</span>
+          <input
+            id={titleId}
+            type="text"
+            aria-label="Document title"
+            value={title}
+            onChange={(event) => setTitle(event.target.value)}
+            placeholder="Use filename"
+            disabled={upload.isPending}
+          />
+        </label>
+        <label htmlFor={notesId}>
+          <span>Notes</span>
+          <input
+            id={notesId}
+            type="text"
+            aria-label="Document notes"
+            value={notes}
+            onChange={(event) => setNotes(event.target.value)}
+            placeholder="Optional"
+            disabled={upload.isPending}
+          />
+        </label>
+      </div>
+      <FileDropZone
+        title="Stage document"
+        description="Choose a file, review its row, then upload it."
+        inputLabel={scope.kind === "property" ? "Upload property document" : "Upload asset document"}
+        disabled={upload.isPending}
+        onFiles={queueFiles}
+      />
+      {queued.length > 0 ? (
+        <div className="document-upload__queue" aria-label="Queued documents">
+          {queued.map((row) => (
+            <div key={row.id} className="document-upload__row">
+              <span className="document-upload__file">
+                <strong>{row.file.name}</strong>
+                <span className="muted">{Math.max(1, Math.round(row.file.size / 1024))} KB</span>
+              </span>
+              <label>
+                <span>Kind</span>
+                <select
+                  aria-label={`Kind for ${row.file.name}`}
+                  value={row.kind}
+                  disabled={upload.isPending}
+                  onChange={(event) => updateQueued(row.id, { kind: event.target.value as DocumentKind })}
+                >
+                  {DOCUMENT_KIND_OPTIONS.map((option) => (
+                    <option key={option.value} value={option.value}>{option.label}</option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                <span>Title</span>
+                <input
+                  type="text"
+                  aria-label={`Title for ${row.file.name}`}
+                  value={row.title}
+                  disabled={upload.isPending}
+                  onChange={(event) => updateQueued(row.id, { title: event.target.value })}
+                />
+              </label>
+              <label>
+                <span>Notes</span>
+                <input
+                  type="text"
+                  aria-label={`Notes for ${row.file.name}`}
+                  value={row.notes}
+                  disabled={upload.isPending}
+                  onChange={(event) => updateQueued(row.id, { notes: event.target.value })}
+                />
+              </label>
+              <button
+                className="btn btn--sm btn--moss"
+                type="button"
+                disabled={upload.isPending}
+                onClick={() => upload.mutate(row)}
+              >
+                {upload.isPending ? "Uploading\u2026" : "Upload"}
+              </button>
+              <button
+                className="btn btn--sm btn--ghost"
+                type="button"
+                disabled={upload.isPending}
+                onClick={() => removeQueued(row.id)}
+              >
+                Remove
+              </button>
+            </div>
+          ))}
+        </div>
+      ) : null}
+      {upload.isError ? (
+        <p className="form-error" role="alert">
+          {upload.error instanceof Error ? upload.error.message : "Document upload failed."}
+        </p>
+      ) : null}
+    </section>
   );
 }
 

@@ -12,6 +12,7 @@ import { jsonResponse } from "@/test/helpers";
 import PropertyDetailPage from "./PropertyDetailPage";
 import PropertyTabs from "./property/PropertyTabs";
 import { type PropertyRelatedPage } from "./property/PropertyTabs.lib";
+import type { AssetDocument } from "@/types/api";
 
 interface RequestRecord {
   url: string;
@@ -65,6 +66,7 @@ interface TestProperty {
 
 interface InstallFetchOptions {
   emptyOverview?: boolean;
+  denyPropertyDocuments?: boolean;
   failAreaPost?: boolean;
   failAreasList?: boolean;
   failPropertyPatch?: boolean;
@@ -86,6 +88,7 @@ interface InstallFetchOptions {
 
 function parseBody(init?: RequestInit): unknown {
   // code-health: ignore[nloc] Lizard misattributes the property-detail fetch fixture to this tiny body parser.
+  if (init?.body instanceof FormData) return init.body;
   if (typeof init?.body !== "string") return null;
   return JSON.parse(init.body);
 }
@@ -146,6 +149,23 @@ function installFetch(options: InstallFetchOptions = {}) {
       created_at: "2026-04-29T00:00:00Z",
       updated_at: null,
       deleted_at: null,
+    },
+  ];
+  let propertyDocuments: AssetDocument[] = [
+    {
+      id: "doc_1",
+      asset_id: null,
+      property_id: "prop_1",
+      kind: "permit",
+      title: "Pool permit",
+      filename: "pool-permit.pdf",
+      size_kb: 24,
+      uploaded_at: "2026-04-29T10:00:00Z",
+      expires_on: null,
+      amount_cents: null,
+      amount_currency: null,
+      extraction_status: "succeeded",
+      extracted_at: "2026-04-29T10:05:00Z",
     },
   ];
   const calls: RequestRecord[] = [];
@@ -281,6 +301,61 @@ function installFetch(options: InstallFetchOptions = {}) {
         return jsonResponse(next, 201);
       }
       return jsonResponse({ data: areas, next_cursor: null, has_more: false });
+    }
+    if (resolved === "/w/acme/api/v1/properties/prop_1/documents") {
+      if (options.denyPropertyDocuments) {
+        return jsonResponse({ title: "Forbidden", detail: "Forbidden" }, 403);
+      }
+      if (method === "POST") {
+        const form = body as FormData;
+        const file = form.get("file");
+        const uploaded: AssetDocument = {
+          id: "doc_" + String(propertyDocuments.length + 1),
+          asset_id: null,
+          property_id: "prop_1",
+          kind: form.get("category") as AssetDocument["kind"],
+          title: String(form.get("title") ?? "Untitled"),
+          filename: file instanceof File ? file.name : "upload.bin",
+          size_kb: file instanceof File ? Math.max(1, Math.round(file.size / 1024)) : 0,
+          uploaded_at: "2026-05-05T10:00:00Z",
+          expires_on: null,
+          amount_cents: null,
+          amount_currency: null,
+          extraction_status: "pending",
+          extracted_at: null,
+        };
+        propertyDocuments = [...propertyDocuments, uploaded];
+        return jsonResponse(uploaded, 201);
+      }
+      return jsonResponse({ data: propertyDocuments, next_cursor: null, has_more: false });
+    }
+    if (resolved === "/w/acme/api/v1/properties/prop_2/documents") {
+      return jsonResponse({ data: [], next_cursor: null, has_more: false });
+    }
+    if (resolved === "/w/acme/api/v1/documents/doc_1/extraction" && method === "GET") {
+      return jsonResponse({
+        document_id: "doc_1",
+        status: "succeeded",
+        extractor: "pypdf",
+        body_preview: "Pool permit text",
+        page_count: 2,
+        token_count: 450,
+        has_secret_marker: false,
+        last_error: null,
+        extracted_at: "2026-04-29T10:05:00Z",
+      });
+    }
+    if (resolved === "/w/acme/api/v1/documents/doc_1/extraction/pages/1" && method === "GET") {
+      return jsonResponse({
+        page: 1,
+        char_start: 0,
+        char_end: 20,
+        body: "Pool permit notes.",
+        more_pages: false,
+      });
+    }
+    if (resolved === "/w/acme/api/v1/documents/doc_1/extraction/retry" && method === "POST") {
+      return jsonResponse(null);
     }
     if (resolved.startsWith("/w/acme/api/v1/areas/")) {
       const areaId = resolved.split("/").at(-1) ?? "";
@@ -880,6 +955,7 @@ describe("<PropertyDetailPage>", () => {
       const tablist = screen.getByRole("tablist", { name: "Property sections" });
       expect(tablist).toHaveClass("page-tabs");
       expect(within(tablist).queryByRole("tab", { name: "Assets" })).not.toBeInTheDocument();
+      expect(within(tablist).getByRole("tab", { name: "Documents" })).toBeInTheDocument();
       fireEvent.click(screen.getByRole("tab", { name: "Sharing & client" }));
       expect(window.location.hash).toBe("#sharing");
       expect(await screen.findByText("Billing client")).toBeInTheDocument();
@@ -982,20 +1058,98 @@ describe("<PropertyDetailPage>", () => {
       expect(window.location.hash).toBe("#settings");
       expect(await screen.findByText("Settings overrides")).toBeInTheDocument();
 
+      fireEvent.click(screen.getByRole("tab", { name: "Documents" }));
+      expect(window.location.hash).toBe("#documents");
+      expect(await screen.findByText("Pool permit")).toBeInTheDocument();
+
+      window.history.back();
+      await waitFor(() => expect(window.location.hash).toBe("#settings"));
+      expect(screen.getByRole("tab", { name: "Settings" })).toHaveAttribute("aria-selected", "true");
+
       window.history.back();
       await waitFor(() => expect(window.location.hash).toBe("#sharing"));
       expect(screen.getByRole("tab", { name: "Sharing & client" })).toHaveAttribute("aria-selected", "true");
-
-      window.history.back();
-      await waitFor(() => expect(window.location.hash).toBe("#assets"));
-      expect(screen.getByRole("tab", { name: "Overview" })).toHaveAttribute("aria-selected", "true");
 
       window.history.forward();
-      await waitFor(() => expect(window.location.hash).toBe("#sharing"));
-      expect(screen.getByRole("tab", { name: "Sharing & client" })).toHaveAttribute("aria-selected", "true");
+      await waitFor(() => expect(window.location.hash).toBe("#settings"));
+      expect(screen.getByRole("tab", { name: "Settings" })).toHaveAttribute("aria-selected", "true");
 
       expect(fake.calls.some((call) => call.url === "/w/acme/api/v1/settings")).toBe(true);
       expect(fake.calls.some((call) => call.url === "/w/acme/api/v1/settings/catalog")).toBe(true);
+    } finally {
+      fake.restore();
+    }
+  });
+
+  it("loads property documents from the hash-backed tab and uploads property-owned files", async () => {
+    const fake = installFetch();
+    try {
+      window.history.replaceState(null, "", "/w/acme/property/prop_1#documents");
+      const { container } = render(<Harness initial="/w/acme/property/prop_1#documents" />);
+
+      expect(await screen.findByRole("heading", { name: "Villa Rosa" })).toBeInTheDocument();
+      expect(screen.getByRole("tab", { name: "Documents" })).toHaveAttribute("aria-selected", "true");
+      expect(await screen.findByText("Pool permit")).toBeInTheDocument();
+      expect(screen.getByText("pool-permit.pdf")).toBeInTheDocument();
+      expect(screen.queryByText("Casa Azul insurance")).not.toBeInTheDocument();
+      expect(container.querySelector(".doc-thumb")).toBeNull();
+      expect(fake.calls).toContainEqual({
+        url: "/w/acme/api/v1/properties/prop_1/documents",
+        method: "GET",
+        body: null,
+      });
+
+      fireEvent.click(screen.getByText("indexed"));
+      expect(await screen.findByText("pypdf")).toBeInTheDocument();
+      fireEvent.click(screen.getByText("Extracted text"));
+      expect(await screen.findByText("Pool permit notes.")).toBeInTheDocument();
+      fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+      await waitFor(() => {
+        expect(
+          fake.calls.filter((call) => call.url === "/w/acme/api/v1/properties/prop_1/documents" && call.method === "GET"),
+        ).toHaveLength(2);
+      });
+
+      fireEvent.change(screen.getByLabelText("Kind"), { target: { value: "insurance" } });
+      fireEvent.change(screen.getByLabelText("Title"), { target: { value: "Umbrella insurance" } });
+      fireEvent.change(screen.getByLabelText("Document notes"), { target: { value: "Policy renewal" } });
+      const upload = new File(["policy"], "umbrella.pdf", { type: "application/pdf" });
+      fireEvent.change(screen.getByLabelText("Upload property document"), {
+        target: { files: [upload] },
+      });
+      expect(await screen.findByText("umbrella.pdf")).toBeInTheDocument();
+      expect(screen.getByLabelText("Kind for umbrella.pdf")).toHaveValue("insurance");
+      expect(screen.getByLabelText("Title for umbrella.pdf")).toHaveValue("Umbrella insurance");
+      expect(screen.getByLabelText("Notes for umbrella.pdf")).toHaveValue("Policy renewal");
+      fireEvent.click(screen.getByRole("button", { name: "Upload" }));
+
+      await screen.findByText("Umbrella insurance");
+      const post = fake.calls.find(
+        (call) => call.url === "/w/acme/api/v1/properties/prop_1/documents" && call.method === "POST",
+      );
+      expect(post?.body).toBeInstanceOf(FormData);
+      const form = post!.body as FormData;
+      expect(form.get("category")).toBe("insurance");
+      expect(form.get("title")).toBe("Umbrella insurance");
+      expect(form.get("notes_md")).toBe("Policy renewal");
+      expect(form.get("file")).toBe(upload);
+      expect(
+        fake.calls.filter((call) => call.url === "/w/acme/api/v1/properties/prop_1/documents" && call.method === "GET"),
+      ).toHaveLength(3);
+    } finally {
+      fake.restore();
+    }
+  });
+
+  it("uses the access denied pattern when property documents are not authorised", async () => {
+    const fake = installFetch({ denyPropertyDocuments: true });
+    try {
+      window.history.replaceState(null, "", "/w/acme/property/prop_1#documents");
+      render(<Harness initial="/w/acme/property/prop_1#documents" />);
+
+      expect(await screen.findByRole("heading", { name: "Villa Rosa" })).toBeInTheDocument();
+      expect(await screen.findByRole("alert")).toHaveTextContent("You do not have permission to open this page.");
+      expect(screen.queryByLabelText("Upload property document")).not.toBeInTheDocument();
     } finally {
       fake.restore();
     }

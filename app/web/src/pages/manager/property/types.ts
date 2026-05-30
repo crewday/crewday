@@ -61,4 +61,4 @@ export interface PropertyRecord {
   property_notes_md: string;
 }
 
-export type PropertyTab = "overview" | "areas" | "sharing" | "settings";
+export type PropertyTab = "overview" | "areas" | "documents" | "sharing" | "settings";

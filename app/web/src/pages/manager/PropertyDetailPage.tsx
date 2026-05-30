@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useLocation, useParams } from "react-router-dom";
-import { fetchJson } from "@/lib/api";
+import { ForbiddenPanel } from "@/auth/RequirePermission";
+import { ApiError, fetchJson } from "@/lib/api";
 import { qk } from "@/lib/queryKeys";
 import DeskPage from "@/components/DeskPage";
 import AgentPreferencesPanel from "@/components/AgentPreferencesPanel";
@@ -26,6 +27,8 @@ import SharingPanel from "./property/SharingPanel";
 import PropertyTabs from "./property/PropertyTabs";
 import { panelIdFor, PROPERTY_TABS } from "./property/PropertyTabs.lib";
 import { fetchPropertyDetail } from "./property/propertyDetailApi";
+import DocumentLibraryTable, { DocumentUploadStrip } from "./documents/DocumentLibrary";
+import { fetchDocumentList } from "./documents/DocumentLibrary.lib";
 import type { PropertyRecord, PropertyTab } from "./property/types";
 
 function tabFromHash(hash: string): PropertyTab {
@@ -158,6 +161,12 @@ export default function PropertyDetailPage() {
         </div>
       )}
 
+      {activeTab === "documents" && (
+        <div id={panelIdFor("documents")} role="tabpanel">
+          <PropertyDocumentsPanel propertyId={property.id} />
+        </div>
+      )}
+
       {activeTab === "settings" && (
         <div id={panelIdFor("settings")} role="tabpanel">
           {(settingsQ.isPending || catalogQ.isPending) ? (
@@ -201,5 +210,37 @@ export default function PropertyDetailPage() {
         />
       )}
     </DeskPage>
+  );
+}
+
+function PropertyDocumentsPanel({ propertyId }: { propertyId: string }) {
+  const docsQ = useQuery({
+    queryKey: qk.propertyDocuments(propertyId),
+    queryFn: () => fetchDocumentList(`/api/v1/properties/${propertyId}/documents`),
+  });
+
+  return (
+    <section className="panel">
+      <header className="panel__head"><h2>Documents</h2></header>
+      {docsQ.isPending ? (
+        <Loading />
+      ) : docsQ.error instanceof ApiError && docsQ.error.status === 403 ? (
+        <ForbiddenPanel detail="You do not have permission to open this page." />
+      ) : docsQ.isError ? (
+        <p className="muted">Failed to load documents.</p>
+      ) : !docsQ.data ? (
+        <p className="muted">Failed to load documents.</p>
+      ) : docsQ.data.length === 0 ? (
+        <>
+          <DocumentUploadStrip scope={{ kind: "property", id: propertyId }} />
+          <p className="muted">No documents attached.</p>
+        </>
+      ) : (
+        <>
+          <DocumentUploadStrip scope={{ kind: "property", id: propertyId }} />
+          <DocumentLibraryTable documents={docsQ.data} showAsset={false} showProperty={false} />
+        </>
+      )}
+    </section>
   );
 }

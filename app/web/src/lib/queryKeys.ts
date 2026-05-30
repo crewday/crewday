@@ -172,6 +172,7 @@ export const qk = {
   assets: () => [...ws(), "assets"] as const,
   asset: (aid: string) => [...ws(), "asset", aid] as const,
   documents: () => [...ws(), "documents"] as const,
+  propertyDocuments: (pid: string) => [...ws(), "property", pid, "documents"] as const,
   users: (workspaceId?: string) => [...ws(), "users", workspaceId ?? "all"] as const,
   workspaces: () => [...ws(), "workspaces"] as const,
   // `/api/v1/me/workspaces` switcher rows. Distinct slot from
