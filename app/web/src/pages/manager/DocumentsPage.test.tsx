@@ -143,6 +143,15 @@ function installFetch({ documents = DOCUMENTS }: { documents?: AssetDocument[] }
         more_pages: true,
       });
     }
+    if (resolved === "/w/acme/api/v1/documents/doc_1/extraction/pages/2") {
+      return jsonResponse({
+        page: 2,
+        char_start: 32,
+        char_end: 64,
+        body: "Second-page wiring notes.",
+        more_pages: false,
+      });
+    }
     if (resolved === "/w/acme/api/v1/documents/doc_1/extraction/retry" && method === "POST") {
       return jsonResponse(null, 202);
     }
@@ -196,13 +205,14 @@ describe("<DocumentsPage>", () => {
   it("renders the promoted mock table from production endpoints", async () => {
     const fake = installFetch();
     try {
-      render(<Harness />);
+      const { container } = render(<Harness />);
       expect(await screen.findByText("Pool pump manual")).toBeInTheDocument();
       expect(screen.getByText("Manuals, warranties, invoices, and permits across all properties.")).toBeInTheDocument();
       expect(screen.getByText("pump.pdf")).toBeInTheDocument();
       expect(screen.getByText("Pool pump")).toBeInTheDocument();
       expect(screen.getByText("01 May 2026")).toBeInTheDocument();
       expect(screen.getByText("129.00 EUR")).toBeInTheDocument();
+      expect(container.querySelector(".doc-thumb")).toBeNull();
       expect(fake.calls).not.toContain("/w/acme/api/v1/documents/doc_1/extraction");
 
       const warrantyFilter = screen.getAllByText("warranty")[0];
@@ -253,12 +263,21 @@ describe("<DocumentsPage>", () => {
       fireEvent.click(screen.getByText("Extracted text"));
       expect(await screen.findByText("Pump must be isolated before service.")).toBeInTheDocument();
 
+      fireEvent.click(screen.getByRole("button", { name: "Next" }));
+      expect(await screen.findByText("Second-page wiring notes.")).toBeInTheDocument();
+
+      const documentFetchesBeforeRetry = fake.calls.filter((call) => call === "/w/acme/api/v1/documents").length;
       fireEvent.click(screen.getByRole("button", { name: "Retry" }));
       await waitFor(() => {
         expect(fake.requests).toEqual(
           expect.arrayContaining([
             { url: "/w/acme/api/v1/documents/doc_1/extraction/retry", method: "POST" },
           ]),
+        );
+      });
+      await waitFor(() => {
+        expect(fake.calls.filter((call) => call === "/w/acme/api/v1/documents")).toHaveLength(
+          documentFetchesBeforeRetry + 1,
         );
       });
     } finally {

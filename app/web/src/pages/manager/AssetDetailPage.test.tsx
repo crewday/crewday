@@ -143,6 +143,40 @@ function installFetch({ failDetail = false } = {}) {
     if (resolved === "/w/acme/api/v1/assets/asset_1/actions/act_filter/complete" && method === "POST") {
       return jsonResponse({ ...ACTION, last_performed_at: "2026-04-30T10:00:00Z" }, 201);
     }
+    if (resolved === "/w/acme/api/v1/documents/doc_1/extraction" && method === "GET") {
+      return jsonResponse({
+        document_id: "doc_1",
+        status: "succeeded",
+        extractor: "pypdf",
+        body_preview: "Page one text",
+        page_count: 2,
+        token_count: 1234,
+        has_secret_marker: true,
+        last_error: null,
+        extracted_at: "2026-04-29T10:05:00Z",
+      });
+    }
+    if (resolved === "/w/acme/api/v1/documents/doc_1/extraction/pages/1" && method === "GET") {
+      return jsonResponse({
+        page: 1,
+        char_start: 0,
+        char_end: 32,
+        body: "Pump must be isolated before service.",
+        more_pages: true,
+      });
+    }
+    if (resolved === "/w/acme/api/v1/documents/doc_1/extraction/pages/2" && method === "GET") {
+      return jsonResponse({
+        page: 2,
+        char_start: 32,
+        char_end: 64,
+        body: "Second-page wiring notes.",
+        more_pages: false,
+      });
+    }
+    if (resolved === "/w/acme/api/v1/documents/doc_1/extraction/retry" && method === "POST") {
+      return jsonResponse(null, 202);
+    }
     throw new Error(`Unexpected fetch call: ${resolved}`);
   });
   (globalThis as { fetch: typeof fetch }).fetch = spy as unknown as typeof fetch;
@@ -197,7 +231,7 @@ describe("<AssetDetailPage>", () => {
   it("renders the promoted mock structure from the production asset endpoint", async () => {
     const fake = installFetch();
     try {
-      render(<Harness initial="/w/acme/asset/asset_1" />);
+      const { container } = render(<Harness initial="/w/acme/asset/asset_1" />);
 
       expect(screen.getByText(/Loading/)).toBeInTheDocument();
       expect(await screen.findByText("Villa Rosa / Pump room")).toBeInTheDocument();
@@ -216,7 +250,10 @@ describe("<AssetDetailPage>", () => {
       fireEvent.click(within(tablist).getByRole("tab", { name: "Documents" }));
       expect(window.location.hash).toBe("#documents");
       expect(screen.getByText("Pump manual")).toBeInTheDocument();
+      expect(screen.getByText("pump.pdf")).toBeInTheDocument();
       expect(screen.getByText("418 KB")).toBeInTheDocument();
+      expect(screen.getByText("indexed")).toBeInTheDocument();
+      expect(container.querySelector(".doc-thumb")).toBeNull();
 
       fireEvent.click(within(tablist).getByRole("tab", { name: "History" }));
       expect(window.location.hash).toBe("#history");
@@ -287,6 +324,48 @@ describe("<AssetDetailPage>", () => {
         expect(within(tablist).getByRole("tab", { name: "Documents" })).toHaveAttribute("aria-selected", "true");
       });
       expect(screen.getByText("Pump manual")).toBeInTheDocument();
+    } finally {
+      fake.restore();
+    }
+  });
+
+  it("loads asset document extraction metadata and text through the shared document row", async () => {
+    const fake = installFetch();
+    try {
+      window.history.replaceState(null, "", "/w/acme/asset/asset_1#documents");
+      render(<Harness initial="/w/acme/asset/asset_1" />);
+      expect(await screen.findByText("Pump manual")).toBeInTheDocument();
+      expect(fake.requests).not.toContainEqual({ url: "/w/acme/api/v1/documents/doc_1/extraction", method: "GET" });
+
+      fireEvent.click(screen.getByText("indexed"));
+      expect(await screen.findByText("pypdf")).toBeInTheDocument();
+      expect(screen.getByText("1,234")).toBeInTheDocument();
+      expect(screen.getByText(/Extraction found a value that looks like a password or access code/)).toBeInTheDocument();
+
+      fireEvent.click(screen.getByText("Extracted text"));
+      expect(await screen.findByText("Pump must be isolated before service.")).toBeInTheDocument();
+
+      fireEvent.click(screen.getByRole("button", { name: "Next" }));
+      expect(await screen.findByText("Second-page wiring notes.")).toBeInTheDocument();
+
+      const assetFetchesBeforeRetry = fake.requests.filter(
+        (request) => request.url === "/w/acme/api/v1/assets/asset_1" && request.method === "GET",
+      ).length;
+      fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+      await waitFor(() => {
+        expect(fake.requests).toEqual(
+          expect.arrayContaining([
+            { url: "/w/acme/api/v1/documents/doc_1/extraction/retry", method: "POST" },
+          ]),
+        );
+      });
+      await waitFor(() => {
+        expect(
+          fake.requests.filter(
+            (request) => request.url === "/w/acme/api/v1/assets/asset_1" && request.method === "GET",
+          ),
+        ).toHaveLength(assetFetchesBeforeRetry + 1);
+      });
     } finally {
       fake.restore();
     }

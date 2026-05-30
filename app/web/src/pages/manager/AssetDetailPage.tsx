@@ -9,13 +9,13 @@ import PageTabs, { type PageTab } from "@/components/PageTabs";
 import DateTime from "@/components/DateTime";
 import { Chip, Loading } from "@/components/common";
 import { AssetIcon } from "@/components/AssetIcon";
+import DocumentLibraryTable from "./documents/DocumentLibrary";
 import type {
   AssetAction,
   AssetCondition,
   AssetDetailPayload,
   AssetDocument,
   AssetStatus,
-  DocumentKind,
   Task,
   TaskStatus,
 } from "@/types/api";
@@ -43,19 +43,6 @@ const TASK_STATUS_TONE: Record<TaskStatus, "moss" | "sky" | "ghost" | "rust" | "
   skipped: "rust",
   cancelled: "rust",
   overdue: "rust",
-};
-
-const KIND_ICON: Record<DocumentKind, string> = {
-  manual: "\u{1F4D6}",
-  warranty: "\u{1F6E1}\uFE0F",
-  invoice: "\u{1F9FE}",
-  receipt: "\u{1F9FE}",
-  photo: "\u{1F4F7}",
-  certificate: "\u{1F4DC}",
-  contract: "\u{1F4DD}",
-  permit: "\u{1F4CB}",
-  insurance: "\u{1F3E6}",
-  other: "\u{1F4C4}",
 };
 
 function fmtDate(iso: string | null): string {
@@ -324,15 +311,7 @@ function DocumentsTab({ documents }: { documents: AssetDocument[] }) {
       {documents.length === 0 ? (
         <p className="muted">No documents attached.</p>
       ) : (
-        documents.map((doc) => (
-          <div key={doc.id} className="doc-row">
-            <span className="doc-thumb">{KIND_ICON[doc.kind]}</span>
-            <span><strong>{doc.title}</strong></span>
-            <Chip tone="ghost" size="sm">{doc.kind}</Chip>
-            <span className="mono muted">{doc.size_kb} KB</span>
-            <span className="muted">{fmtDate(doc.expires_on)}</span>
-          </div>
-        ))
+        <DocumentLibraryTable documents={documents} showAsset={false} showProperty={false} />
       )}
     </div>
   );
