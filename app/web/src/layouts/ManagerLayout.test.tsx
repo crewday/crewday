@@ -7,7 +7,7 @@ import { setAuthenticated } from "@/auth/authStore";
 import { __resetAuthStoreForTests } from "@/auth/useAuth";
 import { WorkspaceProvider } from "@/context/WorkspaceContext";
 import { __resetApiProvidersForTests } from "@/lib/api";
-import { __resetQueryKeyGetterForTests } from "@/lib/queryKeys";
+import { __resetQueryKeyGetterForTests, qk, registerQueryKeyWorkspaceGetter } from "@/lib/queryKeys";
 import * as preferences from "@/lib/preferences";
 import { installFetch, jsonResponse } from "@/test/helpers";
 import type { AuthMe } from "@/auth/types";
@@ -66,7 +66,7 @@ function authMe(): AuthMe {
   };
 }
 
-function workspaceMe(): Me {
+function workspaceMe(overrides: Partial<Me> = {}): Me {
   return {
     role: "manager",
     theme: "system",
@@ -101,17 +101,32 @@ function workspaceMe(): Me {
     client_binding_org_ids: [],
     is_deployment_admin: false,
     is_deployment_owner: false,
+    ...overrides,
   };
 }
 
-function renderManagerLayout(allowed: Set<string>, initialPath = "/w/ws_1/dashboard"): string[] {
+function renderManagerLayout(
+  allowed: Set<string>,
+  initialPath = "/w/ws_1/dashboard",
+  options: {
+    workspaceMeResponse?: Me;
+    deferredWorkspaceMeResponse?: Promise<Response>;
+    deferWorkspaceMe?: boolean;
+    cachedWorkspaceMe?: unknown;
+    cachedAuthMe?: AuthMe;
+    onWorkspaceMeRequest?: () => void;
+  } = {},
+): string[] {
   const permissionProbes: string[] = [];
   vi.spyOn(preferences, "readWorkspaceCookie").mockReturnValue("ws_1");
   setAuthenticated(authMe());
   installFetch(({ url }) => {
     const parsed = new URL(url, "http://crewday.test");
     if (parsed.pathname === "/w/ws_1/api/v1/me") {
-      return jsonResponse(workspaceMe());
+      options.onWorkspaceMeRequest?.();
+      if (options.deferredWorkspaceMeResponse) return options.deferredWorkspaceMeResponse;
+      if (options.deferWorkspaceMe) return new Promise<Response>(() => {});
+      return jsonResponse(options.workspaceMeResponse ?? workspaceMe());
     }
     if (parsed.pathname === "/w/ws_1/api/v1/permissions/resolved/self") {
       const actionKey = parsed.searchParams.get("action_key") ?? "";
@@ -129,6 +144,9 @@ function renderManagerLayout(allowed: Set<string>, initialPath = "/w/ws_1/dashbo
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   });
+  registerQueryKeyWorkspaceGetter(() => "ws_1");
+  if (options.cachedAuthMe) queryClient.setQueryData(qk.authMe(), options.cachedAuthMe);
+  if (options.cachedWorkspaceMe) queryClient.setQueryData(qk.me(), options.cachedWorkspaceMe);
 
   render(
     <QueryClientProvider client={queryClient}>
@@ -222,6 +240,63 @@ afterEach(() => {
 });
 
 describe("<ManagerLayout> permission-resolved navigation", () => {
+  it("renders manager footer details from the workspace /me payload", async () => {
+    const managerPayload = workspaceMe({
+      manager_name: "Operations Lead",
+      employee: {
+        ...workspaceMe().employee,
+        name: "Operations Lead",
+        avatar_initials: "OL",
+      },
+    });
+
+    renderManagerLayout(new Set(["employees.read"]), "/w/ws_1/dashboard", {
+      workspaceMeResponse: managerPayload,
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText("Operations Lead")).toBeInTheDocument();
+      expect(screen.getByText("OL")).toBeInTheDocument();
+    });
+  });
+
+  it("falls back to auth identity while auth-shaped me data is cached, then renders workspace me", async () => {
+    let resolveWorkspaceMe: (response: Response) => void = () => {};
+    const deferredWorkspaceMeResponse = new Promise<Response>((resolve) => {
+      resolveWorkspaceMe = resolve;
+    });
+    const workspaceMeRequests: string[] = [];
+    const managerPayload = workspaceMe({
+      manager_name: "Operations Lead",
+      employee: {
+        ...workspaceMe().employee,
+        name: "Operations Lead",
+        avatar_initials: "OL",
+      },
+    });
+
+    renderManagerLayout(new Set(["employees.read"]), "/w/ws_1/dashboard", {
+      cachedAuthMe: authMe(),
+      cachedWorkspaceMe: authMe(),
+      deferredWorkspaceMeResponse,
+      onWorkspaceMeRequest: () => workspaceMeRequests.push("me"),
+    });
+
+    expect(screen.getByText("Manager User")).toBeInTheDocument();
+    expect(screen.getByText("MU")).toBeInTheDocument();
+    expect(screen.getByTestId("agent-sidebar")).toHaveTextContent("agent:manager");
+    await waitFor(() => {
+      expect(workspaceMeRequests).toEqual(["me"]);
+    });
+
+    resolveWorkspaceMe(jsonResponse(managerPayload));
+
+    await waitFor(() => {
+      expect(screen.getByText("Operations Lead")).toBeInTheDocument();
+      expect(screen.getByText("OL")).toBeInTheDocument();
+    });
+  });
+
   it("keeps the fixed phone bottom row and puts extra allowed management destinations in nav", async () => {
     renderManagerLayout(new Set([
       "employees.read",
@@ -259,14 +334,14 @@ describe("<ManagerLayout> permission-resolved navigation", () => {
     expect(screen.getByTestId("agent-sidebar")).toHaveTextContent("agent:manager");
   });
 
-  it("hides the hamburger when no extra management destinations are allowed", async () => {
+  it("hides permission-gated management destinations when no actions are allowed", async () => {
     const probes = renderManagerLayout(new Set());
 
     await waitFor(
       () => {
         expect(probes).toContain("api_tokens.manage");
         expect(screen.queryByRole("link", { name: /Dashboard/i })).toBeNull();
-        expect(screen.queryByRole("button", { name: "Open menu" })).toBeNull();
+        expect(screen.getByRole("button", { name: "Open menu" })).toBeInTheDocument();
       },
       { timeout: 3000 },
     );

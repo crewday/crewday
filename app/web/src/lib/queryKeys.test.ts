@@ -26,6 +26,17 @@ describe("qk — workspace prefix", () => {
     expect(qk.authMe()).toEqual(["auth", "me"]);
   });
 
+  it("keeps auth identity and workspace profile keys distinct", () => {
+    registerQueryKeyWorkspaceGetter(() => "acme");
+    const queryClient = new QueryClient();
+    const authPayload = { display_name: "Manager User" };
+
+    expect(qk.authMe()).not.toEqual(qk.me());
+    queryClient.setQueryData(qk.authMe(), authPayload);
+    expect(queryClient.getQueryData(qk.authMe())).toBe(authPayload);
+    expect(queryClient.getQueryData(qk.me())).toBeUndefined();
+  });
+
   it("prepends the active workspace slug to every workspace-scoped key", () => {
     registerQueryKeyWorkspaceGetter(() => "acme");
 

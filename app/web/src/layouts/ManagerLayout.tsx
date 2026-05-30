@@ -190,6 +190,36 @@ function filterNavItems(items: SideNavItem[], allowedActions: Set<string> | null
   return pruneEmptySections(visible);
 }
 
+function isWorkspaceMe(data: unknown): data is Me {
+  if (typeof data !== "object" || data === null) return false;
+  const maybeMe = data as {
+    current_workspace_id?: unknown;
+    employee?: unknown;
+    is_deployment_admin?: unknown;
+    manager_name?: unknown;
+    user_id?: unknown;
+  };
+  if (typeof maybeMe.current_workspace_id !== "string") return false;
+  if (typeof maybeMe.is_deployment_admin !== "boolean") return false;
+  if (typeof maybeMe.manager_name !== "string") return false;
+  if (typeof maybeMe.user_id !== "string" && maybeMe.user_id !== null) return false;
+  if (typeof maybeMe.employee !== "object" || maybeMe.employee === null) return false;
+  const employee = maybeMe.employee as { avatar_initials?: unknown; name?: unknown };
+  return typeof employee.avatar_initials === "string" && typeof employee.name === "string";
+}
+
+function initialsForName(name: string | null | undefined): string {
+  const parts = (name ?? "")
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean);
+  if (parts.length === 0) return "CD";
+  return parts
+    .slice(0, 2)
+    .map((part) => part[0]?.toUpperCase() ?? "")
+    .join("") || "CD";
+}
+
 async function resolveAllowedNavActions(
   actionKeys: string[],
   scopeId: string,
@@ -221,6 +251,9 @@ export default function ManagerLayout() {
   // code-health: ignore[ccn nloc] Manager shell keeps permission-filtered nav, drawer state, route outlet, and agent sidebar in one layout boundary.
   const { user } = useAuth();
   const { data } = useQuery({ queryKey: qk.me(), queryFn: () => fetchJson<Me>("/api/v1/me") });
+  const managerMe = isWorkspaceMe(data) ? data : null;
+  const footerName = managerMe?.manager_name || managerMe?.employee.name || user?.display_name || user?.email || "Crewday";
+  const footerInitials = managerMe?.employee.avatar_initials ?? initialsForName(footerName);
   const collapsed = initialAgentCollapsed();
   const { pathname } = useLocation();
   const relativePathname = workspaceRelativePathname(pathname);
@@ -233,11 +266,11 @@ export default function ManagerLayout() {
       return next;
     });
   }, []);
-  const navItems: SideNavItem[] = data?.is_deployment_admin
+  const navItems: SideNavItem[] = managerMe?.is_deployment_admin
     ? [...BASE_NAV_ITEMS, ADMINISTRATION_LINK]
     : BASE_NAV_ITEMS;
-  const permissionScopeId = data?.current_workspace_id ?? null;
-  const permissionUserId = data?.user_id ?? user?.user_id ?? null;
+  const permissionScopeId = managerMe?.current_workspace_id ?? null;
+  const permissionUserId = managerMe?.user_id ?? user?.user_id ?? null;
   const actionKeys = actionKeysFor(navItems);
   const permissionQ = useQuery({
     queryKey: permissionUserId && permissionScopeId
@@ -292,8 +325,8 @@ export default function ManagerLayout() {
           collapsed={navCollapsed}
           onToggleCollapsed={toggleNavCollapsed}
           footer={{
-            initials: data?.employee.avatar_initials ?? "EB",
-            name: data?.manager_name ?? "Élodie Bernard",
+            initials: footerInitials,
+            name: footerName,
             role: "Manager",
           }}
         />
