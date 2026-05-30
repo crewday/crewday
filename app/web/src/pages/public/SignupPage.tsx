@@ -36,8 +36,9 @@ import {
   type ReactNode,
 } from "react";
 import { Link } from "react-router-dom";
-import { useMutation } from "@tanstack/react-query";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { fetchJson } from "@/lib/api";
+import { qk } from "@/lib/queryKeys";
 import {
   isSignupCaptchaError,
   messageForSignupSlugError,
@@ -92,6 +93,7 @@ interface SignupPageState {
 }
 
 export default function SignupPage(): ReactElement {
+  const queryClient = useQueryClient();
   const [state, setState] = usePatchReducer<SignupPageState>({
     email: "",
     slug: "",
@@ -122,6 +124,7 @@ export default function SignupPage(): ReactElement {
       setState({ form: { kind: "pending" } });
     },
     onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: qk.authMe(), refetchType: "none" });
       setState({ form: { kind: "sent" } });
       inflightRef.current = false;
     },

@@ -519,9 +519,6 @@ function ProviderForm(props: ProviderFormProps) {
       .map((pm) => providerModelOption(pm, models, provider));
   }, [models, provider, providerModels]);
 
-  const invalidate = async () => {
-    await qc.invalidateQueries({ queryKey: qk.adminLlmGraph() });
-  };
   function providerErrorCopy(error: Error, fallback: string): string {
     return redactedCopy(apiErrorCopy(error, fallback), [
       apiKey,
@@ -539,7 +536,7 @@ function ProviderForm(props: ProviderFormProps) {
         { method: mode === "create" ? "POST" : "PUT", body },
       ),
     onSuccess: async () => {
-      await invalidate();
+      await qc.invalidateQueries({ queryKey: qk.adminLlmGraph() });
       onClose();
     },
     onError: (error: Error) =>
@@ -553,7 +550,7 @@ function ProviderForm(props: ProviderFormProps) {
       }),
     onSuccess: async () => {
       setApiKey("");
-      await invalidate();
+      await qc.invalidateQueries({ queryKey: qk.adminLlmGraph() });
     },
     onError: (error: Error) =>
       setServerErr(providerErrorCopy(error, "Provider key update failed.")),
@@ -565,7 +562,7 @@ function ProviderForm(props: ProviderFormProps) {
       }),
     onSuccess: async () => {
       setApiKey("");
-      await invalidate();
+      await qc.invalidateQueries({ queryKey: qk.adminLlmGraph() });
     },
     onError: (error: Error) =>
       setServerErr(providerErrorCopy(error, "Provider key clear failed.")),
@@ -576,7 +573,7 @@ function ProviderForm(props: ProviderFormProps) {
         method: "DELETE",
       }),
     onSuccess: async () => {
-      await invalidate();
+      await qc.invalidateQueries({ queryKey: qk.adminLlmGraph() });
       onClose();
     },
     onError: (error: Error) =>
@@ -935,9 +932,6 @@ function ModelForm({
       });
   }, [mode, model, providerModels, providers]);
 
-  const invalidate = async () => {
-    await qc.invalidateQueries({ queryKey: qk.adminLlmGraph() });
-  };
   const save = useMutation({
     mutationFn: (body: ModelPayload) =>
       fetchJson<LlmModel>(
@@ -947,7 +941,7 @@ function ModelForm({
         { method: mode === "create" ? "POST" : "PUT", body },
       ),
     onSuccess: async () => {
-      await invalidate();
+      await qc.invalidateQueries({ queryKey: qk.adminLlmGraph() });
       onClose();
     },
     onError: (error: Error) => setServerErr(apiErrorCopy(error, "Model save failed.")),
@@ -956,7 +950,7 @@ function ModelForm({
     mutationFn: () =>
       fetchJson(`/admin/api/v1/llm/models/${model?.id}`, { method: "DELETE" }),
     onSuccess: async () => {
-      await invalidate();
+      await qc.invalidateQueries({ queryKey: qk.adminLlmGraph() });
       onClose();
     },
     onError: (error: Error) => setServerErr(apiErrorCopy(error, "Model delete failed.")),
@@ -995,7 +989,7 @@ function ModelForm({
       setServerErr(null);
     },
     onSuccess: async (providerModel) => {
-      await invalidate();
+      await qc.invalidateQueries({ queryKey: qk.adminLlmGraph() });
       onOpenProviderModel(providerModel);
     },
     onError: (error: Error) =>
@@ -1010,7 +1004,7 @@ function ModelForm({
       ),
     onSuccess: (preview) => {
       applyModelPayload(preview.model_payload);
-      void invalidate();
+      void qc.invalidateQueries({ queryKey: qk.adminLlmGraph() });
       setOpenRouterErr(null);
       setClientErr(null);
       setServerErr(null);
@@ -1626,9 +1620,6 @@ function ProviderModelForm(props: ProviderModelFormProps) {
     priceSourceModelOverride: emptyToNull(priceSourceModelOverride),
   };
 
-  const invalidate = async () => {
-    await qc.invalidateQueries({ queryKey: qk.adminLlmGraph() });
-  };
   const syncPricing = useMutation({
     mutationFn: (_expected: {
       priceSourceOverride: LlmPriceSourceOverride;
@@ -1654,7 +1645,7 @@ function ProviderModelForm(props: ProviderModelFormProps) {
       setSyncErr(null);
       setClientErr(null);
       setServerErr(null);
-      await invalidate();
+      await qc.invalidateQueries({ queryKey: qk.adminLlmGraph() });
     },
     onError: (error: Error) =>
       setSyncErr(apiErrorCopy(error, "Provider-model pricing sync failed.")),
@@ -1680,7 +1671,7 @@ function ProviderModelForm(props: ProviderModelFormProps) {
       setSyncErr(null);
       setClientErr(null);
       setServerErr(null);
-      await invalidate();
+      await qc.invalidateQueries({ queryKey: qk.adminLlmGraph() });
     },
     onError: (error: Error) =>
       setSyncErr(apiErrorCopy(error, "Provider-model pricing sync failed.")),
@@ -1694,7 +1685,7 @@ function ProviderModelForm(props: ProviderModelFormProps) {
         { method: mode === "create" ? "POST" : "PUT", body },
       ),
     onSuccess: async () => {
-      await invalidate();
+      await qc.invalidateQueries({ queryKey: qk.adminLlmGraph() });
       onClose();
     },
     onError: (error: Error) =>
@@ -1706,7 +1697,7 @@ function ProviderModelForm(props: ProviderModelFormProps) {
         method: "DELETE",
       }),
     onSuccess: async () => {
-      await invalidate();
+      await qc.invalidateQueries({ queryKey: qk.adminLlmGraph() });
       onClose();
     },
     onError: (error: Error) =>

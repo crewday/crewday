@@ -27,17 +27,6 @@ function toMin(hhmm: string): number {
   return Number(h) * 60 + Number(m);
 }
 
-function invalidateScheduleQueries(
-  qc: ReturnType<typeof useQueryClient>,
-  empId: string | null,
-): void {
-  qc.invalidateQueries({ queryKey: qk.mySchedulePrefix() });
-  qc.invalidateQueries({ queryKey: qk.meOverrides() });
-  qc.invalidateQueries({ queryKey: qk.me() });
-  if (empId) qc.invalidateQueries({ queryKey: qk.employeeLeaves(empId) });
-  qc.invalidateQueries({ queryKey: qk.leaves() });
-}
-
 export function OverrideDialog({
   iso,
   pattern,
@@ -85,7 +74,11 @@ function OverrideDialogForm({
         body,
       }),
     onSuccess: () => {
-      invalidateScheduleQueries(qc, employeeId);
+      qc.invalidateQueries({ queryKey: qk.mySchedulePrefix() });
+      qc.invalidateQueries({ queryKey: qk.meOverrides() });
+      qc.invalidateQueries({ queryKey: qk.me() });
+      if (employeeId) qc.invalidateQueries({ queryKey: qk.employeeLeaves(employeeId) });
+      qc.invalidateQueries({ queryKey: qk.leaves() });
       onClose();
     },
   });
@@ -215,7 +208,11 @@ function LeaveDialogForm({
     mutationFn: (body: unknown) =>
       fetchJson<Leave>("/api/v1/me/leaves", { method: "POST", body }),
     onSuccess: () => {
-      invalidateScheduleQueries(qc, employeeId);
+      qc.invalidateQueries({ queryKey: qk.mySchedulePrefix() });
+      qc.invalidateQueries({ queryKey: qk.meOverrides() });
+      qc.invalidateQueries({ queryKey: qk.me() });
+      if (employeeId) qc.invalidateQueries({ queryKey: qk.employeeLeaves(employeeId) });
+      qc.invalidateQueries({ queryKey: qk.leaves() });
       onClose();
     },
   });

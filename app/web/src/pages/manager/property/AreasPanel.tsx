@@ -1,5 +1,5 @@
 import { useMemo, useReducer, type SetStateAction } from "react";
-import { useMutation, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   InlineNoteDisplay,
   InlineNoteField,
@@ -160,17 +160,6 @@ function bodyFromDraft(draft: AreaDraft, orderHint = draft.order_hint): AreaWrit
   };
 }
 
-async function invalidatePropertyAreaViews(
-  queryClient: QueryClient,
-  propertyId: string,
-): Promise<void> {
-  await Promise.all([
-    queryClient.invalidateQueries({ queryKey: qk.propertyAreas(propertyId) }),
-    queryClient.invalidateQueries({ queryKey: qk.property(propertyId) }),
-    queryClient.invalidateQueries({ queryKey: qk.properties() }),
-  ]);
-}
-
 function nextAreaOrderHint(areas: readonly Area[]): number {
   if (areas.length === 0) return 0;
   return Math.max(...areas.map((area) => area.order_hint)) + 1;
@@ -241,7 +230,11 @@ export default function AreasPanel({ propertyId }: { propertyId: string }) {
         setEditedDrafts((current) => clearMapValue(current, variables.rowId));
         setSavedDrafts((current) => setMapValue(current, variables.rowId, savedDraft));
       }
-      await invalidatePropertyAreaViews(queryClient, propertyId);
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: qk.propertyAreas(propertyId) }),
+        queryClient.invalidateQueries({ queryKey: qk.property(propertyId) }),
+        queryClient.invalidateQueries({ queryKey: qk.properties() }),
+      ]);
     },
     onError: (err, variables) => {
       const message = errorMessage(err, "Area could not be saved.");
@@ -260,7 +253,11 @@ export default function AreasPanel({ propertyId }: { propertyId: string }) {
       setEditedDrafts((current) => clearMapValue(current, areaId));
       setSavedDrafts((current) => clearMapValue(current, areaId));
       setRowErrors((current) => clearMapValue(current, areaId));
-      await invalidatePropertyAreaViews(queryClient, propertyId);
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: qk.propertyAreas(propertyId) }),
+        queryClient.invalidateQueries({ queryKey: qk.property(propertyId) }),
+        queryClient.invalidateQueries({ queryKey: qk.properties() }),
+      ]);
     },
     onError: (err, areaId) => {
       setRowErrors((current) => setMapValue(current, areaId, errorMessage(err, "Area could not be deleted.")));
@@ -321,7 +318,11 @@ export default function AreasPanel({ propertyId }: { propertyId: string }) {
       );
     },
     onSettled: async () => {
-      await invalidatePropertyAreaViews(queryClient, propertyId);
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: qk.propertyAreas(propertyId) }),
+        queryClient.invalidateQueries({ queryKey: qk.property(propertyId) }),
+        queryClient.invalidateQueries({ queryKey: qk.properties() }),
+      ]);
     },
   });
   const busy = saveArea.isPending || deleteArea.isPending || reorderAreas.isPending;

@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useMutation, useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Check, Copy, MessageSquare } from "lucide-react";
 import AutoGrowTextarea from "@/components/AutoGrowTextarea";
 import DeskPage from "@/components/DeskPage";
@@ -182,6 +182,7 @@ function ProviderPanel({
 }
 
 function TestInboundPanel({ provider }: { provider: AdminChatProvider | undefined }) {
+  const queryClient = useQueryClient();
   const [externalContact, setExternalContact] = useState("+15551234567");
   const [bodyMd, setBodyMd] = useState("Can you show me today's tasks?");
   const [languageHint, setLanguageHint] = useState("en");
@@ -192,6 +193,10 @@ function TestInboundPanel({ provider }: { provider: AdminChatProvider | undefine
         method: "POST",
         body: payload,
       }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: qk.adminAgentLog() });
+      void queryClient.invalidateQueries({ queryKey: qk.adminAgentActions() });
+    },
   });
 
   const result = testInbound.data;

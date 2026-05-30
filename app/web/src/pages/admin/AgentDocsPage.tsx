@@ -128,7 +128,9 @@ export default function AdminAgentDocsPage() {
     ),
     onSuccess: (updated) => {
       applyUpdatedDoc(updated);
-      invalidateAgentDocQueries(queryClient, updated.slug);
+      void queryClient.invalidateQueries({ queryKey: qk.adminAgentDocs() });
+      void queryClient.invalidateQueries({ queryKey: qk.adminAgentDoc(updated.slug) });
+      void queryClient.invalidateQueries({ queryKey: qk.adminAgentDocRevisions(updated.slug) });
     },
     onError: (error, vars) => {
       patchRow(vars.slug, (row) => ({
@@ -146,7 +148,9 @@ export default function AdminAgentDocsPage() {
     ),
     onSuccess: (updated) => {
       applyUpdatedDoc(updated);
-      invalidateAgentDocQueries(queryClient, updated.slug);
+      void queryClient.invalidateQueries({ queryKey: qk.adminAgentDocs() });
+      void queryClient.invalidateQueries({ queryKey: qk.adminAgentDoc(updated.slug) });
+      void queryClient.invalidateQueries({ queryKey: qk.adminAgentDocRevisions(updated.slug) });
     },
     onError: (error, vars) => {
       patchRow(vars.slug, (row) => ({
@@ -626,10 +630,4 @@ function apiErrorMessage(error: unknown, fallback: string): string {
   }
   if (error instanceof Error) return error.message;
   return fallback;
-}
-
-function invalidateAgentDocQueries(queryClient: ReturnType<typeof useQueryClient>, slug: string): void {
-  void queryClient.invalidateQueries({ queryKey: qk.adminAgentDocs() });
-  void queryClient.invalidateQueries({ queryKey: qk.adminAgentDoc(slug) });
-  void queryClient.invalidateQueries({ queryKey: qk.adminAgentDocRevisions(slug) });
 }

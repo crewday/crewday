@@ -1,6 +1,7 @@
 import { useState } from "react";
-import { useMutation } from "@tanstack/react-query";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { ApiError, fetchJson } from "@/lib/api";
+import { qk } from "@/lib/queryKeys";
 import type {
   LlmModel,
   LlmProviderModel,
@@ -21,6 +22,7 @@ export default function LlmEmbeddingSmoke({
   titleId,
   description,
 }: LlmEmbeddingSmokeProps) {
+  const qc = useQueryClient();
   const [text, setText] = useState("crew.day local embedding smoke test");
   const [clientErr, setClientErr] = useState<string | null>(null);
   const smoke = useMutation({
@@ -29,6 +31,9 @@ export default function LlmEmbeddingSmoke({
         `/admin/api/v1/llm/provider-models/${providerModel.id}/embedding-smoke`,
         { method: "POST", body },
       ),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: qk.adminLlmCalls() });
+    },
     onError: (error) => setClientErr(embeddingSmokeErrorCopy(error)),
   });
 

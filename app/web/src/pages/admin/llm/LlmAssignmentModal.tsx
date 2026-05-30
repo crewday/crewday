@@ -292,11 +292,6 @@ export default function LlmAssignmentModal({
   const setClientErr = (next: string | null) => patchModalState({ clientErr: next });
   const setServerErr = (next: DisplayError | null) => patchModalState({ serverErr: next });
 
-  const invalidate = async () => {
-    await qc.invalidateQueries({ queryKey: qk.adminLlmGraph() });
-    await qc.invalidateQueries({ queryKey: qk.adminLlmCalls() });
-  };
-
   const createAssignment = useMutation({
     mutationFn: (providerModelId: string) => {
       if (!capability) throw new Error("Capability is missing.");
@@ -310,7 +305,10 @@ export default function LlmAssignmentModal({
         ),
       });
     },
-    onSuccess: invalidate,
+    onSuccess: async () => {
+      await qc.invalidateQueries({ queryKey: qk.adminLlmGraph() });
+      await qc.invalidateQueries({ queryKey: qk.adminLlmCalls() });
+    },
     onError: (error: Error) =>
       setServerErr(assignmentDisplayError(error, "Assignment create failed.")),
   });
@@ -320,7 +318,10 @@ export default function LlmAssignmentModal({
       fetchJson(`/admin/api/v1/llm/assignments/${assignmentId}`, {
         method: "DELETE",
       }),
-    onSuccess: invalidate,
+    onSuccess: async () => {
+      await qc.invalidateQueries({ queryKey: qk.adminLlmGraph() });
+      await qc.invalidateQueries({ queryKey: qk.adminLlmCalls() });
+    },
     onError: (error: Error) =>
       setServerErr(assignmentDisplayError(error, "Assignment delete failed.")),
   });
@@ -331,7 +332,10 @@ export default function LlmAssignmentModal({
         method: "PATCH",
         body: [{ capability: capabilityKey, ids_in_priority_order: ids }],
       }),
-    onSuccess: invalidate,
+    onSuccess: async () => {
+      await qc.invalidateQueries({ queryKey: qk.adminLlmGraph() });
+      await qc.invalidateQueries({ queryKey: qk.adminLlmCalls() });
+    },
     onError: (error: Error) =>
       setServerErr(assignmentDisplayError(error, "Assignment reorder failed.")),
   });
@@ -351,7 +355,10 @@ export default function LlmAssignmentModal({
             thinkingOverride === "inherit" ? null : thinkingOverride,
         },
       }),
-    onSuccess: invalidate,
+    onSuccess: async () => {
+      await qc.invalidateQueries({ queryKey: qk.adminLlmGraph() });
+      await qc.invalidateQueries({ queryKey: qk.adminLlmCalls() });
+    },
     onError: (error: Error) =>
       setServerErr(assignmentDisplayError(error, "Assignment thinking save failed.")),
   });
@@ -382,7 +389,8 @@ export default function LlmAssignmentModal({
     },
     onSuccess: async () => {
       setReplacementParent(null);
-      await invalidate();
+      await qc.invalidateQueries({ queryKey: qk.adminLlmGraph() });
+      await qc.invalidateQueries({ queryKey: qk.adminLlmCalls() });
     },
     onError: (error: Error) =>
       setServerErr(assignmentDisplayError(error, "Inheritance save failed.")),
@@ -396,7 +404,10 @@ export default function LlmAssignmentModal({
         { method: "DELETE" },
       );
     },
-    onSuccess: invalidate,
+    onSuccess: async () => {
+      await qc.invalidateQueries({ queryKey: qk.adminLlmGraph() });
+      await qc.invalidateQueries({ queryKey: qk.adminLlmCalls() });
+    },
     onError: (error: Error) =>
       setServerErr(assignmentDisplayError(error, "Inheritance delete failed.")),
   });

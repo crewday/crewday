@@ -295,7 +295,11 @@ export default function EmployeeDetailPage() {
     mutationFn: saveEmployeeRoles,
     onError: invalidateEmployeeRoleQueries,
     onSuccess: async () => {
-      await invalidateEmployeeRoleQueries();
+      await Promise.all([
+        qc.invalidateQueries({ queryKey: qk.employee(eid) }),
+        qc.invalidateQueries({ queryKey: qk.employees() }),
+        qc.invalidateQueries({ queryKey: [...qk.employee(eid), "user_work_roles"] }),
+      ]);
       setRoleDialogOpen(false);
     },
   });

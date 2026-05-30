@@ -243,18 +243,6 @@ function WorkRoleCatalogManager() {
   const roles = rolesQ.data ?? [];
   const rolesById = useMemo(() => new Map(roles.map((role) => [role.id, role])), [roles]);
 
-  const invalidateRoleDependents = () =>
-    Promise.all([
-      queryClient.invalidateQueries({ queryKey: qk.workRoles() }),
-      queryClient.invalidateQueries({ queryKey: qk.employees() }),
-      queryClient.invalidateQueries({
-        predicate: (query) => {
-          const key = query.queryKey;
-          return Array.isArray(key) && key.includes("employee") && key.includes("user_work_roles");
-        },
-      }),
-    ]);
-
   const saveRole = useMutation({
     mutationFn: ({ rowId, draft }: { rowId: string; draft: WorkRoleFormState }) => {
       const payload = workRoleWritePayload(draft);
@@ -270,7 +258,16 @@ function WorkRoleCatalogManager() {
       });
     },
     onSuccess: async (_role, variables) => {
-      await invalidateRoleDependents();
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: qk.workRoles() }),
+        queryClient.invalidateQueries({ queryKey: qk.employees() }),
+        queryClient.invalidateQueries({
+          predicate: (query) => {
+            const key = query.queryKey;
+            return Array.isArray(key) && key.includes("employee") && key.includes("user_work_roles");
+          },
+        }),
+      ]);
       if (variables.rowId === CREATE_WORK_ROLE_ROW_ID) {
         resetCreateRow();
         return;
@@ -300,7 +297,16 @@ function WorkRoleCatalogManager() {
       setRowErrors((current) => clearMapValue(current, roleId));
     },
     onSuccess: async () => {
-      await invalidateRoleDependents();
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: qk.workRoles() }),
+        queryClient.invalidateQueries({ queryKey: qk.employees() }),
+        queryClient.invalidateQueries({
+          predicate: (query) => {
+            const key = query.queryKey;
+            return Array.isArray(key) && key.includes("employee") && key.includes("user_work_roles");
+          },
+        }),
+      ]);
     },
     onError: (error, roleId) => {
       setRowErrors((current) => setMapValue(current, roleId, workRoleErrorMessage(error, {})));

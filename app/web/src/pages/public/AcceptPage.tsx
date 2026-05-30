@@ -91,6 +91,9 @@ export default function AcceptPage(): ReactElement {
         `/api/v1/invites/${encodeURIComponent(token)}/accept`,
         { method: "POST" },
       ),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: qk.authMe() });
+    },
   });
 
   const [state, setState] = useState<AcceptState>({ kind: "idle" });

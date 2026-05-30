@@ -1350,6 +1350,9 @@ function StocktakeSheet({
         `/api/v1/properties/${propertyId}/stocktakes`,
         { method: "POST", body: {} },
       ),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: qk.inventory(), refetchType: "none" });
+    },
   });
   const commit = useMutation({
     mutationFn: (sid: string) =>

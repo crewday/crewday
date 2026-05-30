@@ -39,9 +39,10 @@ import {
   type ReactElement,
 } from "react";
 import { useLocation } from "react-router-dom";
-import { useMutation } from "@tanstack/react-query";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { sanitizeNext } from "@/auth";
 import { ApiError, fetchJson } from "@/lib/api";
+import { qk } from "@/lib/queryKeys";
 
 const STATUS_ROLE = "status";
 
@@ -64,6 +65,7 @@ type FormState =
   | { kind: "error"; message: string };
 
 export default function RecoverPage() {
+  const queryClient = useQueryClient();
   const { search } = useLocation();
   const [stepUp, setStepUp] = useState(false);
   const [email, setEmail] = useState("");
@@ -96,6 +98,7 @@ export default function RecoverPage() {
       // Enumeration guard: we swap to the "check your email"
       // confirmation on ANY 2xx response. The server's audit log
       // discriminates hit from miss; the UI never does.
+      void queryClient.invalidateQueries({ queryKey: qk.authMe(), refetchType: "none" });
       setForm({ kind: "sent" });
       inflightRef.current = false;
     },

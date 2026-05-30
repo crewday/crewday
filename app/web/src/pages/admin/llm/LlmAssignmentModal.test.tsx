@@ -1,6 +1,7 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
+import { qk } from "@/lib/queryKeys";
 import type { LlmGraphPayload } from "@/types";
 import { graph } from "@/pages/admin/LlmPage.testData";
 import LlmAssignmentModal from "./LlmAssignmentModal";
@@ -72,6 +73,7 @@ function renderAssignment(capabilityKey: string, testGraph: LlmGraphPayload = ba
       />
     </QueryClientProvider>,
   );
+  return qc;
 }
 
 function bodyOf(call: FetchCall): unknown {
@@ -934,7 +936,8 @@ describe("LlmAssignmentModal", () => {
 
   it("creates direct assignments through drag and drop", async () => {
     const calls = installFetch();
-    renderAssignment("chat.manager");
+    const qc = renderAssignment("chat.manager");
+    const invalidate = vi.spyOn(qc, "invalidateQueries");
     const dialog = screen.getByRole("dialog", { name: "chat.manager" });
     const transfer = dataTransfer();
 
@@ -965,6 +968,8 @@ describe("LlmAssignmentModal", () => {
       provider_model_id: "pm_fast",
       priority: 1,
     });
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: qk.adminLlmGraph() });
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: qk.adminLlmCalls() });
   });
 
   it("removes, keyboard-reorders, and updates thinking on selected rows", async () => {

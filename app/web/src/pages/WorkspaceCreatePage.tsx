@@ -1,8 +1,9 @@
 import { useCallback, useRef, useState, type FormEvent, type ReactElement } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { useMutation } from "@tanstack/react-query";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { ApiError, fetchJson } from "@/lib/api";
 import { useWorkspace } from "@/context/WorkspaceContext";
+import { qk } from "@/lib/queryKeys";
 import { normalizeWorkspaceSlugInput } from "@/lib/workspaceSlug";
 import {
   messageForSignupSlugError,
@@ -30,6 +31,7 @@ type WorkspaceCreateState =
 
 export default function WorkspaceCreatePage(): ReactElement {
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
   const { workspaceId, setWorkspaceId } = useWorkspace();
   const [name, setName] = useState("");
   const [slug, setSlug] = useState("");
@@ -47,6 +49,8 @@ export default function WorkspaceCreatePage(): ReactElement {
     },
     onSuccess: (created) => {
       inflightRef.current = false;
+      void queryClient.invalidateQueries({ queryKey: qk.authMe() });
+      void queryClient.invalidateQueries({ queryKey: qk.meWorkspaces() });
       setWorkspaceId(created.workspace_slug);
       navigate(created.redirect, { replace: true });
     },

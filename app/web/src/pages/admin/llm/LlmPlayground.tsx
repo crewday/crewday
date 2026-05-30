@@ -1,10 +1,11 @@
 import type { KeyboardEvent } from "react";
 import type { ReactNode } from "react";
-import { useMutation } from "@tanstack/react-query";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import AutoGrowTextarea from "@/components/AutoGrowTextarea";
 import FileDropZone from "@/components/FileDropZone";
 import { FormModalField } from "@/components/FormModal";
 import { ApiError, fetchJson } from "@/lib/api";
+import { qk } from "@/lib/queryKeys";
 import { usePatchReducer } from "@/lib/usePatchReducer";
 import type {
   LlmAssignment,
@@ -56,6 +57,7 @@ export default function LlmPlayground({
   titleId,
   description,
 }: LlmPlaygroundProps) {
+  const qc = useQueryClient();
   const [playgroundState, setPlaygroundState] = usePatchReducer<LlmPlaygroundState>({
     prompt: "",
     systemPrompt: "",
@@ -89,8 +91,9 @@ export default function LlmPlayground({
       fetchJson<LlmProviderModelPlaygroundResponse>(
         `/admin/api/v1/llm/provider-models/${providerModel.id}/playground`,
         { method: "POST", body },
-      ),
+    ),
     onSuccess: (response) => {
+      void qc.invalidateQueries({ queryKey: qk.adminLlmCalls() });
       setPlaygroundState({ clientErr: null, result: response });
     },
     onError: (error: Error) => {

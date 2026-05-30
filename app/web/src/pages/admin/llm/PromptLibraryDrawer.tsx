@@ -128,9 +128,6 @@ function PromptEditorDialog({ prompt, onClose }: PromptEditorDialogProps) {
       ),
   });
 
-  const invalidate = async () => {
-    await qc.invalidateQueries({ queryKey: qk.adminLlmPrompts() });
-  };
   const save = useMutation({
     mutationFn: (body: PromptPayload) =>
       fetchJson<LlmPromptTemplateDetail>(`/admin/api/v1/llm/prompts/${prompt.id}`, {
@@ -141,7 +138,7 @@ function PromptEditorDialog({ prompt, onClose }: PromptEditorDialogProps) {
       setDraft({ template: updated.template, notes: updated.notes ?? "" });
       setClientErr(null);
       setServerErr(null);
-      await invalidate();
+      await qc.invalidateQueries({ queryKey: qk.adminLlmPrompts() });
     },
     onError: (error: Error) => setServerErr(promptErrorCopy(error, "Prompt save failed.")),
   });
@@ -155,7 +152,7 @@ function PromptEditorDialog({ prompt, onClose }: PromptEditorDialogProps) {
       setDraft({ template: updated.template, notes: updated.notes ?? "" });
       setClientErr(null);
       setServerErr(null);
-      await invalidate();
+      await qc.invalidateQueries({ queryKey: qk.adminLlmPrompts() });
     },
     onError: (error: Error) => setServerErr(promptErrorCopy(error, "Prompt reset failed.")),
   });

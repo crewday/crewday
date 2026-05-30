@@ -778,12 +778,6 @@ export default function SettingsPage() {
     queryKey: qk.workspaceUsage(),
     queryFn: () => fetchJson<WorkspaceUsage>("/api/v1/workspace/usage"),
   });
-  const invalidateWorkspaceLifecycle = (): void => {
-    void qc.invalidateQueries({ queryKey: qk.authMe() });
-    void qc.invalidateQueries({ queryKey: qk.meWorkspaces() });
-    void qc.invalidateQueries({ queryKey: qk.me(), refetchType: "none" });
-    void qc.invalidateQueries({ queryKey: qk.settings(), refetchType: "none" });
-  };
   const exportWorkspace = useMutation({
     mutationFn: () =>
       fetchApiDownload(workspaceAdminPath(pathname, WORKSPACE_EXPORT_PATH), { method: "POST" }),
@@ -791,6 +785,7 @@ export default function SettingsPage() {
       setExportError(null);
     },
     onSuccess: (download) => {
+      void qc.invalidateQueries({ queryKey: qk.settings(), refetchType: "none" });
       triggerBrowserDownload(download.blob, download.filename ?? "crewday-workspace-export.zip");
     },
     onError: (err) => {
@@ -807,7 +802,10 @@ export default function SettingsPage() {
     },
     onSuccess: async () => {
       setConfirmation(null);
-      invalidateWorkspaceLifecycle();
+      void qc.invalidateQueries({ queryKey: qk.authMe() });
+      void qc.invalidateQueries({ queryKey: qk.meWorkspaces() });
+      void qc.invalidateQueries({ queryKey: qk.me(), refetchType: "none" });
+      void qc.invalidateQueries({ queryKey: qk.settings(), refetchType: "none" });
       const route = await routeAfterWorkspaceArchived(pathname).catch(() => "/select-workspace");
       navigate(route, { replace: true });
     },
@@ -827,7 +825,10 @@ export default function SettingsPage() {
     onSuccess: async (result) => {
       setDeleteResult(result);
       setConfirmation(null);
-      invalidateWorkspaceLifecycle();
+      void qc.invalidateQueries({ queryKey: qk.authMe() });
+      void qc.invalidateQueries({ queryKey: qk.meWorkspaces() });
+      void qc.invalidateQueries({ queryKey: qk.me(), refetchType: "none" });
+      void qc.invalidateQueries({ queryKey: qk.settings(), refetchType: "none" });
     },
     onError: (err) => {
       setDeleteError(errorMessage(err, "Workspace deletion could not be scheduled."));
