@@ -1,12 +1,12 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { MemoryRouter } from "react-router-dom";
 import { WorkspaceProvider } from "@/context/WorkspaceContext";
 import { setAuthenticated } from "@/auth/authStore";
 import { __resetAuthStoreForTests } from "@/auth/useAuth";
 import { __resetApiProvidersForTests } from "@/lib/api";
-import { __resetQueryKeyGetterForTests } from "@/lib/queryKeys";
+import { __resetQueryKeyGetterForTests, qk } from "@/lib/queryKeys";
 import * as preferences from "@/lib/preferences";
 import type { GrantRole } from "@/types/auth";
 import type { SchedulerCalendarPayload } from "@/types/api";
@@ -61,6 +61,90 @@ const EMPTY_CALENDAR: SchedulerCalendarPayload = {
   properties: [],
 };
 
+const observedTargets: Element[] = [];
+
+class TestIntersectionObserver {
+  private readonly callback: IntersectionObserverCallback;
+  private readonly targets = new Set<Element>();
+
+  constructor(callback: IntersectionObserverCallback) {
+    this.callback = callback;
+  }
+
+  observe(target: Element): void {
+    this.targets.add(target);
+    observedTargets.push(target);
+  }
+
+  disconnect(): void {}
+
+  unobserve(): void {}
+
+  takeRecords(): IntersectionObserverEntry[] {
+    return [];
+  }
+
+  trigger(target: Element, isIntersecting = true): void {
+    if (!this.targets.has(target)) return;
+    this.callback(
+      [{ target, isIntersecting } as IntersectionObserverEntry],
+      this as unknown as IntersectionObserver,
+    );
+  }
+}
+
+const testObservers: TestIntersectionObserver[] = [];
+
+function installIntersectionObserver(): void {
+  observedTargets.length = 0;
+  testObservers.length = 0;
+  Element.prototype.scrollIntoView = vi.fn();
+  window.scrollBy = vi.fn();
+  vi.stubGlobal(
+    "IntersectionObserver",
+    class extends TestIntersectionObserver {
+      constructor(callback: IntersectionObserverCallback) {
+        super(callback);
+        testObservers.push(this);
+      }
+    },
+  );
+}
+
+function triggerIntersect(selector: string, isIntersecting = true): void {
+  const target = observedTargets.find((item) => item.matches(selector));
+  if (!target) throw new Error(`No observed target matched ${selector}`);
+  testObservers.forEach((observer) => observer.trigger(target, isIntersecting));
+}
+
+function startOfIsoWeekIso(d: Date): string {
+  const out = new Date(d);
+  out.setHours(0, 0, 0, 0);
+  const iso = (out.getDay() + 6) % 7;
+  out.setDate(out.getDate() - iso);
+  const y = out.getFullYear();
+  const m = String(out.getMonth() + 1).padStart(2, "0");
+  const day = String(out.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
+function addDaysIso(iso: string, days: number): string {
+  const [y, m, d] = iso.split("-").map(Number);
+  const date = new Date(y!, (m ?? 1) - 1, d ?? 1);
+  date.setDate(date.getDate() + days);
+  const nextY = date.getFullYear();
+  const nextM = String(date.getMonth() + 1).padStart(2, "0");
+  const nextD = String(date.getDate()).padStart(2, "0");
+  return `${nextY}-${nextM}-${nextD}`;
+}
+
+function isoDate(d: Date): string {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
 function authenticate(grantRole: GrantRole): void {
   setAuthenticated({
     user_id: "usr_test",
@@ -93,7 +177,17 @@ function installFetch(payload: SchedulerCalendarPayload = CALENDAR) {
   const spy = vi.fn(async (url: string | URL | Request) => {
     const resolved = typeof url === "string" ? url : url.toString();
     calls.push(resolved);
-    return jsonResponse(payload);
+    const parsed = new URL(resolved, "http://crewday.local");
+    const from = parsed.searchParams.get("from") ?? payload.window.from;
+    const to = parsed.searchParams.get("to") ?? payload.window.to;
+    return jsonResponse({
+      ...payload,
+      window: { from, to },
+      tasks: payload.tasks.map((task) => ({
+        ...task,
+        scheduled_start: `${from}T09:30:00Z`,
+      })),
+    });
   });
   (globalThis as { fetch: typeof fetch }).fetch = spy as unknown as typeof fetch;
   return {
@@ -122,6 +216,7 @@ beforeEach(() => {
   __resetApiProvidersForTests();
   __resetQueryKeyGetterForTests();
   vi.spyOn(preferences, "readWorkspaceCookie").mockReturnValue("acme");
+  installIntersectionObserver();
 });
 
 afterEach(() => {
@@ -130,6 +225,7 @@ afterEach(() => {
   __resetApiProvidersForTests();
   __resetQueryKeyGetterForTests();
   vi.restoreAllMocks();
+  vi.unstubAllGlobals();
 });
 
 describe("<SchedulerPage>", () => {
@@ -148,10 +244,171 @@ describe("<SchedulerPage>", () => {
       expect(screen.getByText("Turnover clean")).toBeInTheDocument();
       expect(screen.getByText("Villa Rosa")).toBeInTheDocument();
       expect(fake.calls).toHaveLength(1);
-      expect(fake.calls[0]).toMatch(
-        /^\/w\/acme\/api\/v1\/scheduler\/calendar\?from=\d{4}-\d{2}-\d{2}&to=\d{4}-\d{2}-\d{2}$/,
+      const currentWeek = startOfIsoWeekIso(new Date());
+      expect(fake.calls[0]).toBe(
+        `/w/acme/api/v1/scheduler/calendar?from=${currentWeek}&to=${addDaysIso(currentWeek, 6)}`,
       );
       expect(fake.calls[0]).not.toContain("from_=");
+    } finally {
+      fake.restore();
+    }
+  });
+
+  it("fetches and appends the next scheduler week from the bottom sentinel", async () => {
+    const fake = installFetch();
+    try {
+      render(<Harness />);
+
+      await screen.findByText("Alex Rivera");
+      const currentWeek = startOfIsoWeekIso(new Date());
+      await act(async () => {
+        triggerIntersect(".schedule__sentinel--bot");
+      });
+
+      await waitFor(() => expect(fake.calls).toHaveLength(2));
+      const nextWeek = addDaysIso(currentWeek, 7);
+      expect(fake.calls[1]).toBe(
+        `/w/acme/api/v1/scheduler/calendar?from=${nextWeek}&to=${addDaysIso(nextWeek, 6)}`,
+      );
+    } finally {
+      fake.restore();
+    }
+  });
+
+  it("fetches and prepends the previous scheduler week from the top sentinel", async () => {
+    const fake = installFetch();
+    try {
+      render(<Harness />);
+
+      await screen.findByText("Alex Rivera");
+      const currentWeek = startOfIsoWeekIso(new Date());
+      await act(async () => {
+        triggerIntersect(".schedule__sentinel--top");
+      });
+
+      await waitFor(() => expect(fake.calls).toHaveLength(2));
+      const previousWeek = addDaysIso(currentWeek, -7);
+      expect(fake.calls[1]).toBe(
+        `/w/acme/api/v1/scheduler/calendar?from=${previousWeek}&to=${addDaysIso(previousWeek, 6)}`,
+      );
+    } finally {
+      fake.restore();
+    }
+  });
+
+  it("preserves the viewport when prepending after the initial settle window", async () => {
+    const fake = installFetch();
+    let scrollHeight = 1_000;
+    const scrollHeightSpy = vi
+      .spyOn(document.documentElement, "scrollHeight", "get")
+      .mockImplementation(() => scrollHeight);
+    try {
+      render(<Harness />);
+
+      await screen.findByText("Alex Rivera");
+      await act(async () => {
+        await new Promise((resolve) => window.setTimeout(resolve, 250));
+      });
+
+      scrollHeight = 1_000;
+      await act(async () => {
+        triggerIntersect(".schedule__sentinel--top");
+      });
+      scrollHeight = 1_420;
+
+      await waitFor(() =>
+        expect(window.scrollBy).toHaveBeenCalledWith({
+          top: 420,
+          behavior: "instant",
+        }),
+      );
+    } finally {
+      scrollHeightSpy.mockRestore();
+      fake.restore();
+    }
+  });
+
+  it("jumps back to today's loaded cell from the Today affordance", async () => {
+    const fake = installFetch();
+    try {
+      render(<Harness />);
+
+      await screen.findByText("Alex Rivera");
+      const todayIso = isoDate(new Date());
+      await act(async () => {
+        triggerIntersect(`[data-scheduler-iso="${todayIso}"]`, false);
+      });
+
+      const jump = await screen.findByRole("button", { name: "Jump to today" });
+      fireEvent.click(jump);
+
+      const todayCell = document.querySelector(`[data-scheduler-iso="${todayIso}"]`);
+      expect(todayCell?.scrollIntoView).toHaveBeenCalledWith({
+        block: "start",
+        behavior: "smooth",
+      });
+    } finally {
+      fake.restore();
+    }
+  });
+
+  it("refetches every loaded scheduler page through the SSE scheduler prefix", async () => {
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const fake = installFetch();
+    try {
+      render(
+        <QueryClientProvider client={queryClient}>
+          <WorkspaceProvider>
+            <MemoryRouter initialEntries={["/scheduler"]}>
+              <SchedulerPage />
+            </MemoryRouter>
+          </WorkspaceProvider>
+        </QueryClientProvider>,
+      );
+
+      await screen.findByText("Alex Rivera");
+      await act(async () => {
+        triggerIntersect(".schedule__sentinel--bot");
+      });
+      await waitFor(() => expect(fake.calls).toHaveLength(2));
+      await act(async () => {
+        triggerIntersect(".schedule__sentinel--top");
+      });
+      await waitFor(() => expect(fake.calls).toHaveLength(3));
+
+      const callsBeforeInvalidation = fake.calls.length;
+      await act(async () => {
+        await queryClient.invalidateQueries({ queryKey: qk.schedulerCalendarPrefix() });
+      });
+
+      await waitFor(() => expect(fake.calls.length).toBe(callsBeforeInvalidation + 3));
+      const refetches = fake.calls.slice(callsBeforeInvalidation);
+      const currentWeek = startOfIsoWeekIso(new Date());
+      const expectedWeeks = [
+        addDaysIso(currentWeek, -7),
+        currentWeek,
+        addDaysIso(currentWeek, 7),
+      ];
+      expect(refetches).toEqual(
+        expectedWeeks.map(
+          (from) => `/w/acme/api/v1/scheduler/calendar?from=${from}&to=${addDaysIso(from, 6)}`,
+        ),
+      );
+    } finally {
+      fake.restore();
+      queryClient.clear();
+    }
+  });
+
+  it("removes visible previous and next week navigation buttons", async () => {
+    const fake = installFetch();
+    try {
+      render(<Harness />);
+
+      await screen.findByText("Alex Rivera");
+      expect(screen.queryByRole("button", { name: /previous/i })).toBeNull();
+      expect(screen.queryByRole("button", { name: /next/i })).toBeNull();
+      expect(document.querySelector(".scheduler-weeknav")).toBeNull();
     } finally {
       fake.restore();
     }

@@ -1,5 +1,5 @@
-import { useMemo, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { Fragment, useCallback, useMemo } from "react";
+import type { QueryKey } from "@tanstack/react-query";
 import { CalendarDays } from "lucide-react";
 import { fetchJson } from "@/lib/api";
 import { qk } from "@/lib/queryKeys";
@@ -7,6 +7,13 @@ import PageHeader from "@/components/PageHeader";
 import DeskPage from "@/components/DeskPage";
 import { EmptyState, Loading } from "@/components/common";
 import { useActiveAppRole, useAuth } from "@/auth";
+import {
+  addDays,
+  isoDate,
+  parseIsoDate,
+  startOfIsoWeek,
+} from "@/pages/employee/schedule/lib/dateHelpers";
+import { useInfiniteAgendaCore } from "@/pages/employee/schedule/lib/useInfiniteAgenda";
 import type {
   SchedulerCalendarPayload,
   ScheduleAssignment,
@@ -25,27 +32,6 @@ const WEEKDAYS: { idx: number; short: string; long: string }[] = [
   { idx: 6, short: "Sun", long: "Sunday" },
 ];
 
-function startOfIsoWeek(d: Date): Date {
-  const out = new Date(d);
-  out.setHours(0, 0, 0, 0);
-  const iso = (out.getDay() + 6) % 7;
-  out.setDate(out.getDate() - iso);
-  return out;
-}
-
-function addDays(d: Date, n: number): Date {
-  const out = new Date(d);
-  out.setDate(out.getDate() + n);
-  return out;
-}
-
-function fmtIsoDate(d: Date): string {
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, "0");
-  const day = String(d.getDate()).padStart(2, "0");
-  return `${y}-${m}-${day}`;
-}
-
 function fmtHeaderDate(d: Date): string {
   return d.toLocaleDateString("en-GB", { month: "short", day: "numeric" });
 }
@@ -55,14 +41,79 @@ function timeOfTask(iso: string): string {
   return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
 }
 
-function weekdayOfTask(iso: string): number {
-  const d = new Date(iso);
-  return (d.getDay() + 6) % 7;
+function isoOfTask(iso: string): string {
+  return isoDate(new Date(iso));
 }
 
 interface CellRota {
   assignment: ScheduleAssignment;
   slot: ScheduleRulesetSlot;
+}
+
+interface SchedulerDayCell {
+  date: Date;
+  iso: string;
+}
+
+interface SchedulerWeekGroup {
+  weekStartIso: string;
+  weekLabel: string;
+  cells: SchedulerDayCell[];
+}
+
+function mergeById<T extends { id: string }>(
+  pages: SchedulerCalendarPayload[],
+  pick: (page: SchedulerCalendarPayload) => T[],
+): T[] {
+  const seen = new Map<string, T>();
+  pages.forEach((page) => {
+    pick(page).forEach((item) => seen.set(item.id, item));
+  });
+  return Array.from(seen.values());
+}
+
+function mergeSchedulerPages(
+  pages: SchedulerCalendarPayload[],
+): SchedulerCalendarPayload | null {
+  if (pages.length === 0) return null;
+  const first = pages[0]!;
+  const last = pages[pages.length - 1]!;
+  return {
+    window: { from: first.window.from, to: last.window.to },
+    rulesets: mergeById(pages, (page) => page.rulesets),
+    slots: mergeById(pages, (page) => page.slots),
+    assignments: mergeById(pages, (page) => page.assignments),
+    tasks: mergeById(pages, (page) => page.tasks),
+    users: mergeById(pages, (page) => page.users),
+    properties: mergeById(pages, (page) => page.properties),
+  };
+}
+
+function buildSchedulerCells(from: Date, days: number): SchedulerDayCell[] {
+  return Array.from({ length: days }, (_unused, index) => {
+    const date = addDays(from, index);
+    return { date, iso: isoDate(date) };
+  });
+}
+
+function groupSchedulerCells(cells: SchedulerDayCell[]): SchedulerWeekGroup[] {
+  const groups: SchedulerWeekGroup[] = [];
+  cells.forEach((cell) => {
+    const weekStartIso = isoDate(startOfIsoWeek(cell.date));
+    const last = groups[groups.length - 1];
+    if (last?.weekStartIso === weekStartIso) {
+      last.cells.push(cell);
+      return;
+    }
+    const weekStart = parseIsoDate(weekStartIso);
+    const weekEnd = addDays(weekStart, 6);
+    groups.push({
+      weekStartIso,
+      weekLabel: `${fmtHeaderDate(weekStart)} - ${fmtHeaderDate(weekEnd)}`,
+      cells: [cell],
+    });
+  });
+  return groups;
 }
 
 function SchedulerCell({
@@ -113,27 +164,117 @@ function SchedulerCell({
   );
 }
 
+function SchedulerWeekGrid({
+  group,
+  usersToShow,
+  rotasByCell,
+  tasksByCell,
+  propertyColor,
+  scope,
+  hideLabel,
+}: {
+  group: SchedulerWeekGroup;
+  usersToShow: SchedulerUserView[];
+  rotasByCell: Map<string, CellRota[]>;
+  tasksByCell: Map<string, SchedulerTaskView[]>;
+  propertyColor: (pid: string) => string;
+  scope: "manager" | "employee" | "client";
+  hideLabel: boolean;
+}) {
+  return (
+    <div className="panel scheduler-grid-panel">
+      {!hideLabel && <div className="scheduler-grid-panel__label">{group.weekLabel}</div>}
+      <div className="scheduler-grid" role="grid" aria-label={group.weekLabel}>
+        <div className="scheduler-grid__header scheduler-grid__header--user">Employee</div>
+        {group.cells.map((cell) => {
+          const wd = WEEKDAYS[cell.date.getDay() === 0 ? 6 : cell.date.getDay() - 1]!;
+          return (
+            <div
+              key={cell.iso}
+              className="scheduler-grid__header"
+              data-scheduler-iso={cell.iso}
+            >
+              <strong>{wd.short}</strong>
+              <span className="scheduler-grid__date">{fmtHeaderDate(cell.date)}</span>
+            </div>
+          );
+        })}
+        {usersToShow.map((u) => (
+          <div key={`${group.weekStartIso}-${u.id}`} className="scheduler-row">
+            <div className="scheduler-row__user">
+              <strong>{u.first_name || ","}</strong>
+              {scope !== "client" && u.display_name && (
+                <span className="scheduler-row__sub">{u.display_name}</span>
+              )}
+            </div>
+            {group.cells.map((cell) => {
+              const weekday = (cell.date.getDay() + 6) % 7;
+              const rotaKey = `${u.id}|${weekday}`;
+              const taskKey = `${u.id}|${cell.iso}`;
+              return (
+                <SchedulerCell
+                  key={`${u.id}-${cell.iso}`}
+                  rotas={rotasByCell.get(rotaKey) ?? []}
+                  tasks={tasksByCell.get(taskKey) ?? []}
+                  propertyColor={propertyColor}
+                  scope={scope}
+                />
+              );
+            })}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 export default function SchedulerPage() {
   const role = useActiveAppRole();
   const auth = useAuth();
   const scope: "manager" | "employee" | "client" =
     role === "client" ? "client" : role === "employee" ? "employee" : "manager";
 
-  const [weekStart, setWeekStart] = useState<Date>(() => startOfIsoWeek(new Date()));
-  const resetToThisWeek = () => setWeekStart(startOfIsoWeek(new Date()));
-  const from = fmtIsoDate(weekStart);
-  const to = fmtIsoDate(addDays(weekStart, 6));
-
-  const calQ = useQuery({
-    queryKey: qk.schedulerCalendar(from, to),
-    queryFn: () =>
+  const today = useMemo(() => new Date(), []);
+  const todayIso = useMemo(() => isoDate(today), [today]);
+  const queryKey = useCallback((mondayIso: string): QueryKey => {
+    return qk.schedulerCalendar(mondayIso, isoDate(addDays(parseIsoDate(mondayIso), 6)));
+  }, []);
+  const mergePages = useCallback(
+    (pages: SchedulerCalendarPayload[]) => mergeSchedulerPages(pages),
+    [],
+  );
+  const buildCells = useCallback((from: Date, days: number) => {
+    return buildSchedulerCells(from, days);
+  }, []);
+  const {
+    q: calQ,
+    merged: calendar,
+    cells,
+    containerRef,
+    topSentinelRef,
+    bottomSentinelRef,
+    monthLabel,
+    todayInView,
+    scrollToToday,
+  } = useInfiniteAgendaCore<
+    SchedulerCalendarPayload,
+    SchedulerCalendarPayload,
+    SchedulerDayCell
+  >({
+    today,
+    todayIso,
+    queryKey,
+    queryFn: (fromIso) =>
       fetchJson<SchedulerCalendarPayload>(
-        `/api/v1/scheduler/calendar?from=${from}&to=${to}`,
+        `/api/v1/scheduler/calendar?from=${fromIso}&to=${isoDate(addDays(parseIsoDate(fromIso), 6))}`,
       ),
+    mergePages,
+    buildCells,
+    dataAttribute: "schedulerIso",
   });
 
   const { propertyColor, usersToShow, rotasByCell, tasksByCell } = useMemo(() => {
-    if (!calQ.data) {
+    if (!calendar) {
       return {
         propertyColor: () => "var(--moss-soft)",
         usersToShow: [] as SchedulerUserView[],
@@ -149,21 +290,21 @@ export default function SchedulerPage() {
       "rgba(146, 94, 57, 0.18)",  // earth
     ];
     const propertyIndex = new Map<string, number>();
-    calQ.data.properties.forEach((p, i) => propertyIndex.set(p.id, i));
+    calendar.properties.forEach((p, i) => propertyIndex.set(p.id, i));
     const color = (pid: string): string => {
       const idx = (propertyIndex.get(pid) ?? 0) % palette.length;
       return palette[idx] ?? palette[0]!;
     };
 
     const slotsById = new Map<string, ScheduleRulesetSlot[]>();
-    calQ.data.slots.forEach((s) => {
+    calendar.slots.forEach((s) => {
       const arr = slotsById.get(s.schedule_ruleset_id) ?? [];
       arr.push(s);
       slotsById.set(s.schedule_ruleset_id, arr);
     });
 
     const rotas = new Map<string, CellRota[]>();
-    calQ.data.assignments.forEach((a) => {
+    calendar.assignments.forEach((a) => {
       if (!a.schedule_ruleset_id || !a.user_id) return;
       const slots = slotsById.get(a.schedule_ruleset_id) ?? [];
       slots.forEach((slot) => {
@@ -175,18 +316,18 @@ export default function SchedulerPage() {
     });
 
     const tasks = new Map<string, SchedulerTaskView[]>();
-    calQ.data.tasks.forEach((t) => {
+    calendar.tasks.forEach((t) => {
       if (!t.user_id) return;
-      const key = `${t.user_id}|${weekdayOfTask(t.scheduled_start)}`;
+      const key = `${t.user_id}|${isoOfTask(t.scheduled_start)}`;
       const arr = tasks.get(key) ?? [];
       arr.push(t);
       tasks.set(key, arr);
     });
 
     const users =
-      calQ.data.users.length === 0
-      && calQ.data.assignments.length === 0
-      && calQ.data.tasks.length === 0
+      calendar.users.length === 0
+      && calendar.assignments.length === 0
+      && calendar.tasks.length === 0
       && scope !== "client"
       && auth.user
         ? [
@@ -196,7 +337,7 @@ export default function SchedulerPage() {
               display_name: auth.user.display_name,
             },
           ]
-        : calQ.data.users;
+        : calendar.users;
 
     return {
       propertyColor: color,
@@ -204,7 +345,8 @@ export default function SchedulerPage() {
       rotasByCell: rotas,
       tasksByCell: tasks,
     };
-  }, [auth.user, calQ.data, scope]);
+  }, [auth.user, calendar, scope]);
+  const weekGroups = useMemo(() => groupSchedulerCells(cells), [cells]);
 
   const sub =
     scope === "client"
@@ -215,41 +357,24 @@ export default function SchedulerPage() {
 
   const title = "Scheduler";
 
-  const weekNav = (
-    <div className="scheduler-weeknav">
-      <button
-        type="button"
-        className="btn btn--ghost btn--sm"
-        onClick={() => setWeekStart((w) => addDays(w, -7))}
-      >
-        ← Previous
-      </button>
-      <span className="scheduler-weeknav__label">
-        {fmtHeaderDate(weekStart)} – {fmtHeaderDate(addDays(weekStart, 6))}
-      </span>
-      <button
-        type="button"
-        className="btn btn--ghost btn--sm"
-        onClick={resetToThisWeek}
-      >
-        This week
-      </button>
-      <button
-        type="button"
-        className="btn btn--ghost btn--sm"
-        onClick={() => setWeekStart((w) => addDays(w, 7))}
-      >
-        Next →
-      </button>
-    </div>
-  );
-
   const body = (() => {
-    if (calQ.isPending) return <Loading />;
-    if (!calQ.data) return <p>Failed to load scheduler.</p>;
+    if (calQ.isPending) {
+      return (
+        <div ref={containerRef} className="schedule schedule--desktop scheduler-agenda">
+          <Loading />
+        </div>
+      );
+    }
+    if (!calendar) {
+      return (
+        <div ref={containerRef} className="schedule schedule--desktop scheduler-agenda">
+          <p>Failed to load scheduler.</p>
+        </div>
+      );
+    }
     if (usersToShow.length === 0) {
       return (
-        <section className="panel">
+        <div ref={containerRef} className="panel">
           <EmptyState
             icon={CalendarDays}
             title="No rota data yet"
@@ -260,70 +385,100 @@ export default function SchedulerPage() {
             }
             variant="compact"
           />
-        </section>
+        </div>
       );
     }
 
     return (
-      <>
-        {weekNav}
-        <div className="panel scheduler-grid-panel">
-          <div className="scheduler-grid" role="grid">
-            <div className="scheduler-grid__header scheduler-grid__header--user">Employee</div>
-            {WEEKDAYS.map((wd, i) => (
-              <div key={wd.idx} className="scheduler-grid__header">
-                <strong>{wd.short}</strong>
-                <span className="scheduler-grid__date">
-                  {fmtHeaderDate(addDays(weekStart, i))}
-                </span>
-              </div>
-            ))}
-            {usersToShow.map((u) => (
-              <div key={u.id} className="scheduler-row">
-                <div className="scheduler-row__user">
-                  <strong>{u.first_name || ","}</strong>
-                  {scope !== "client" && u.display_name && (
-                    <span className="scheduler-row__sub">{u.display_name}</span>
-                  )}
-                </div>
-                {WEEKDAYS.map((wd) => {
-                  const key = `${u.id}|${wd.idx}`;
-                  const rotas = rotasByCell.get(key) ?? [];
-                  const tasks = tasksByCell.get(key) ?? [];
-                  return (
-                    <SchedulerCell
-                      key={key}
-                      rotas={rotas}
-                      tasks={tasks}
-                      propertyColor={propertyColor}
-                      scope={scope}
-                    />
-                  );
-                })}
-              </div>
-            ))}
+      <div ref={containerRef} className="schedule schedule--desktop scheduler-agenda">
+        <div className="schedule__sticky-top">
+          <div className="schedule__monthbar" aria-live="polite" aria-atomic="true">
+            <span className="schedule__monthbar-label">{monthLabel}</span>
+            {!todayInView && (
+              <button type="button" className="schedule__monthbar-jump" onClick={scrollToToday}>
+                Today
+              </button>
+            )}
           </div>
-          <div className="scheduler-legend">
-            {calQ.data.properties.map((p) => (
+        </div>
+        <div className="schedule__intro">
+          <div className="schedule__legend" aria-label="Scheduler legend">
+            {calendar.properties.map((p) => (
               <span
                 key={p.id}
-                className="scheduler-legend__item"
+                className="schedule__legend-item"
                 style={{ "--rota-tint": propertyColor(p.id) } as React.CSSProperties}
               >
-                <span className="scheduler-legend__swatch" aria-hidden />
+                <span className="schedule__legend-swatch" aria-hidden />
                 {p.name}
               </span>
             ))}
           </div>
           {scope !== "client" && (
-            <p className="muted">
+            <p className="muted schedule__intro-help">
               Tip: <em>rota gap</em> markers surface weekday slots with no task yet.
               Managers edit rulesets on the Schedules page; workers request overrides
               via Leave.
             </p>
           )}
         </div>
-      </>
+
+        <div className="schedule__agenda">
+          <div
+            ref={topSentinelRef}
+            className="schedule__sentinel schedule__sentinel--top"
+            aria-hidden
+          >
+            {calQ.isFetchingPreviousPage ? (
+              <span className="schedule__sentinel-spinner">Loading earlier…</span>
+            ) : (
+              <span className="schedule__sentinel-hint">Scroll up for past weeks</span>
+            )}
+          </div>
+
+          {weekGroups.map((group, groupIndex) => (
+            <Fragment key={group.weekStartIso}>
+              {groupIndex > 0 && (
+                <div className="schedule__weekgap" aria-hidden>
+                  <span>{group.weekLabel}</span>
+                </div>
+              )}
+              <SchedulerWeekGrid
+                group={group}
+                usersToShow={usersToShow}
+                rotasByCell={rotasByCell}
+                tasksByCell={tasksByCell}
+                propertyColor={propertyColor}
+                scope={scope}
+                hideLabel={groupIndex > 0}
+              />
+            </Fragment>
+          ))}
+
+          <div
+            ref={bottomSentinelRef}
+            className="schedule__sentinel schedule__sentinel--bot"
+            aria-hidden
+          >
+            {calQ.isFetchingNextPage ? (
+              <span className="schedule__sentinel-spinner">Loading next week…</span>
+            ) : (
+              <span className="schedule__sentinel-hint">Keep scrolling for more</span>
+            )}
+          </div>
+        </div>
+
+        {!todayInView && (
+          <button
+            type="button"
+            className="schedule__today-fab"
+            onClick={scrollToToday}
+            aria-label="Jump to today"
+          >
+            Today
+          </button>
+        )}
+      </div>
     );
   })();
 

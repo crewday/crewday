@@ -38,6 +38,15 @@
 .scheduler-grid-panel {
   padding: 18px;
 }
+.scheduler-grid-panel__label {
+  font-family: "Fraunces", ui-serif, serif;
+  font-size: 1.05rem;
+  color: var(--ink);
+  letter-spacing: 0;
+  border-bottom: 1px solid var(--line);
+  padding-bottom: 8px;
+  margin-bottom: 10px;
+}
 .scheduler-grid {
   display: grid;
   grid-template-columns: minmax(140px, 1fr) repeat(7, minmax(110px, 1.2fr));
@@ -165,6 +174,10 @@
   border-radius: 50%;
   background: var(--rota-tint, var(--moss-soft));
   border: 1px solid var(--paper-3);
+}
+
+.scheduler-agenda [data-scheduler-iso] {
+  scroll-margin-top: 88px;
 }
 
 /* ── /schedule — self-only schedule view (§14 "Schedule view") ─────── */

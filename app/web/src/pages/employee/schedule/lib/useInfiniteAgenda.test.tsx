@@ -87,4 +87,24 @@ describe("useInfiniteAgenda", () => {
     expect(path).toBe("/api/v1/me/schedule?from=2026-05-11&to=2026-05-17");
     expect(path).not.toContain("from_=");
   });
+
+  it("moves the fetched window backward when the previous agenda page loads", async () => {
+    fetchJsonMock.mockImplementation(async (path: string) => payloadForPath(path));
+
+    const { result } = renderHook(
+      () => useInfiniteAgenda(new Date(2026, 4, 4), "2026-05-04"),
+      { wrapper: makeWrapper() },
+    );
+
+    await waitFor(() => expect(result.current.q.isSuccess).toBe(true));
+
+    await act(async () => {
+      await result.current.q.fetchPreviousPage();
+    });
+
+    expect(fetchJsonMock).toHaveBeenCalledTimes(2);
+    const path = fetchJsonMock.mock.calls[1]![0];
+    expect(path).toBe("/api/v1/me/schedule?from=2026-04-27&to=2026-05-03");
+    expect(path).not.toContain("from_=");
+  });
 });
