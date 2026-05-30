@@ -106,6 +106,10 @@ function installFetch(options: {
   shareGuestIdentity?: boolean;
   createStay?: (body: unknown) => { status?: number; body?: unknown };
   createFeed?: (body: unknown) => { status?: number; body?: unknown };
+  memberships?: Record<string, {
+    membershipRole?: "owner_workspace" | "managed_workspace" | "observer_workspace";
+    shareGuestIdentity?: boolean;
+  }>;
 } = {}) {
   const reservations = [...(options.reservations ?? [])];
   const feeds = [...(options.feeds ?? [])];
@@ -114,6 +118,10 @@ function installFetch(options: {
     ? { prop_1: options.units }
     : options.units ?? { prop_1: [unit] };
   const unitsFor = (propertyId: string) => unitsByProperty[propertyId] ?? [];
+  const membershipFor = (propertyId: string) => ({
+    membershipRole: options.memberships?.[propertyId]?.membershipRole ?? options.membershipRole ?? "owner_workspace",
+    shareGuestIdentity: options.memberships?.[propertyId]?.shareGuestIdentity ?? options.shareGuestIdentity ?? false,
+  });
   return installFetchRouteHandlers([
     {
       path: "/api/v1/auth/me",
@@ -194,17 +202,18 @@ function installFetch(options: {
       path: "/w/acme/api/v1/properties/prop_1/share",
       respond: {
         body: {
-          data: [
-            {
+          data: (() => {
+            const membership = membershipFor("prop_1");
+            return [{
               property_id: "prop_1",
               workspace_id: "ws_1",
               label: "Acme",
-              membership_role: options.membershipRole ?? "owner_workspace",
+              membership_role: membership.membershipRole,
               status: "active",
-              share_guest_identity: options.shareGuestIdentity ?? false,
+              share_guest_identity: membership.shareGuestIdentity,
               created_at: "2026-04-01T00:00:00Z",
-            },
-          ],
+            }];
+          })(),
         },
       },
     },
@@ -212,17 +221,18 @@ function installFetch(options: {
       path: "/w/acme/api/v1/properties/prop_2/share",
       respond: {
         body: {
-          data: [
-            {
+          data: (() => {
+            const membership = membershipFor("prop_2");
+            return [{
               property_id: "prop_2",
               workspace_id: "ws_1",
               label: "Acme",
-              membership_role: options.membershipRole ?? "owner_workspace",
+              membership_role: membership.membershipRole,
               status: "active",
-              share_guest_identity: options.shareGuestIdentity ?? false,
+              share_guest_identity: membership.shareGuestIdentity,
               created_at: "2026-04-01T00:00:00Z",
-            },
-          ],
+            }];
+          })(),
         },
       },
     },
@@ -410,16 +420,15 @@ describe("<StaysPage>", () => {
     try {
       render(<Harness initial="/w/acme/property/prop_2/stays" />);
 
-      fireEvent.click(await screen.findByRole("button", { name: "More actions" }));
-      fireEvent.click(screen.getByRole("menuitem", { name: "Add stay" }));
-
-      const stayDialog = await screen.findByRole("dialog", { name: "Add stay" });
-      expect(within(stayDialog).getByRole("combobox", { name: /^Property\b/ })).toHaveValue("Beach House");
-      expect(within(stayDialog).getByRole("combobox", { name: /^Unit\b/ })).toHaveValue("Cabana");
-      fireEvent.change(within(stayDialog).getByLabelText(/^Guest name\b/), { target: { value: "Beach Guest" } });
-      fireEvent.change(within(stayDialog).getByLabelText(/^Check-in\b/), { target: { value: "2026-04-21" } });
-      fireEvent.change(within(stayDialog).getByLabelText(/^Check-out\b/), { target: { value: "2026-04-23" } });
-      fireEvent.click(within(stayDialog).getByRole("button", { name: "Create stay" }));
+      expect(await screen.findByText("Other Guest")).toBeInTheDocument();
+      expect(screen.queryByRole("menuitem", { name: "Add stay" })).toBeNull();
+      const stayRow = screen.getByLabelText("New stay");
+      expect(within(stayRow).getByRole("combobox", { name: /^Property\b/ })).toHaveValue("Beach House");
+      expect(within(stayRow).getByRole("combobox", { name: /^Unit\b/ })).toHaveValue("Cabana");
+      fireEvent.change(within(stayRow).getByLabelText(/^Guest name\b/), { target: { value: "Beach Guest" } });
+      fireEvent.change(within(stayRow).getByLabelText(/^Check-in\b/), { target: { value: "2026-04-21" } });
+      fireEvent.change(within(stayRow).getByLabelText(/^Check-out\b/), { target: { value: "2026-04-23" } });
+      fireEvent.click(within(stayRow).getByRole("button", { name: "Save" }));
 
       await waitFor(() => {
         const createRequest = fake.requests.find((request) => request.method === "POST" && request.path === "/w/acme/api/v1/stays");
@@ -517,6 +526,30 @@ describe("<StaysPage>", () => {
     }
   });
 
+  it("selects draft stay dates from the shared planner without saving", async () => {
+    const todayIso = isoOffset(0);
+    const tomorrowIso = isoOffset(1);
+    const checkoutIso = isoOffset(2);
+    const fake = installFetch();
+    try {
+      render(<Harness />);
+
+      const createRow = await screen.findByLabelText("New stay");
+      expect(screen.getByText("Scroll up for past weeks")).toBeInTheDocument();
+      const dayCell = (iso: string) => screen.getByLabelText(new RegExp(iso));
+
+      fireEvent.pointerDown(dayCell(todayIso), { button: 0 });
+      fireEvent.pointerEnter(dayCell(tomorrowIso), { buttons: 1 });
+
+      expect(within(createRow).getByLabelText(/^Check-in\b/)).toHaveValue(todayIso);
+      expect(within(createRow).getByLabelText(/^Check-out\b/)).toHaveValue(checkoutIso);
+      expect(within(dayCell(todayIso)).getByLabelText("Draft stay, Unsaved manual stay")).toBeInTheDocument();
+      expect(fake.requests.some((request) => request.method === "POST" && request.path === "/w/acme/api/v1/stays")).toBe(false);
+    } finally {
+      fake.restore();
+    }
+  });
+
   it("renders the agenda when cached stay payload is missing leaves", async () => {
     const fake = installFetch({ reservations: [existingReservation] });
     const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -549,24 +582,22 @@ describe("<StaysPage>", () => {
       render(<Harness />);
 
       expect(await screen.findByText("Ada Existing")).toBeInTheDocument();
+      expect(screen.queryByRole("menuitem", { name: "Add stay" })).toBeNull();
 
-      fireEvent.click(screen.getByRole("button", { name: "More actions" }));
-      fireEvent.click(screen.getByRole("menuitem", { name: "Add stay" }));
+      const createRow = screen.getByLabelText("New stay");
+      fireEvent.change(within(createRow).getByLabelText(/^Guest name\b/), { target: { value: "Bea Guest" } });
+      fireEvent.change(within(createRow).getByLabelText(/^Guests\b/), { target: { value: "3" } });
+      fireEvent.change(within(createRow).getByLabelText(/^Check-in\b/), { target: { value: "2026-04-19" } });
+      fireEvent.change(within(createRow).getByLabelText(/^Check-out\b/), { target: { value: "2026-04-21" } });
 
-      const dialog = await screen.findByRole("dialog", { name: "Add stay" });
-      fireEvent.change(within(dialog).getByLabelText(/^Guest name\b/), { target: { value: "Bea Guest" } });
-      fireEvent.change(within(dialog).getByLabelText(/^Guests\b/), { target: { value: "3" } });
-      fireEvent.change(within(dialog).getByLabelText(/^Check-in\b/), { target: { value: "2026-04-19" } });
-      fireEvent.change(within(dialog).getByLabelText(/^Check-out\b/), { target: { value: "2026-04-21" } });
+      expect(within(createRow).getByText(/Overlaps Ada Existing/)).toBeInTheDocument();
 
-      expect(within(dialog).getByText(/Overlaps Ada Existing/)).toBeInTheDocument();
-
-      fireEvent.change(within(dialog).getByLabelText(/^Check-in\b/), { target: { value: "2026-04-21" } });
-      fireEvent.change(within(dialog).getByLabelText(/^Check-out\b/), { target: { value: "2026-04-23" } });
+      fireEvent.change(within(createRow).getByLabelText(/^Check-in\b/), { target: { value: "2026-04-21" } });
+      fireEvent.change(within(createRow).getByLabelText(/^Check-out\b/), { target: { value: "2026-04-23" } });
       const reservationFetchesBeforeCreate = fake.requests.filter(
         (request) => request.path === "/w/acme/api/v1/stays/reservations?limit=500",
       ).length;
-      fireEvent.click(within(dialog).getByRole("button", { name: "Create stay" }));
+      fireEvent.click(within(createRow).getByRole("button", { name: "Save" }));
 
       await waitFor(() => expect(screen.getByText("Bea Guest")).toBeInTheDocument());
       const createRequest = fake.requests.find((request) => request.method === "POST" && request.path === "/w/acme/api/v1/stays");
@@ -589,6 +620,42 @@ describe("<StaysPage>", () => {
     }
   });
 
+  it("keeps new-row stay validation and server errors local to the inline row", async () => {
+    const fake = installFetch({
+      createStay: () => ({
+        status: 422,
+        body: {
+          type: "validation",
+          title: "Validation failed",
+          user_message: "Server rejected these stay dates.",
+        },
+      }),
+    });
+    try {
+      render(<Harness />);
+
+      const createRow = await screen.findByLabelText("New stay");
+      fireEvent.change(within(createRow).getByLabelText(/^Guest name\b/), { target: { value: "Bea Guest" } });
+      fireEvent.change(within(createRow).getByLabelText(/^Check-in\b/), { target: { value: "2026-04-21" } });
+      fireEvent.change(within(createRow).getByLabelText(/^Check-out\b/), { target: { value: "2026-04-23" } });
+      fireEvent.click(within(createRow).getByRole("button", { name: "Save" }));
+
+      expect(await within(createRow).findByText("Server rejected these stay dates.")).toBeInTheDocument();
+      expect(within(createRow).getByLabelText(/^Guest name\b/)).toHaveValue("Bea Guest");
+      expect(within(createRow).getByLabelText(/^Check-in\b/)).toHaveValue("2026-04-21");
+      expect(within(createRow).getByLabelText(/^Check-out\b/)).toHaveValue("2026-04-23");
+
+      fireEvent.change(within(createRow).getByLabelText(/^Guest name\b/), { target: { value: "" } });
+      fireEvent.click(within(createRow).getByRole("button", { name: "Save" }));
+
+      expect(within(createRow).getByText("Guest name is required for this property.")).toBeInTheDocument();
+      expect(within(createRow).queryByText("Server rejected these stay dates.")).toBeNull();
+      expect(fake.requests.filter((request) => request.method === "POST" && request.path === "/w/acme/api/v1/stays")).toHaveLength(1);
+    } finally {
+      fake.restore();
+    }
+  });
+
   it("checks overlap by unit and hides guest identity for non-sharing workspaces", async () => {
     const fake = installFetch({
       reservations: [{ ...existingReservation, unit_id: "unit_2" }],
@@ -602,26 +669,54 @@ describe("<StaysPage>", () => {
       expect(await screen.findByText("Hidden guest")).toBeInTheDocument();
       expect(screen.queryByText("Ada Existing")).not.toBeInTheDocument();
 
-      fireEvent.click(screen.getByRole("button", { name: "More actions" }));
-      fireEvent.click(screen.getByRole("menuitem", { name: "Add stay" }));
+      const createRow = screen.getByLabelText("New stay");
+      expect(within(createRow).getByLabelText(/^Guest name\b/)).toBeDisabled();
 
-      const dialog = await screen.findByRole("dialog", { name: "Add stay" });
-      expect(within(dialog).getByLabelText(/^Guest name\b/)).toBeDisabled();
+      fireEvent.change(within(createRow).getByLabelText(/^Check-in\b/), { target: { value: "2026-04-19" } });
+      fireEvent.change(within(createRow).getByLabelText(/^Check-out\b/), { target: { value: "2026-04-21" } });
+      expect(within(createRow).queryByText(/Overlaps/)).not.toBeInTheDocument();
 
-      fireEvent.change(within(dialog).getByLabelText(/^Check-in\b/), { target: { value: "2026-04-19" } });
-      fireEvent.change(within(dialog).getByLabelText(/^Check-out\b/), { target: { value: "2026-04-21" } });
-      expect(within(dialog).queryByText(/Overlaps/)).not.toBeInTheDocument();
+      await chooseSearchableOption(createRow, /^Unit\b/, "Roof Studio");
+      expect(within(createRow).getByText(/Overlaps Hidden guest/)).toBeInTheDocument();
 
-      await chooseSearchableOption(dialog, /^Unit\b/, "Roof Studio");
-      expect(within(dialog).getByText(/Overlaps Hidden guest/)).toBeInTheDocument();
-
-      fireEvent.change(within(dialog).getByLabelText(/^Check-in\b/), { target: { value: "2026-04-21" } });
-      fireEvent.change(within(dialog).getByLabelText(/^Check-out\b/), { target: { value: "2026-04-23" } });
-      fireEvent.click(within(dialog).getByRole("button", { name: "Create stay" }));
+      fireEvent.change(within(createRow).getByLabelText(/^Check-in\b/), { target: { value: "2026-04-21" } });
+      fireEvent.change(within(createRow).getByLabelText(/^Check-out\b/), { target: { value: "2026-04-23" } });
+      fireEvent.click(within(createRow).getByRole("button", { name: "Save" }));
 
       await waitFor(() => expect(fake.requests.some((request) => request.method === "POST")).toBe(true));
       const createRequest = fake.requests.find((request) => request.method === "POST" && request.path === "/w/acme/api/v1/stays");
       expect(createRequest?.body).toMatchObject({ unit_id: "unit_2", guest_name: null });
+    } finally {
+      fake.restore();
+    }
+  });
+
+  it("does not leak a stale draft guest name after switching to a non-sharing property", async () => {
+    const todayIso = isoOffset(0);
+    const checkoutIso = isoOffset(2);
+    const fake = installFetch({
+      properties: [property, secondProperty],
+      units: { prop_1: [unit], prop_2: [otherPropertyUnit] },
+      memberships: {
+        prop_1: { membershipRole: "owner_workspace", shareGuestIdentity: false },
+        prop_2: { membershipRole: "managed_workspace", shareGuestIdentity: false },
+      },
+    });
+    try {
+      render(<Harness />);
+
+      const createRow = await screen.findByLabelText("New stay");
+      fireEvent.change(within(createRow).getByLabelText(/^Guest name\b/), { target: { value: "Private Guest" } });
+      await chooseSearchableOption(createRow, /^Property\b/, "Beach House");
+      fireEvent.change(within(createRow).getByLabelText(/^Check-in\b/), { target: { value: todayIso } });
+      fireEvent.change(within(createRow).getByLabelText(/^Check-out\b/), { target: { value: checkoutIso } });
+
+      expect(within(createRow).getByRole("combobox", { name: /^Property\b/ })).toHaveValue("Beach House");
+      expect(within(createRow).getByLabelText(/^Guest name\b/)).toBeDisabled();
+      expect(within(createRow).getByLabelText(/^Guest name\b/)).toHaveValue("");
+      const dayCell = screen.getByLabelText(new RegExp(todayIso));
+      expect(within(dayCell).getByLabelText("Draft stay, Unsaved manual stay")).toBeInTheDocument();
+      expect(screen.queryByText("Private Guest")).toBeNull();
     } finally {
       fake.restore();
     }

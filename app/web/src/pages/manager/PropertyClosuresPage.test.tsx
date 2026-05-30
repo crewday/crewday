@@ -275,6 +275,13 @@ beforeEach(() => {
   __resetApiProvidersForTests();
   __resetQueryKeyGetterForTests();
   vi.spyOn(preferences, "readWorkspaceCookie").mockReturnValue("acme");
+  Element.prototype.scrollIntoView = vi.fn();
+  class TestIntersectionObserver {
+    observe = vi.fn();
+    disconnect = vi.fn();
+    unobserve = vi.fn();
+  }
+  vi.stubGlobal("IntersectionObserver", TestIntersectionObserver);
   HTMLDialogElement.prototype.showModal = vi.fn(function showModal(this: HTMLDialogElement) {
     this.setAttribute("open", "");
   });
@@ -287,6 +294,7 @@ afterEach(() => {
   cleanup();
   __resetApiProvidersForTests();
   __resetQueryKeyGetterForTests();
+  vi.unstubAllGlobals();
   vi.restoreAllMocks();
 });
 
@@ -318,30 +326,14 @@ describe("<PropertyClosuresPage>", () => {
       const importedRow = screen.getByLabelText("Owner repainting west wing closure from 20 Apr to 21 Apr");
       expect(within(importedRow).getByRole("button", { name: "Edit" })).toBeDisabled();
       expect(within(importedRow).getByRole("button", { name: "Delete" })).toBeDisabled();
-      expect(screen.getByText("Calendar view")).toBeInTheDocument();
-      const calendar = screen.getByRole("grid", { name: "April 2026 property calendar" });
-      expect(screen.getByRole("grid", { name: "May 2026 property calendar" })).toBeInTheDocument();
-      expect(screen.getByRole("grid", { name: "June 2026 property calendar" })).toBeInTheDocument();
-      expect(Array.from(calendar.children).slice(0, 10).map((el) => el.textContent)).toEqual([
-        "Mon",
-        "Tue",
-        "Wed",
-        "Thu",
-        "Fri",
-        "Sat",
-        "Sun",
-        "",
-        "",
-        "1",
-      ]);
-      expect(calendar.querySelectorAll(".mini-cal__blank")).toHaveLength(2);
-      expect(within(calendar).getByRole("gridcell", { name: /^2026-04-16\b/ })).toHaveClass("mini-cal__day--today");
-      const importedCell = within(calendar).getByRole("gridcell", {
-        name: /2026-04-20.*Owner repainting west wing closure, iCal source/,
-      });
-      expect(within(importedCell).getByText("Owner repainting west wing")).toBeInTheDocument();
-      expect(within(importedCell).getByText("iCal")).toBeInTheDocument();
-      expect(within(importedCell).getByTitle("Owner repainting west wing closure, iCal source")).toBeInTheDocument();
+      expect(screen.getByText("Planner")).toBeInTheDocument();
+      expect(screen.getByText("Scroll up for past weeks")).toBeInTheDocument();
+      expect(screen.getByText("Keep scrolling for more")).toBeInTheDocument();
+      expect(screen.getByLabelText("Stays calendar legend")).toBeInTheDocument();
+      const todayCell = screen.getByLabelText(/Thu 16 Apr, 2026-04-16.*Ada Guest stay/);
+      expect(todayCell).toHaveClass("schedule-day--today");
+      expect(within(todayCell).getByText("Ada Guest")).toBeInTheDocument();
+      expect(document.querySelector(".mini-cal")).toBeNull();
       expect(fake.calls).toContain("/w/acme/api/v1/property_closures?property_id=prop_1&limit=100");
       expect(fake.calls).toContain("/w/acme/api/v1/stays/reservations?property_id=prop_1&limit=100");
     } finally {
@@ -349,107 +341,7 @@ describe("<PropertyClosuresPage>", () => {
     }
   });
 
-  it("renders closure reason and source across the current and next two calendar months", async () => {
-    const fake = installFetch({ boundaryClosure: true });
-    try {
-      render(<Harness />);
-
-      const april = await screen.findByRole("grid", { name: "April 2026 property calendar" });
-      const may = screen.getByRole("grid", { name: "May 2026 property calendar" });
-      expect(screen.getByRole("grid", { name: "June 2026 property calendar" })).toBeInTheDocument();
-
-      const aprilStart = within(april).getByRole("gridcell", { name: /^2026-04-29\b/ });
-      const mayMiddle = within(may).getByRole("gridcell", { name: /^2026-05-01\b/ });
-      const mayEnd = within(may).getByRole("gridcell", { name: /^2026-05-03\b/ });
-      const exclusiveEnd = within(may).getByRole("gridcell", { name: "2026-05-04" });
-
-      for (const cell of [aprilStart, mayMiddle, mayEnd]) {
-        expect(within(cell).getByText("Owner stay")).toBeInTheDocument();
-        expect(within(cell).getByText("manual")).toBeInTheDocument();
-        expect(within(cell).getByTitle("Owner stay closure, manual source")).toBeInTheDocument();
-      }
-      expect(within(exclusiveEnd).queryByText("Owner stay")).toBeNull();
-    } finally {
-      fake.restore();
-    }
-  });
-
-  it("selects a draft closure range from calendar day pointers into the create row", async () => {
-    const fake = installFetch();
-    try {
-      render(<Harness />);
-
-      const createRow = await screen.findByLabelText("New closure");
-      const april = screen.getByRole("grid", { name: "April 2026 property calendar" });
-      const dayCell = (iso: string) => within(april).getByRole("gridcell", { name: new RegExp(`^${iso}\\b`) });
-
-      fireEvent.pointerDown(dayCell("2026-04-10"), { button: 0 });
-      fireEvent.pointerEnter(dayCell("2026-04-16"), { buttons: 1 });
-
-      expect(within(createRow).getByLabelText("Start date")).toHaveValue("2026-04-10");
-      expect(within(createRow).getByLabelText("End date")).toHaveValue("2026-04-16");
-      expect(within(dayCell("2026-04-12")).getByLabelText("Draft closure")).toBeInTheDocument();
-      expect(within(dayCell("2026-04-10")).getByText("Renovation")).toBeInTheDocument();
-      expect(dayCell("2026-04-16").querySelector(".mini-cal__bar")).toBeInTheDocument();
-      fireEvent.pointerUp(dayCell("2026-04-16"));
-
-      fireEvent.change(within(createRow).getByLabelText("Reason"), { target: { value: "Floor repair" } });
-      expect(within(dayCell("2026-04-12")).getByLabelText("Floor repair draft closure")).toBeInTheDocument();
-      expect(within(dayCell("2026-04-12")).getByText("Floor repair")).toBeInTheDocument();
-
-      fireEvent.change(within(createRow).getByLabelText("Reason"), { target: { value: "" } });
-      expect(within(dayCell("2026-04-12")).getByLabelText("Draft closure")).toBeInTheDocument();
-      fireEvent.click(within(createRow).getByRole("button", { name: "Save" }));
-      expect(within(createRow).getByText("Reason is required.")).toBeInTheDocument();
-      expect(fake.requests.some((request) => request.url === "/w/acme/api/v1/property_closures" && request.init?.method === "POST")).toBe(false);
-
-      fireEvent.pointerDown(dayCell("2026-04-10"), { button: 0 });
-      fireEvent.pointerEnter(dayCell("2026-04-06"), { buttons: 1 });
-      fireEvent.pointerUp(dayCell("2026-04-06"));
-
-      expect(within(createRow).getByLabelText("Start date")).toHaveValue("2026-04-06");
-      expect(within(createRow).getByLabelText("End date")).toHaveValue("2026-04-10");
-      expect(within(dayCell("2026-04-08")).getByLabelText("Draft closure")).toBeInTheDocument();
-      expect(fake.requests.some((request) => request.url === "/w/acme/api/v1/property_closures" && request.init?.method === "POST")).toBe(false);
-
-      fireEvent.change(within(createRow).getByLabelText("Start date"), { target: { value: "2026-04-14" } });
-      fireEvent.change(within(createRow).getByLabelText("End date"), { target: { value: "2026-04-15" } });
-
-      expect(within(dayCell("2026-04-14")).getByLabelText("Draft closure")).toBeInTheDocument();
-      expect(within(dayCell("2026-04-15")).getByLabelText("Draft closure")).toBeInTheDocument();
-      expect(within(dayCell("2026-04-13")).queryByLabelText("Draft closure")).toBeNull();
-    } finally {
-      fake.restore();
-    }
-  });
-
-  it("stops calendar range selection when a stale drag re-enters without the primary button held", async () => {
-    const fake = installFetch();
-    try {
-      render(<Harness />);
-
-      const createRow = await screen.findByLabelText("New closure");
-      const april = screen.getByRole("grid", { name: "April 2026 property calendar" });
-      const dayCell = (iso: string) => within(april).getByRole("gridcell", { name: new RegExp(`^${iso}\\b`) });
-
-      fireEvent.pointerDown(dayCell("2026-04-10"), { button: 0 });
-      fireEvent.pointerEnter(dayCell("2026-04-16"), { buttons: 0 });
-
-      expect(within(createRow).getByLabelText("Start date")).toHaveValue("2026-04-10");
-      expect(within(createRow).getByLabelText("End date")).toHaveValue("2026-04-10");
-      expect(within(dayCell("2026-04-16")).queryByLabelText("Draft closure")).toBeNull();
-
-      fireEvent.pointerEnter(dayCell("2026-04-18"), { buttons: 1 });
-
-      expect(within(createRow).getByLabelText("Start date")).toHaveValue("2026-04-10");
-      expect(within(createRow).getByLabelText("End date")).toHaveValue("2026-04-10");
-      expect(within(dayCell("2026-04-18")).queryByLabelText("Draft closure")).toBeNull();
-    } finally {
-      fake.restore();
-    }
-  });
-
-  it("stacks closure calendar months and lays out closure chip text vertically", async () => {
+  it("renders closure and stay markers in the shared infinite planner", async () => {
     const fake = installFetch({
       closureRows: [{
         id: "closure_overlap",
@@ -463,48 +355,116 @@ describe("<PropertyClosuresPage>", () => {
     try {
       render(<Harness />);
 
-      const calendarGroup = await screen.findByRole("group", { name: "Three-month property calendar" });
-      const months = Array.from(calendarGroup.querySelectorAll(".property-calendar__month"));
-      expect(months).toHaveLength(3);
-      expect(months.map((month) => within(month as HTMLElement).getByRole("heading").textContent)).toEqual([
-        "April 2026",
-        "May 2026",
-        "June 2026",
-      ]);
+      const overlapCell = await screen.findByLabelText(/Thu 16 Apr, 2026-04-16.*Ada Guest stay.*Owner stay closure/);
+      expect(within(overlapCell).getByText("Ada Guest")).toBeInTheDocument();
+      expect(within(overlapCell).getByText("Closure")).toBeInTheDocument();
+      expect(within(overlapCell).getByText(/Villa Rosa · Owner stay/)).toBeInTheDocument();
+      expect(screen.getByText("Scroll up for past weeks")).toBeInTheDocument();
+      expect(screen.getByText("Keep scrolling for more")).toBeInTheDocument();
+    } finally {
+      fake.restore();
+    }
+  });
 
-      const april = screen.getByRole("grid", { name: "April 2026 property calendar" });
-      const overlapCell = within(april).getByRole("gridcell", {
-        name: /2026-04-16.*Owner stay closure, manual source.*Ada Guest stay, manual source/,
-      });
-      const closureChip = within(overlapCell).getByTitle("Owner stay closure, manual source");
-      const stayBar = overlapCell.querySelector(".mini-cal__bar");
-      const [dayNumber, chipSibling, staySibling] = Array.from(overlapCell.children);
+  it("selects a draft closure range from calendar day pointers into the create row", async () => {
+    const fake = installFetch();
+    try {
+      render(<Harness />);
 
-      expect(dayNumber).toHaveClass("mini-cal__num");
-      expect(chipSibling).toBe(closureChip);
-      expect(staySibling).toBe(stayBar);
-      expect(stayBar).toBeInTheDocument();
-      expect(Array.from(closureChip.children).map((child) => child.className)).toEqual([
-        "mini-cal__closure-reason",
-        "mini-cal__closure-source",
-      ]);
+      const createRow = await screen.findByLabelText("New closure");
+      const dayCell = (iso: string) => screen.getByLabelText(new RegExp(iso));
 
-      const calendarRule = cssRule(".property-calendar");
-      const closureRule = cssRule(".mini-cal__closure");
-      const closureTextRule = cssRule(".mini-cal__closure-reason,\n.mini-cal__closure-source");
-      const sourceRule = cssRule(".mini-cal__closure-source", managerPanelsCss, 1);
+      fireEvent.pointerDown(dayCell("2026-04-14"), { button: 0 });
+      fireEvent.pointerEnter(dayCell("2026-04-16"), { buttons: 1 });
 
-      expectCssDeclaration(calendarRule, "grid-template-columns", "minmax(0, 1fr)");
-      expect(managerPanelsCss).not.toMatch(/\.property-calendar\s*{[^}]*repeat\(auto-fit/);
-      expectCssDeclaration(closureRule, "display", "flex");
-      expectCssDeclaration(closureRule, "flex-direction", "column");
-      expectCssDeclaration(closureRule, "max-width", "100%");
-      expectCssDeclaration(closureRule, "overflow", "hidden");
-      expectCssDeclaration(closureTextRule, "width", "100%");
-      expectCssDeclaration(closureTextRule, "max-width", "100%");
-      expectCssDeclaration(closureTextRule, "text-overflow", "ellipsis");
-      expectCssDeclaration(sourceRule, "color", "var(--ink-3)");
-      expect(managerPanelsCss).not.toMatch(/\.mini-cal__closure-source\s*{[^}]*clip:\s*rect/);
+      expect(within(createRow).getByLabelText("Start date")).toHaveValue("2026-04-14");
+      expect(within(createRow).getByLabelText("End date")).toHaveValue("2026-04-16");
+      expect(within(dayCell("2026-04-15")).getByLabelText("Draft closure, Unsaved closure")).toBeInTheDocument();
+      expect(within(dayCell("2026-04-16")).getByText("Ada Guest")).toBeInTheDocument();
+      fireEvent.pointerUp(dayCell("2026-04-16"));
+
+      fireEvent.change(within(createRow).getByLabelText("Reason"), { target: { value: "Floor repair" } });
+      expect(within(dayCell("2026-04-15")).getByLabelText("Floor repair, Unsaved closure")).toBeInTheDocument();
+      expect(within(dayCell("2026-04-15")).getByText("Floor repair")).toBeInTheDocument();
+
+      fireEvent.change(within(createRow).getByLabelText("Reason"), { target: { value: "" } });
+      expect(within(dayCell("2026-04-15")).getByLabelText("Draft closure, Unsaved closure")).toBeInTheDocument();
+      fireEvent.click(within(createRow).getByRole("button", { name: "Save" }));
+      expect(within(createRow).getByText("Reason is required.")).toBeInTheDocument();
+      expect(fake.requests.some((request) => request.url === "/w/acme/api/v1/property_closures" && request.init?.method === "POST")).toBe(false);
+
+      fireEvent.pointerDown(dayCell("2026-04-18"), { button: 0 });
+      fireEvent.pointerEnter(dayCell("2026-04-14"), { buttons: 1 });
+      fireEvent.pointerUp(dayCell("2026-04-14"));
+
+      expect(within(createRow).getByLabelText("Start date")).toHaveValue("2026-04-14");
+      expect(within(createRow).getByLabelText("End date")).toHaveValue("2026-04-18");
+      expect(within(dayCell("2026-04-17")).getByLabelText("Draft closure, Unsaved closure")).toBeInTheDocument();
+      expect(fake.requests.some((request) => request.url === "/w/acme/api/v1/property_closures" && request.init?.method === "POST")).toBe(false);
+
+      fireEvent.change(within(createRow).getByLabelText("Start date"), { target: { value: "2026-04-14" } });
+      fireEvent.change(within(createRow).getByLabelText("End date"), { target: { value: "2026-04-15" } });
+
+      expect(within(dayCell("2026-04-14")).getByLabelText("Draft closure, Unsaved closure")).toBeInTheDocument();
+      expect(within(dayCell("2026-04-15")).getByLabelText("Draft closure, Unsaved closure")).toBeInTheDocument();
+      expect(within(dayCell("2026-04-13")).queryByLabelText("Draft closure, Unsaved closure")).toBeNull();
+    } finally {
+      fake.restore();
+    }
+  });
+
+  it("stops calendar range selection when a stale drag re-enters without the primary button held", async () => {
+    const fake = installFetch();
+    try {
+      render(<Harness />);
+
+      const createRow = await screen.findByLabelText("New closure");
+      const dayCell = (iso: string) => screen.getByLabelText(new RegExp(iso));
+
+      fireEvent.pointerDown(dayCell("2026-04-14"), { button: 0 });
+      fireEvent.pointerEnter(dayCell("2026-04-16"), { buttons: 0 });
+
+      expect(within(createRow).getByLabelText("Start date")).toHaveValue("2026-04-14");
+      expect(within(createRow).getByLabelText("End date")).toHaveValue("2026-04-14");
+      expect(within(dayCell("2026-04-16")).queryByLabelText("Draft closure, Unsaved closure")).toBeNull();
+
+      fireEvent.pointerEnter(dayCell("2026-04-18"), { buttons: 1 });
+
+      expect(within(createRow).getByLabelText("Start date")).toHaveValue("2026-04-14");
+      expect(within(createRow).getByLabelText("End date")).toHaveValue("2026-04-14");
+      expect(within(dayCell("2026-04-18")).queryByLabelText("Draft closure, Unsaved closure")).toBeNull();
+    } finally {
+      fake.restore();
+    }
+  });
+
+  it("uses the shared infinite planner layout for closures", async () => {
+    const fake = installFetch({
+      closureRows: [{
+        id: "closure_overlap",
+        property_id: "prop_1",
+        starts_at: "2026-04-16T00:00:00Z",
+        ends_at: "2026-04-17T00:00:00Z",
+        reason: "Owner stay",
+        source_ical_feed_id: null,
+      }],
+    });
+    try {
+      render(<Harness />);
+
+      expect(await screen.findByText("Scroll up for past weeks")).toBeInTheDocument();
+      const overlapCell = screen.getByLabelText(/Thu 16 Apr, 2026-04-16.*Ada Guest stay.*Owner stay closure/);
+      const closureEvent = within(overlapCell).getByLabelText("Closure: Owner stay, manual source");
+      expect(closureEvent).toHaveClass("stays-day__event--closed");
+      expect(within(overlapCell).getByText("Ada Guest")).toBeInTheDocument();
+      expect(document.querySelector(".property-calendar")).toBeNull();
+      expect(document.querySelector(".mini-cal")).toBeNull();
+
+      const dayRule = cssRule(".stays-day");
+      const draftRule = cssRule(".stays-day__event--draft");
+      expectCssDeclaration(dayRule, "cursor", "crosshair");
+      expectCssDeclaration(dayRule, "touch-action", "none");
+      expectCssDeclaration(draftRule, "outline", "1px dashed var(--moss)");
     } finally {
       fake.restore();
     }
@@ -710,6 +670,12 @@ describe("<PropertyClosuresPage>", () => {
       expect(within(createRow).getByLabelText("Start date")).toHaveValue("2026-04-16");
       expect(within(createRow).getByLabelText("End date")).toHaveValue("2026-04-18");
       expect(within(createRow).getByLabelText("Reason")).toHaveValue("Owner repainting west wing");
+
+      fireEvent.change(within(createRow).getByLabelText("Reason"), { target: { value: "" } });
+      fireEvent.click(within(createRow).getByRole("button", { name: "Save" }));
+
+      expect(within(createRow).getByText("Reason is required.")).toBeInTheDocument();
+      expect(within(createRow).queryByText("Date range overlaps another closure.")).toBeNull();
     } finally {
       fake.restore();
     }
@@ -793,6 +759,12 @@ describe("<PropertyClosuresPage>", () => {
       expect(await within(manualRow).findByText("Date range overlaps another closure.")).toBeInTheDocument();
       expect(within(manualRow).getByLabelText("Start date")).toHaveValue("2026-04-11");
       expect(within(manualRow).getByLabelText("Reason")).toHaveValue("Owner maintenance");
+
+      fireEvent.change(within(manualRow).getByLabelText("Reason"), { target: { value: "" } });
+      fireEvent.click(within(manualRow).getByRole("button", { name: "Save" }));
+
+      expect(within(manualRow).getByText("Reason is required.")).toBeInTheDocument();
+      expect(within(manualRow).queryByText("Date range overlaps another closure.")).toBeNull();
     } finally {
       fake.restore();
     }

@@ -1,5 +1,5 @@
 import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
-import { type FormEvent, useMemo, useState } from "react";
+import { type FormEvent, useEffect, useMemo, useState } from "react";
 import { useLocation, useParams } from "react-router-dom";
 import { ApiError, fetchJson } from "@/lib/api";
 import { type ListEnvelope } from "@/lib/listResponse";
@@ -7,6 +7,16 @@ import { qk } from "@/lib/queryKeys";
 import DeskPage from "@/components/DeskPage";
 import FormField from "@/components/FormField";
 import FormModal, { FormModalGrid } from "@/components/FormModal";
+import {
+  InlineDateField,
+  InlineNumberField,
+  InlineSearchableSelectField,
+  InlineSelectField,
+  InlineTableForm,
+  InlineTextField,
+  type InlineTableColumn,
+  type InlineTableRow,
+} from "@/components/InlineTableForm";
 import SearchableSelect, { type SearchableSelectOption } from "@/components/SearchableSelect";
 import { Chip, Loading } from "@/components/common";
 import { useWorkspace } from "@/context/WorkspaceContext";
@@ -22,7 +32,7 @@ import type { AuthMe } from "@/auth/types";
 import { isoDate } from "@/pages/employee/schedule/lib/dateHelpers";
 import { useIsPhone } from "@/pages/employee/schedule/lib/useIsPhone";
 import PropertyTabs from "./property/PropertyTabs";
-import { InfiniteStaysAgenda } from "./stays/InfiniteStaysAgenda";
+import { InfiniteStaysAgenda, type StaysPlannerDraftRange } from "./stays/InfiniteStaysAgenda";
 
 type IcalProvider = "airbnb" | "vrbo" | "booking" | "gcal" | "generic";
 type StaySource = Stay["source"];
@@ -120,7 +130,6 @@ function unitSelectOption(unit: UnitPayload): SearchableSelectOption {
   };
 }
 
-const manualNoticeId = "manual-stay-form-notice";
 const manualPrivacyId = "manual-stay-privacy-note";
 const manualOverlapId = "manual-stay-overlap-note";
 const manualUnitErrorId = "manual-stay-unit-error";
@@ -297,6 +306,30 @@ function initialManualForm(properties: Property[], units: UnitPayload[], preferr
   };
 }
 
+function emptyManualForm(): ManualStayForm {
+  return {
+    propertyId: "",
+    unitId: "",
+    guestName: "",
+    guestCount: "1",
+    checkIn: "",
+    checkOut: "",
+    status: "confirmed",
+  };
+}
+
+function makeStayCreateRow(form: ManualStayForm): InlineTableRow<ManualStayForm> {
+  return {
+    id: "stay-create",
+    isNew: true,
+    editing: true,
+    dirty: false,
+    draft: form,
+    committedDraft: form,
+    label: "New stay",
+  };
+}
+
 function initialIcalForm(properties: Property[], units: UnitPayload[], preferredPropertyId?: string | null): IcalForm {
   const propertyId = preferredPropertyId && properties.some((property) => property.id === preferredPropertyId)
     ? preferredPropertyId
@@ -360,7 +393,7 @@ function validateIcalForm(form: IcalForm): string | null {
 
 function problemMessage(error: unknown, fallback: string): string {
   if (!(error instanceof ApiError)) return fallback;
-  const detail = error.detail ?? error.title ?? error.message;
+  const detail = error.userMessage ?? error.detail ?? error.title ?? error.message;
   const lowerDetail = detail.toLowerCase();
   const problem = error.problem;
   const rawError = typeof problem?.error === "string" ? problem.error : "";
@@ -415,6 +448,12 @@ function describedBy(...ids: Array<string | false | null | undefined>): string |
   return liveIds.length > 0 ? liveIds.join(" ") : undefined;
 }
 
+function nextIsoDate(iso: string): string {
+  const date = new Date(iso + "T00:00:00Z");
+  date.setUTCDate(date.getUTCDate() + 1);
+  return date.toISOString().slice(0, 10);
+}
+
 export default function StaysPage() {
   // code-health: ignore[nloc] Stays page is declarative reservation/closure composition over promoted route data.
   const { pid } = useParams<{ pid?: string }>();
@@ -431,9 +470,10 @@ export default function StaysPage() {
   const feedsQueryKey = routePropertyId
     ? ([...qk.icalFeeds(), "property", routePropertyId] as const)
     : qk.icalFeeds();
-  const [manualForm, setManualForm] = useState<ManualStayForm | null>(null);
+  const [createStayRow, setCreateStayRow] = useState<InlineTableRow<ManualStayForm>>(
+    () => makeStayCreateRow(emptyManualForm()),
+  );
   const [icalForm, setIcalForm] = useState<IcalForm | null>(null);
-  const [manualNotice, setManualNotice] = useState<FormNotice | null>(null);
   const [icalNotice, setIcalNotice] = useState<FormNotice | null>(null);
 
   const dataQ = useQuery({
@@ -479,6 +519,31 @@ export default function StaysPage() {
       ? unitQs.some((query) => query.isPending) || membershipQs.some((query) => query.isPending)
       : false
   );
+  const loadedUnits = useMemo(() => unitQs.flatMap((query) => query.data ?? []), [unitQs]);
+  const loadedProperties = propsQ.data ?? [];
+  const loadedPageProperties = routePropertyId
+    ? loadedProperties.filter((property) => property.id === routePropertyId)
+    : loadedProperties;
+  const defaultManualFormSignature = useMemo(() => {
+    return JSON.stringify({
+      properties: loadedPageProperties.map((property) => property.id),
+      units: loadedUnits.map((unit) => [unit.id, unit.property_id]),
+      routePropertyId,
+    });
+  }, [loadedPageProperties, loadedUnits, routePropertyId]);
+
+  useEffect(() => {
+    if (!propsQ.data || metadataPending) return;
+    const nextForm = initialManualForm(loadedPageProperties, loadedUnits, routePropertyId);
+    setCreateStayRow((row) => {
+      if (row.dirty) return row;
+      return {
+        ...row,
+        draft: nextForm,
+        committedDraft: nextForm,
+      };
+    });
+  }, [defaultManualFormSignature, metadataPending, propsQ.data, routePropertyId]);
 
   const createStay = useMutation({
     mutationFn: (body: {
@@ -498,14 +563,14 @@ export default function StaysPage() {
         return { ...current, stays: [mapReservation(reservation), ...current.stays] };
       });
       void queryClient.invalidateQueries({ queryKey: qk.stays() });
-      setManualNotice({ tone: "success", text: "Stay created and added to the list." });
-      setManualForm(null);
+      const nextForm = initialManualForm(loadedPageProperties, loadedUnits, routePropertyId);
+      setCreateStayRow(makeStayCreateRow(nextForm));
     },
     onError: (error) => {
-      setManualNotice({
-        tone: "error",
-        text: problemMessage(error, "The stay could not be created. Check the fields and try again."),
-      });
+      setCreateStayRow((row) => ({
+        ...row,
+        error: problemMessage(error, "The stay could not be created. Check the fields and try again."),
+      }));
     },
   });
 
@@ -603,18 +668,13 @@ export default function StaysPage() {
   function guestNameForStay(stay: PageStay): string {
     return canSeeGuestIdentity(stay.property_id) ? stay.guest_name : "Hidden guest";
   }
-  const canShareManualGuestName = manualForm ? canSeeGuestIdentity(manualForm.propertyId) : false;
-  const manualOverlap = manualForm ? overlapWarning(manualForm, stays, guestNameForStay) : null;
-  const selectedManualUnits = manualForm ? unitsByProperty.get(manualForm.propertyId) ?? [] : [];
+  const canShareCreateGuestName = createStayRow.draft.propertyId
+    ? canSeeGuestIdentity(createStayRow.draft.propertyId)
+    : false;
+  const createStayOverlap = overlapWarning(createStayRow.draft, stays, guestNameForStay);
+  const selectedCreateUnits = unitsByProperty.get(createStayRow.draft.propertyId) ?? [];
   const selectedIcalUnits = icalForm ? unitsByProperty.get(icalForm.propertyId) ?? [] : [];
   const icalDuplicate = icalForm ? duplicateFeedNotice(icalForm, pageFeeds) : null;
-
-  function openManualDialog(): void {
-    const next = initialManualForm(pageProperties, units, routePropertyId);
-    setManualForm(next);
-    setManualNotice(null);
-    createStay.reset();
-  }
 
   function openIcalDialog(): void {
     const next = initialIcalForm(pageProperties, units, routePropertyId);
@@ -625,7 +685,11 @@ export default function StaysPage() {
 
   function updateManualProperty(propertyId: string): void {
     const propertyUnits = unitsByProperty.get(propertyId) ?? [];
-    setManualForm((current) => current ? { ...current, propertyId, unitId: propertyUnits[0]?.id ?? "" } : current);
+    patchCreateStayRow({
+      propertyId,
+      unitId: propertyUnits[0]?.id ?? "",
+      guestName: canSeeGuestIdentity(propertyId) ? createStayRow.draft.guestName : "",
+    });
   }
 
   function updateIcalProperty(propertyId: string): void {
@@ -634,15 +698,24 @@ export default function StaysPage() {
     setIcalForm((current) => current ? { ...current, propertyId, unitId: propertyUnits[0]?.id ?? "" } : current);
   }
 
-  function submitManualStay(event: FormEvent<HTMLFormElement>): void {
-    event.preventDefault();
-    if (!manualForm) return;
-    const validation = validateManualForm(manualForm, canShareManualGuestName);
+  function patchCreateStayRow(patch: Partial<ManualStayForm>): void {
+    setCreateStayRow((row) => ({
+      ...row,
+      draft: { ...row.draft, ...patch },
+      dirty: true,
+      validation: undefined,
+      error: undefined,
+    }));
+  }
+
+  function saveCreateStayRow(): void {
+    const manualForm = createStayRow.draft;
+    const validation = validateManualForm(manualForm, canShareCreateGuestName);
     if (validation) {
-      setManualNotice({ tone: "error", text: validation });
+      setCreateStayRow((row) => ({ ...row, dirty: true, validation, error: undefined }));
       return;
     }
-    const guestName = canShareManualGuestName ? manualForm.guestName.trim() : "";
+    const guestName = canShareCreateGuestName ? manualForm.guestName.trim() : "";
     createStay.mutate({
       property_id: manualForm.propertyId,
       unit_id: manualForm.unitId,
@@ -654,6 +727,10 @@ export default function StaysPage() {
       status: manualForm.status,
       source: "manual",
     });
+  }
+
+  function cancelCreateStayRow(): void {
+    setCreateStayRow(makeStayCreateRow(initialManualForm(pageProperties, units, routePropertyId)));
   }
 
   function submitIcalFeed(event: FormEvent<HTMLFormElement>): void {
@@ -672,6 +749,188 @@ export default function StaysPage() {
     });
   }
 
+  const stayColumns: InlineTableColumn<ManualStayForm>[] = [
+    {
+      key: "guest",
+      header: "Guest",
+      width: { flex: 1.2, min: 180 },
+      renderRead: ({ row }) => <strong>{row.draft.guestName || "Hidden guest"}</strong>,
+      renderEdit: ({ row, update, disabled }) => {
+        const canShareGuestName = row.draft.propertyId ? canSeeGuestIdentity(row.draft.propertyId) : false;
+        return (
+          <InlineTextField
+            value={canShareGuestName ? row.draft.guestName : ""}
+            disabled={disabled || !canShareGuestName}
+            placeholder={canShareGuestName ? "Ada Guest" : "Hidden by sharing settings"}
+            ariaLabel="Guest name"
+            ariaDescribedBy={!canShareGuestName ? manualPrivacyId : undefined}
+            onChange={(guestName) => update({ guestName })}
+          />
+        );
+      },
+    },
+    {
+      key: "property",
+      header: "Property",
+      width: { flex: 1.1, min: 180 },
+      renderRead: ({ row }) => {
+        const property = propsById.get(row.draft.propertyId);
+        return property ? <Chip tone={property.color} size="sm">{property.name}</Chip> : "—";
+      },
+      renderEdit: ({ row, disabled }) => (
+        <InlineSearchableSelectField
+          value={row.draft.propertyId}
+          options={pageProperties.map(propertySelectOption)}
+          disabled={disabled || Boolean(routePropertyId)}
+          ariaLabel="Property"
+          noResultsLabel="No properties available"
+          onChange={updateManualProperty}
+        />
+      ),
+    },
+    {
+      key: "unit",
+      header: "Unit",
+      width: { flex: 1, min: 160 },
+      renderRead: ({ row }) => units.find((unit) => unit.id === row.draft.unitId)?.name ?? "—",
+      renderEdit: ({ row, update, disabled }) => {
+        const propertyUnits = unitsByProperty.get(row.draft.propertyId) ?? [];
+        return (
+          <InlineSearchableSelectField
+            value={row.draft.unitId}
+            options={propertyUnits.map(unitSelectOption)}
+            disabled={disabled}
+            ariaLabel="Unit"
+            noResultsLabel="No units available"
+            renderOptionSecondaryText={() => null}
+            onChange={(unitId) => update({ unitId })}
+          />
+        );
+      },
+    },
+    {
+      key: "check_in",
+      header: "Check-in",
+      width: { px: 156 },
+      renderRead: ({ row }) => <span className="mono">{row.draft.checkIn ? fmtAbbrevDate(row.draft.checkIn) : "—"}</span>,
+      renderEdit: ({ row, update, disabled }) => (
+        <InlineDateField
+          value={row.draft.checkIn}
+          disabled={disabled}
+          ariaLabel="Check-in"
+          onChange={(checkIn) => update({ checkIn })}
+        />
+      ),
+    },
+    {
+      key: "check_out",
+      header: "Check-out",
+      width: { px: 156 },
+      renderRead: ({ row }) => <span className="mono">{row.draft.checkOut ? fmtAbbrevDate(row.draft.checkOut) : "—"}</span>,
+      renderEdit: ({ row, update, disabled }) => (
+        <InlineDateField
+          value={row.draft.checkOut}
+          disabled={disabled}
+          ariaLabel="Check-out"
+          onChange={(checkOut) => update({ checkOut })}
+        />
+      ),
+    },
+    {
+      key: "guests",
+      header: "Guests",
+      width: { px: 96 },
+      align: "end",
+      renderRead: ({ row }) => row.draft.guestCount,
+      renderEdit: ({ row, update, disabled }) => (
+        <InlineNumberField
+          value={row.draft.guestCount}
+          min={1}
+          disabled={disabled}
+          ariaLabel="Guests"
+          onChange={(guestCount) => update({ guestCount })}
+        />
+      ),
+    },
+    {
+      key: "status",
+      header: "Status",
+      width: { px: 140 },
+      renderRead: ({ row }) => <Chip tone={STAY_TONE[row.draft.status]} size="sm">{row.draft.status.replace("_", " ")}</Chip>,
+      renderEdit: ({ row, update, disabled }) => (
+        <InlineSelectField
+          value={row.draft.status}
+          disabled={disabled}
+          ariaLabel="Status"
+          options={[
+            { value: "tentative", label: "Tentative" },
+            { value: "confirmed", label: "Confirmed" },
+          ]}
+          onChange={(status) => update({ status: status as StayStatus })}
+        />
+      ),
+    },
+    {
+      key: "source",
+      header: "Source",
+      width: { px: 120 },
+      renderRead: ({ row }) => <Chip tone="ghost" size="sm">{stays.find((stay) => stay.id === row.id)?.source ?? "manual"}</Chip>,
+      renderEdit: () => <Chip tone="ghost" size="sm">manual</Chip>,
+    },
+  ];
+  const stayRows: InlineTableRow<ManualStayForm>[] = stays.map((stay) => ({
+    id: stay.id,
+    draft: {
+      propertyId: stay.property_id,
+      unitId: stay.unit_id ?? "",
+      guestName: guestNameForStay(stay),
+      guestCount: String(stay.guests),
+      checkIn: stay.check_in,
+      checkOut: stay.check_out,
+      status: stay.status,
+    },
+    label: `${guestNameForStay(stay)} stay from ${fmtAbbrevDate(stay.check_in)} to ${fmtAbbrevDate(stay.check_out)}`,
+  }));
+  const createStayMeta = createStayRow.draft.propertyId && (
+    !canShareCreateGuestName ||
+    selectedCreateUnits.length === 0 ||
+    createStayOverlap
+  ) ? (
+    <>
+      {!canShareCreateGuestName ? (
+        <p id={manualPrivacyId} className="stays-form-note">
+          Guest identity is hidden for this shared property. This stay will be saved without a guest name.
+        </p>
+      ) : null}
+      {selectedCreateUnits.length === 0 ? (
+        <p id={manualUnitErrorId} className="form-error" role="alert">No units are available for this property.</p>
+      ) : null}
+      {createStayOverlap ? (
+        <p id={manualOverlapId} className="stays-form-note stays-form-note--warn">{createStayOverlap}</p>
+      ) : null}
+    </>
+  ) : undefined;
+  const activeCreateStayRow: InlineTableRow<ManualStayForm> = {
+    ...createStayRow,
+    saving: createStay.isPending,
+    meta: createStayMeta,
+  };
+  const plannerDraftRanges: StaysPlannerDraftRange[] =
+    createStayRow.dirty && createStayRow.draft.checkIn && createStayRow.draft.checkOut && createStayRow.draft.checkIn < createStayRow.draft.checkOut
+      ? [{
+          id: "draft-stay",
+          kind: "stay",
+          starts_on: createStayRow.draft.checkIn,
+          ends_on: createStayRow.draft.checkOut,
+          endExclusive: true,
+          label: "Draft stay",
+          meta: canShareCreateGuestName && createStayRow.draft.guestName.trim()
+            ? createStayRow.draft.guestName.trim()
+            : "Unsaved manual stay",
+          property_id: createStayRow.draft.propertyId,
+        }]
+      : [];
+
   return (
     <DeskPage
       title="Stays"
@@ -685,12 +944,6 @@ export default function StaysPage() {
           Import iCal
         </button>
       }
-      overflow={[
-        {
-          label: "Add stay",
-          onSelect: openManualDialog,
-        },
-      ]}
     >
       {pid ? (
         <PropertyTabs
@@ -699,126 +952,6 @@ export default function StaysPage() {
           activeRelatedPage="stays"
         />
       ) : null}
-
-      <FormModal
-        open={manualForm !== null}
-        title="Add stay"
-        eyebrow="Reservations"
-        subtitle="Manual stays save to the reservation API and use the selected unit for conflict checks."
-        formClassName="stay-create-form"
-        onClose={() => setManualForm(null)}
-        onSubmit={submitManualStay}
-        describedBy={
-          manualForm
-            ? describedBy(
-                !canShareManualGuestName && manualPrivacyId,
-                selectedManualUnits.length === 0 && manualUnitErrorId,
-                manualOverlap && manualOverlapId,
-                manualNotice && manualNoticeId,
-              )
-            : undefined
-        }
-        noValidate
-        actions={
-          <>
-            <button type="button" className="btn btn--ghost" onClick={() => setManualForm(null)}>
-              Cancel
-            </button>
-            <button type="submit" className="btn btn--moss" disabled={createStay.isPending}>
-              {createStay.isPending ? "Creating..." : "Create stay"}
-            </button>
-          </>
-        }
-      >
-        {manualForm ? (
-          <>
-            <FormModalGrid className="stay-create-form__grid">
-              <SearchableSelect
-                label="Property"
-                className="stay-create-form__field sheet-form__field"
-                value={manualForm.propertyId}
-                options={pageProperties.map(propertySelectOption)}
-                required
-                onChange={updateManualProperty}
-              />
-
-              <SearchableSelect
-                label="Unit"
-                className="stay-create-form__field sheet-form__field"
-                value={manualForm.unitId}
-                options={selectedManualUnits.map(unitSelectOption)}
-                required
-                aria-invalid={selectedManualUnits.length === 0}
-                aria-describedby={selectedManualUnits.length === 0 ? manualUnitErrorId : undefined}
-                noResultsLabel="No units available"
-                renderOptionSecondaryText={() => null}
-                onChange={(value) => setManualForm({ ...manualForm, unitId: value })}
-              />
-
-              <FormField label="Check-in" requirement="required" className="stay-create-form__field sheet-form__field">
-                <input
-                  type="date"
-                  value={manualForm.checkIn}
-                  onChange={(event) => setManualForm({ ...manualForm, checkIn: event.target.value })}
-                />
-              </FormField>
-
-              <FormField label="Check-out" requirement="required" className="stay-create-form__field sheet-form__field">
-                <input
-                  type="date"
-                  value={manualForm.checkOut}
-                  onChange={(event) => setManualForm({ ...manualForm, checkOut: event.target.value })}
-                />
-              </FormField>
-
-              <FormField label="Guest name" requirement="optional" className="stay-create-form__field sheet-form__field">
-                <input
-                  type="text"
-                  value={canShareManualGuestName ? manualForm.guestName : ""}
-                  disabled={!canShareManualGuestName}
-                  placeholder={canShareManualGuestName ? "Ada Guest" : "Hidden by sharing settings"}
-                  aria-describedby={!canShareManualGuestName ? manualPrivacyId : undefined}
-                  onChange={(event) => setManualForm({ ...manualForm, guestName: event.target.value })}
-                />
-              </FormField>
-
-              <FormField label="Guests" requirement="required" className="stay-create-form__field sheet-form__field">
-                <input
-                  type="number"
-                  min="1"
-                  value={manualForm.guestCount}
-                  onChange={(event) => setManualForm({ ...manualForm, guestCount: event.target.value })}
-                />
-              </FormField>
-
-              <FormField label="Status" requirement="required" className="stay-create-form__field sheet-form__field">
-                <select
-                  value={manualForm.status}
-                  onChange={(event) => setManualForm({ ...manualForm, status: event.target.value as StayStatus })}
-                >
-                  <option value="tentative">Tentative</option>
-                  <option value="confirmed">Confirmed</option>
-                </select>
-              </FormField>
-            </FormModalGrid>
-
-            {!canShareManualGuestName ? (
-              <p id={manualPrivacyId} className="stays-form-note">
-                Guest identity is hidden for this shared property. This stay will be saved without a guest name.
-              </p>
-            ) : null}
-            {selectedManualUnits.length === 0 ? (
-              <p id={manualUnitErrorId} className="form-error" role="alert">No units are available for this property.</p>
-            ) : null}
-            {manualOverlap ? <p id={manualOverlapId} className="stays-form-note stays-form-note--warn">{manualOverlap}</p> : null}
-            {manualNotice ? (
-              <p id={manualNoticeId} className={`form-notice form-notice--${manualNotice.tone}`} role="alert">
-                {manualNotice.text}
-              </p>
-            ) : null}
-          </>
-        ) : null}
-      </FormModal>
 
       <FormModal
         open={icalForm !== null}
@@ -912,35 +1045,23 @@ export default function StaysPage() {
       </FormModal>
 
       <div className="panel">
-        <table className="table table--roomy">
-          <thead>
-            <tr>
-              <th>Guest</th>
-              <th>Property</th>
-              <th>Source</th>
-              <th>Check-in</th>
-              <th>Check-out</th>
-              <th>Guests</th>
-              <th>Status</th>
-            </tr>
-          </thead>
-          <tbody>
-            {stays.map((s) => {
-              const p = propsById.get(s.property_id);
-              return (
-                <tr key={s.id}>
-                  <td><strong>{guestNameForStay(s)}</strong></td>
-                  <td>{p && <Chip tone={p.color} size="sm">{p.name}</Chip>}</td>
-                  <td><Chip tone="ghost" size="sm">{s.source}</Chip></td>
-                  <td className="mono">{fmtAbbrevDate(s.check_in)}</td>
-                  <td className="mono">{fmtAbbrevDate(s.check_out)}</td>
-                  <td>{s.guests}</td>
-                  <td><Chip tone={STAY_TONE[s.status]} size="sm">{s.status.replace("_", " ")}</Chip></td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
+        <InlineTableForm
+          ariaLabel="Stays"
+          columns={stayColumns}
+          rows={stayRows}
+          trailingCreateRow={activeCreateStayRow}
+          saveMode="explicit"
+          onDraftChange={(rowId, patch) => {
+            if (rowId === createStayRow.id) patchCreateStayRow(patch);
+          }}
+          onCancel={(rowId) => {
+            if (rowId === createStayRow.id) cancelCreateStayRow();
+          }}
+          onSave={(rowId) => {
+            if (rowId === createStayRow.id) saveCreateStayRow();
+          }}
+          getRowLabel={(row) => row.label ?? "Stay"}
+        />
       </div>
 
       <div className="panel">
@@ -996,6 +1117,11 @@ export default function StaysPage() {
         payload={data}
         guestNameForStay={guestNameForStay}
         showLeaveLayer={!routePropertyId}
+        draftRanges={plannerDraftRanges}
+        selectionLabel="Select stay dates"
+        onDraftRangeSelect={(fromIso, toIso) => {
+          patchCreateStayRow({ checkIn: fromIso, checkOut: nextIsoDate(toIso) });
+        }}
       />
     </DeskPage>
   );

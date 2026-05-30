@@ -1,5 +1,5 @@
-import { Fragment, useCallback, useMemo } from "react";
-import type { CSSProperties } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { CSSProperties, PointerEvent } from "react";
 import { Loading } from "@/components/common";
 import { qk } from "@/lib/queryKeys";
 import type { Employee, Leave, Property, PropertyClosure, Stay } from "@/types/api";
@@ -18,8 +18,8 @@ import {
 } from "@/pages/employee/schedule/lib/palette";
 import { useInfiniteAgendaCore } from "@/pages/employee/schedule/lib/useInfiniteAgenda";
 
-interface PageStay extends Stay {
-  unit_id: string | null;
+export interface PageStay extends Stay {
+  unit_id?: string | null;
 }
 
 interface StaysPayload {
@@ -38,6 +38,18 @@ interface StaysCell {
 }
 
 type StaysVariant = "phone" | "desktop";
+type PlannerDraftKind = "stay" | "closure";
+
+export interface StaysPlannerDraftRange {
+  id: string;
+  kind: PlannerDraftKind;
+  starts_on: string;
+  ends_on: string;
+  label: string;
+  meta: string;
+  property_id?: string | null;
+  endExclusive?: boolean;
+}
 
 interface InfiniteStaysAgendaProps {
   variant: StaysVariant;
@@ -48,6 +60,9 @@ interface InfiniteStaysAgendaProps {
   payload: StaysPayload;
   guestNameForStay: (stay: PageStay) => string;
   showLeaveLayer?: boolean;
+  draftRanges?: readonly StaysPlannerDraftRange[];
+  onDraftRangeSelect?: (fromIso: string, toIso: string) => void;
+  selectionLabel?: string;
 }
 
 export function InfiniteStaysAgenda(props: InfiniteStaysAgendaProps) {
@@ -61,7 +76,12 @@ export function InfiniteStaysAgenda(props: InfiniteStaysAgendaProps) {
     payload,
     guestNameForStay,
     showLeaveLayer = true,
+    draftRanges = [],
+    onDraftRangeSelect,
+    selectionLabel = "date range",
   } = props;
+  const [dragSelectionAnchor, setDragSelectionAnchor] = useState<string | null>(null);
+  const dragSelectionAnchorRef = useRef<string | null>(null);
   const payloadSignature = useMemo(() => {
     const stays = payload.stays.map((stay) => [
       stay.id,
@@ -120,6 +140,52 @@ export function InfiniteStaysAgenda(props: InfiniteStaysAgendaProps) {
     () => new Map(employees.map((employee) => [employee.id, employee])),
     [employees],
   );
+  const sortedDraftRange = useCallback((fromIso: string, toIso: string) => {
+    return fromIso <= toIso ? [fromIso, toIso] as const : [toIso, fromIso] as const;
+  }, []);
+  const startDateSelection = useCallback((iso: string, event: PointerEvent<HTMLElement>) => {
+    if (!onDraftRangeSelect || event.button !== 0) return;
+    event.preventDefault();
+    dragSelectionAnchorRef.current = iso;
+    setDragSelectionAnchor(iso);
+    onDraftRangeSelect(iso, iso);
+  }, [onDraftRangeSelect]);
+  const updateDateSelection = useCallback((iso: string, event: PointerEvent<HTMLElement>) => {
+    if (!onDraftRangeSelect) return;
+    const anchor = dragSelectionAnchorRef.current;
+    if (!anchor) return;
+    if ((event.buttons & 1) !== 1) {
+      dragSelectionAnchorRef.current = null;
+      setDragSelectionAnchor(null);
+      return;
+    }
+    const [fromIso, toIso] = sortedDraftRange(anchor, iso);
+    onDraftRangeSelect(fromIso, toIso);
+  }, [onDraftRangeSelect, sortedDraftRange]);
+  const finishDateSelection = useCallback((iso: string) => {
+    if (!onDraftRangeSelect) return;
+    const anchor = dragSelectionAnchorRef.current;
+    if (anchor) {
+      const [fromIso, toIso] = sortedDraftRange(anchor, iso);
+      onDraftRangeSelect(fromIso, toIso);
+    }
+    dragSelectionAnchorRef.current = null;
+    setDragSelectionAnchor(null);
+  }, [onDraftRangeSelect, sortedDraftRange]);
+  const cancelDateSelection = useCallback(() => {
+    dragSelectionAnchorRef.current = null;
+    setDragSelectionAnchor(null);
+  }, []);
+
+  useEffect(() => {
+    if (!dragSelectionAnchor) return;
+    window.addEventListener("pointerup", cancelDateSelection);
+    window.addEventListener("pointercancel", cancelDateSelection);
+    return () => {
+      window.removeEventListener("pointerup", cancelDateSelection);
+      window.removeEventListener("pointercancel", cancelDateSelection);
+    };
+  }, [cancelDateSelection, dragSelectionAnchor]);
 
   if (q.isPending) {
     return (
@@ -206,6 +272,13 @@ export function InfiniteStaysAgenda(props: InfiniteStaysAgendaProps) {
                 employeesById={employeesById}
                 guestNameForStay={guestNameForStay}
                 showLeaveLayer={showLeaveLayer}
+                draftRanges={draftRanges}
+                dragSelectionAnchor={dragSelectionAnchor}
+                selectionLabel={selectionLabel}
+                onPointerDown={startDateSelection}
+                onPointerEnter={updateDateSelection}
+                onPointerUp={finishDateSelection}
+                onPointerCancel={cancelDateSelection}
                 hideLabel={gi > 0}
               />
             ) : (
@@ -216,6 +289,13 @@ export function InfiniteStaysAgenda(props: InfiniteStaysAgendaProps) {
                 employeesById={employeesById}
                 guestNameForStay={guestNameForStay}
                 showLeaveLayer={showLeaveLayer}
+                draftRanges={draftRanges}
+                dragSelectionAnchor={dragSelectionAnchor}
+                selectionLabel={selectionLabel}
+                onPointerDown={startDateSelection}
+                onPointerEnter={updateDateSelection}
+                onPointerUp={finishDateSelection}
+                onPointerCancel={cancelDateSelection}
               />
             )}
           </Fragment>
@@ -255,6 +335,13 @@ function StaysWeekGrid(props: {
   employeesById: Map<string, Employee>;
   guestNameForStay: (stay: PageStay) => string;
   showLeaveLayer: boolean;
+  draftRanges: readonly StaysPlannerDraftRange[];
+  dragSelectionAnchor: string | null;
+  selectionLabel: string;
+  onPointerDown: (iso: string, event: PointerEvent<HTMLElement>) => void;
+  onPointerEnter: (iso: string, event: PointerEvent<HTMLElement>) => void;
+  onPointerUp: (iso: string) => void;
+  onPointerCancel: () => void;
   hideLabel: boolean;
 }) {
   const {
@@ -264,6 +351,13 @@ function StaysWeekGrid(props: {
     employeesById,
     guestNameForStay,
     showLeaveLayer,
+    draftRanges,
+    dragSelectionAnchor,
+    selectionLabel,
+    onPointerDown,
+    onPointerEnter,
+    onPointerUp,
+    onPointerCancel,
     hideLabel,
   } = props;
   return (
@@ -290,6 +384,13 @@ function StaysWeekGrid(props: {
             employeesById={employeesById}
             guestNameForStay={guestNameForStay}
             showLeaveLayer={showLeaveLayer}
+            draftRanges={draftRanges}
+            dragSelectionAnchor={dragSelectionAnchor}
+            selectionLabel={selectionLabel}
+            onPointerDown={onPointerDown}
+            onPointerEnter={onPointerEnter}
+            onPointerUp={onPointerUp}
+            onPointerCancel={onPointerCancel}
           />
         ))}
       </div>
@@ -304,8 +405,29 @@ function StaysPhoneWeek(props: {
   employeesById: Map<string, Employee>;
   guestNameForStay: (stay: PageStay) => string;
   showLeaveLayer: boolean;
+  draftRanges: readonly StaysPlannerDraftRange[];
+  dragSelectionAnchor: string | null;
+  selectionLabel: string;
+  onPointerDown: (iso: string, event: PointerEvent<HTMLElement>) => void;
+  onPointerEnter: (iso: string, event: PointerEvent<HTMLElement>) => void;
+  onPointerUp: (iso: string) => void;
+  onPointerCancel: () => void;
 }) {
-  const { group, today, properties, employeesById, guestNameForStay, showLeaveLayer } = props;
+  const {
+    group,
+    today,
+    properties,
+    employeesById,
+    guestNameForStay,
+    showLeaveLayer,
+    draftRanges,
+    dragSelectionAnchor,
+    selectionLabel,
+    onPointerDown,
+    onPointerEnter,
+    onPointerUp,
+    onPointerCancel,
+  } = props;
   return (
     <>
       {group.cells.map((cell) => (
@@ -317,6 +439,13 @@ function StaysPhoneWeek(props: {
             employeesById={employeesById}
             guestNameForStay={guestNameForStay}
             showLeaveLayer={showLeaveLayer}
+            draftRanges={draftRanges}
+            dragSelectionAnchor={dragSelectionAnchor}
+            selectionLabel={selectionLabel}
+            onPointerDown={onPointerDown}
+            onPointerEnter={onPointerEnter}
+            onPointerUp={onPointerUp}
+            onPointerCancel={onPointerCancel}
           />
         </div>
       ))}
@@ -331,20 +460,64 @@ function StaysDayCell(props: {
   employeesById: Map<string, Employee>;
   guestNameForStay: (stay: PageStay) => string;
   showLeaveLayer: boolean;
+  draftRanges: readonly StaysPlannerDraftRange[];
+  dragSelectionAnchor: string | null;
+  selectionLabel: string;
+  onPointerDown: (iso: string, event: PointerEvent<HTMLElement>) => void;
+  onPointerEnter: (iso: string, event: PointerEvent<HTMLElement>) => void;
+  onPointerUp: (iso: string) => void;
+  onPointerCancel: () => void;
 }) {
-  const { cell, today, properties, employeesById, guestNameForStay, showLeaveLayer } = props;
+  const {
+    cell,
+    today,
+    properties,
+    employeesById,
+    guestNameForStay,
+    showLeaveLayer,
+    draftRanges,
+    dragSelectionAnchor,
+    selectionLabel,
+    onPointerDown,
+    onPointerEnter,
+    onPointerUp,
+    onPointerCancel,
+  } = props;
   const isToday = isoDate(today) === cell.iso;
+  const dayDrafts = draftRanges.filter((draft) => draftCoversDate(draft, cell.iso));
   const hasEvents =
     cell.stays.length > 0 ||
     cell.turnovers.length > 0 ||
     cell.closures.length > 0 ||
+    dayDrafts.length > 0 ||
     (showLeaveLayer && cell.leaves.length > 0);
   const { weekday, day, month } = dayLabel(cell.date);
+  const dayAriaLabel = staysDayLabel({
+    cell,
+    weekday,
+    day,
+    month,
+    properties,
+    employeesById,
+    guestNameForStay,
+    showLeaveLayer,
+    drafts: dayDrafts,
+  });
   return (
     <article
-      className={`schedule-day stays-day${isToday ? " schedule-day--today" : ""}${hasEvents ? "" : " schedule-day--empty"}`}
+      className={[
+        "schedule-day stays-day",
+        isToday ? "schedule-day--today" : "",
+        hasEvents ? "" : "schedule-day--empty",
+        dragSelectionAnchor && dayDrafts.length > 0 ? "stays-day--selecting" : "",
+      ].filter(Boolean).join(" ")}
       data-schedule-iso={cell.iso}
-      aria-label={`${weekday} ${day} ${month}`}
+      aria-label={dayAriaLabel}
+      title={dayAriaLabel}
+      onPointerDown={(event) => onPointerDown(cell.iso, event)}
+      onPointerEnter={(event) => onPointerEnter(cell.iso, event)}
+      onPointerUp={() => onPointerUp(cell.iso)}
+      onPointerCancel={onPointerCancel}
     >
       <header className="schedule-day__header">
         <span className="schedule-day__wd">{weekday}</span>
@@ -376,8 +549,18 @@ function StaysDayCell(props: {
               key={`closure-${closure.id}`}
               modifier="closed"
               label="Closure"
-              meta={`${propertyName(closure.property_id, properties)} · ${closure.reason.replace("_", " ")}`}
-              title={`Closure: ${closure.reason}`}
+              meta={`${propertyName(closure.property_id, properties)} · ${closure.reason.replace("_", " ")} · ${closureSourceLabel(closure)}`}
+              title={`Closure: ${closure.reason}, ${closureSourceLabel(closure)} source`}
+            />
+          ))}
+          {dayDrafts.map((draft) => (
+            <StaysEvent
+              key={`draft-${draft.id}`}
+              modifier="draft"
+              label={draft.label}
+              meta={draft.meta}
+              title={`${draft.label}, ${draft.meta}`}
+              tone={draft.property_id ? propertyTone(draft.property_id, properties) : undefined}
             />
           ))}
           {showLeaveLayer
@@ -397,7 +580,7 @@ function StaysDayCell(props: {
         </div>
       ) : (
         <div className="schedule-day__empty">
-          <span className="schedule-day__empty-label">open</span>
+          <span className="schedule-day__empty-label">{dragSelectionAnchor ? selectionLabel : "open"}</span>
         </div>
       )}
     </article>
@@ -406,7 +589,7 @@ function StaysDayCell(props: {
 
 function StaysEvent(props: {
   tone?: CSSProperties;
-  modifier?: "turnover" | "closed" | "leave";
+  modifier?: "turnover" | "closed" | "leave" | "draft";
   label: string;
   meta: string;
   title: string;
@@ -414,11 +597,55 @@ function StaysEvent(props: {
   const { tone, modifier, label, meta, title } = props;
   const cls = modifier ? ` stays-day__event stays-day__event--${modifier}` : "stays-day__event";
   return (
-    <span className={cls} style={tone} title={title}>
+    <span className={cls} style={tone} title={title} aria-label={title}>
       <strong>{label}</strong>
       <span>{meta}</span>
     </span>
   );
+}
+
+function draftCoversDate(draft: StaysPlannerDraftRange, iso: string): boolean {
+  if (draft.endExclusive) return draft.starts_on <= iso && iso < draft.ends_on;
+  return draft.starts_on <= iso && iso <= draft.ends_on;
+}
+
+function staysDayLabel({
+  cell,
+  weekday,
+  day,
+  month,
+  properties,
+  employeesById,
+  guestNameForStay,
+  showLeaveLayer,
+  drafts,
+}: {
+  cell: StaysCell;
+  weekday: string;
+  day: string;
+  month: string;
+  properties: Property[];
+  employeesById: Map<string, Employee>;
+  guestNameForStay: (stay: PageStay) => string;
+  showLeaveLayer: boolean;
+  drafts: readonly StaysPlannerDraftRange[];
+}): string {
+  const entries = [
+    ...cell.stays.map((stay) => `${guestNameForStay(stay)} stay at ${propertyName(stay.property_id, properties)}, ${stay.source} source`),
+    ...cell.turnovers.map((stay) => `Turnover after ${guestNameForStay(stay)} at ${propertyName(stay.property_id, properties)}`),
+    ...cell.closures.map((closure) => `${closure.reason} closure at ${propertyName(closure.property_id, properties)}, ${closureSourceLabel(closure)} source`),
+    ...drafts.map((draft) => `${draft.label}, ${draft.meta}`),
+    ...(showLeaveLayer ? cell.leaves.map((leave) => {
+      const employee = employeesById.get(leave.employee_id);
+      return `${employee?.name ?? "Employee"} approved ${leave.category} leave`;
+    }) : []),
+  ];
+  const dateLabel = `${weekday} ${day} ${month}, ${cell.iso}`;
+  return entries.length === 0 ? dateLabel : `${dateLabel}, ${entries.join(", ")}`;
+}
+
+function closureSourceLabel(closure: PropertyClosure): string {
+  return closure.source_ical_feed_id ? "iCal" : "manual";
 }
 
 interface StaysGroup {
