@@ -5,6 +5,7 @@ import {
   InlineCheckboxField,
   InlineDateField,
   InlineNumberField,
+  InlineNoteDisplay,
   InlineNoteField,
   InlineSelectField,
   InlineTableLoadMore,
@@ -594,7 +595,7 @@ export default function InlineTableFormsDemoPage() {
                   onChange={(note) => update({ note })}
                 />
               ) : row.draft.note ? (
-                <p className="inline-table-form__message">{row.draft.note}</p>
+                <InlineNoteDisplay>{row.draft.note}</InlineNoteDisplay>
               ) : null
             )}
           />

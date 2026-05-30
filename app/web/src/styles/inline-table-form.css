@@ -835,6 +835,21 @@
   line-height: 1.4;
 }
 
+.inline-table-form__note-display {
+  min-width: 0;
+  max-width: 100%;
+  margin: 0;
+  color: var(--ink-3);
+  font-size: 13px;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+.inline-table-form__note-display--collapsed {
+  white-space: normal;
+}
+
 .inline-table-form__message--validation,
 .inline-table-form__message--error {
   color: var(--rust);

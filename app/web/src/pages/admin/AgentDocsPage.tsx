@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { RotateCcw } from "lucide-react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
+  InlineNoteDisplay,
   InlineNoteField,
   InlineTagPickerField,
   InlineTableForm,
@@ -475,7 +476,9 @@ function RevisionHistory({
                 <DateTime value={revision.created_at} className="muted" />
               </span>
               <span>{tokenLabel(revision.approx_token_count)}</span>
-              {revision.notes ? <span className="muted">{revision.notes}</span> : null}
+              {revision.notes ? (
+                <InlineNoteDisplay as="span" className="muted">{revision.notes}</InlineNoteDisplay>
+              ) : null}
             </li>
           ))}
         </ol>

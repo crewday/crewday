@@ -7,6 +7,7 @@ import {
   InlineDateField,
   InlineNumberField,
   InlineIconField,
+  InlineNoteDisplay,
   InlineTableLoadMore,
   InlineNoteField,
   InlineSearchableSelectField,
@@ -1974,6 +1975,84 @@ describe("InlineTableForm", () => {
     fireEvent.doubleClick(screen.getByText("Bring spare keys."));
 
     await waitFor(() => expect(screen.getByLabelText("Note")).toHaveFocus());
+  });
+
+  it("preserves read detail note line breaks by default", () => {
+    render(
+      <InlineTableForm
+        ariaLabel="Multiline detail note rows"
+        columns={columns}
+        rows={[
+          {
+            id: "r-1",
+            editing: false,
+            draft: {
+              title: "Confirm linen",
+              owner: "maria",
+              note: "Line one\nLine two",
+            },
+          },
+        ]}
+        saveMode="explicit"
+        onDraftChange={vi.fn()}
+        onSave={vi.fn()}
+        onCancel={vi.fn()}
+        renderDetail={({ row }) => (
+          row.draft.note ? <InlineNoteDisplay>{row.draft.note}</InlineNoteDisplay> : null
+        )}
+      />,
+    );
+
+    const note = document.querySelector(".inline-table-form__note-display");
+    expect(note?.textContent).toBe("Line one\nLine two");
+    expect(note).not.toHaveClass("inline-table-form__note-display--collapsed");
+    expect(cssDeclarationValue(inlineTableCss, ".inline-table-form__note-display", "white-space")).toBe("pre-wrap");
+    expect(cssDeclarationValue(inlineTableCss, ".inline-table-form__note-display", "min-width")).toBe("0");
+    expect(cssDeclarationValue(inlineTableCss, ".inline-table-form__note-display", "max-width")).toBe("100%");
+    expect(cssDeclarationValue(inlineTableCss, ".inline-table-form__note-display", "overflow-wrap")).toBe("anywhere");
+  });
+
+  it("allows read detail notes to opt out of preserved line breaks", () => {
+    render(
+      <InlineNoteDisplay preserveLineBreaks={false}>{"Line one\nLine two"}</InlineNoteDisplay>,
+    );
+
+    const note = document.querySelector(".inline-table-form__note-display");
+    expect(note?.textContent).toBe("Line one\nLine two");
+    expect(note).toHaveClass("inline-table-form__note-display--collapsed");
+    expect(
+      cssDeclarationValue(inlineTableCss, ".inline-table-form__note-display--collapsed", "white-space"),
+    ).toBe("normal");
+  });
+
+  it("does not preserve whitespace for arbitrary detail content", () => {
+    render(
+      <InlineTableForm
+        ariaLabel="Plain detail rows"
+        columns={columns}
+        rows={[
+          {
+            id: "r-1",
+            editing: false,
+            draft: {
+              title: "Confirm linen",
+              owner: "maria",
+              note: "Line one\nLine two",
+            },
+          },
+        ]}
+        saveMode="explicit"
+        onDraftChange={vi.fn()}
+        onSave={vi.fn()}
+        onCancel={vi.fn()}
+        renderDetail={({ row }) => <p className="inline-table-form__message">{row.draft.note}</p>}
+      />,
+    );
+
+    expect(document.querySelector(".inline-table-form__note-display")).toBeNull();
+    expect(cssDeclarationValue(inlineTableCss, ".inline-table-form__detail-content", "white-space")).toBeUndefined();
+    expect(cssDeclarationValue(inlineTableCss, ".inline-table-form__detail-body", "white-space")).toBeUndefined();
+    expect(cssDeclarationValue(inlineTableCss, ".inline-table-form__message", "white-space")).toBeUndefined();
   });
 
   it("does not enter edit mode from disabled or saving detail notes", () => {

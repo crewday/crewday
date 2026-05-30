@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import {
+  InlineNoteDisplay,
   InlineNoteField,
   InlineSearchableSelectField,
   InlineSelectField,
@@ -448,7 +449,7 @@ export default function AreasPanel({ propertyId }: { propertyId: string }) {
               />
             );
           }
-          return row.draft.notes_md ? <p>{row.draft.notes_md}</p> : null;
+          return row.draft.notes_md ? <InlineNoteDisplay>{row.draft.notes_md}</InlineNoteDisplay> : null;
         }}
         renderDeleteConfirmation={({ row, label }) => {
           const childCount = childAreaCount(areas, row.id);

@@ -1901,6 +1901,30 @@ export function InlineNoteField({
   );
 }
 
+export function InlineNoteDisplay({
+  children,
+  className,
+  preserveLineBreaks = true,
+  as: Element = "p",
+}: {
+  children: ReactNode;
+  className?: string;
+  preserveLineBreaks?: boolean;
+  as?: "p" | "span" | "div";
+}) {
+  return (
+    <Element
+      className={[
+        "inline-table-form__note-display",
+        preserveLineBreaks ? null : "inline-table-form__note-display--collapsed",
+        className,
+      ].filter(Boolean).join(" ")}
+    >
+      {children}
+    </Element>
+  );
+}
+
 function rowStatus<TDraft>(row: InlineTableRow<TDraft>): InlineTableRowStatus {
   if (row.disabled) return "disabled";
   if (row.saving) return "saving";
