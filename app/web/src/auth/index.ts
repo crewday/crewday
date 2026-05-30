@@ -44,5 +44,5 @@ export {
   pickLoginLanding,
   pickRoleLanding,
 } from "./roleLanding";
-export { activeWorkspaceGrantRole, appRoleForGrantRole, useActiveAppRole } from "./activeGrantRole";
+export { activeWorkspaceGrantRole, useActiveAppRole } from "./activeGrantRole";
 export type { AuthMe, PasskeyLoginFinish, PasskeyLoginStart } from "./types";

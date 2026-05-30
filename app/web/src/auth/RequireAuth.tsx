@@ -71,8 +71,6 @@ export function RequireAuth({
   return <>{children ?? <Outlet />}</>;
 }
 
-export default RequireAuth;
-
 function ExternalRedirect({
   to,
   redirectExternal,

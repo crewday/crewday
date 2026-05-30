@@ -12,7 +12,7 @@
  * navigable React pages and is emitted by Vite as `dist/_routes.json`.
  */
 
-export const FRONTEND_ROUTE_MANIFEST_VERSION = 1;
+const FRONTEND_ROUTE_MANIFEST_VERSION = 1;
 
 export type FrontendRouteScope = "workspace" | "admin";
 

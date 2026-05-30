@@ -41,7 +41,7 @@ export const EXPENSE_STATUS_TONE: Record<Exclude<ExpenseStatus, "draft" | "submi
   reimbursed: "sky",
 };
 
-export const RISK_TONE: Record<Risk, "sky" | "sand" | "rust"> = {
+const RISK_TONE: Record<Risk, "sky" | "sand" | "rust"> = {
   low: "sky",
   medium: "sand",
   high: "rust",

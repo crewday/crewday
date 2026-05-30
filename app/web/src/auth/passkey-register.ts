@@ -210,7 +210,7 @@ export async function verifySignupToken(token: string): Promise<SignupVerifyResp
  * forward to the WebAuthn user.displayName so password managers
  * label the new credential with something meaningful.
  */
-export async function beginSignupEnroll(
+async function beginSignupEnroll(
   signupSessionId: string,
   displayName: string,
 ): Promise<SignupStartResponse> {
@@ -228,7 +228,7 @@ export async function beginSignupEnroll(
  * SPA must run the regular passkey login ceremony after this
  * lands (§03 "Self-serve signup" step 4).
  */
-export async function finishSignupEnroll(
+async function finishSignupEnroll(
   signupSessionId: string,
   challengeId: string,
   displayName: string,
@@ -249,14 +249,14 @@ export async function finishSignupEnroll(
   });
 }
 
-export async function beginAuthenticatedPasskeyRegister(): Promise<AuthenticatedPasskeyStartResponse> {
+async function beginAuthenticatedPasskeyRegister(): Promise<AuthenticatedPasskeyStartResponse> {
   return fetchJson<AuthenticatedPasskeyStartResponse>("/api/v1/auth/passkey/register/start", {
     method: "POST",
     body: {},
   });
 }
 
-export async function finishAuthenticatedPasskeyRegister(
+async function finishAuthenticatedPasskeyRegister(
   challengeId: string,
   credential: PasskeyRegisterCredential,
 ): Promise<AuthenticatedPasskeyFinishResponse> {
@@ -476,7 +476,7 @@ export async function runAuthenticatedPasskeyRegisterCeremony(
  * bearer-of-capability and the server enforces the
  * pending+passkey-absent gate before minting the challenge.
  */
-export async function beginInvitePasskey(
+async function beginInvitePasskey(
   inviteId: string,
 ): Promise<InvitePasskeyStartResponse> {
   return fetchJson<InvitePasskeyStartResponse>("/api/v1/invite/passkey/start", {
@@ -492,7 +492,7 @@ export async function beginInvitePasskey(
  * (cd-kd26). Response carries the redirect target so the SPA can
  * land the user on `/w/<slug>/today` without a second round trip.
  */
-export async function finishInvitePasskey(
+async function finishInvitePasskey(
   inviteId: string,
   challengeId: string,
   credential: PasskeyRegisterCredential,

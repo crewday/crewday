@@ -24,7 +24,7 @@ export interface PayrollPayslipListPayload {
   data: PayrollPayslipPayload[];
 }
 
-export function normalizePayslipStatus(status: string): PaySlip["status"] {
+function normalizePayslipStatus(status: string): PaySlip["status"] {
   if (status === "draft" || status === "issued" || status === "paid" || status === "voided") {
     return status;
   }

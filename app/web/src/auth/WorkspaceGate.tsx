@@ -225,5 +225,3 @@ function activeWorkspaceSlug(
   });
   return match ? workspaceSlug(match) : null;
 }
-
-export default WorkspaceGate;

@@ -73,7 +73,7 @@ export function todayQueryParams(me: Me): URLSearchParams {
   return params;
 }
 
-export function groupToday(tasks: Task[], nowIso: string): TodayPayload {
+function groupToday(tasks: Task[], nowIso: string): TodayPayload {
   const sorted = tasks.slice().sort((a, b) => a.scheduled_start.localeCompare(b.scheduled_start));
   const completed = sorted.filter((task) => task.status === "completed");
   const active = sorted.filter((task) => !isTerminalStatus(task.status));

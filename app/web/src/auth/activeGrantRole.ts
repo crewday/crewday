@@ -15,7 +15,7 @@ export function activeWorkspaceGrantRole(
   return workspace?.grant_role ?? null;
 }
 
-export function appRoleForGrantRole(grantRole: string | null): Role {
+function appRoleForGrantRole(grantRole: string | null): Role {
   if (grantRole === "manager" || grantRole === "admin") return "manager";
   if (grantRole === "client") return "client";
   return "employee";

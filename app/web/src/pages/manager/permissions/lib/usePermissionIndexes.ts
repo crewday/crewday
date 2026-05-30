@@ -16,7 +16,7 @@ export interface WorkspaceSwitcherEntry {
   name: string;
 }
 
-export function useWorkspaces(enabled = true) {
+function useWorkspaces(enabled = true) {
   return useQuery({
     queryKey: qk.meWorkspaces(),
     queryFn: () =>

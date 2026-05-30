@@ -1,6 +1,5 @@
 import {
   createContext,
-  use,
   useEffect,
   useMemo,
   useReducer,
@@ -30,8 +29,7 @@ import { connectEventStream, type SseStatus } from "@/lib/sse";
 //
 // Message dispatch (query invalidation, `setQueryData` fan-out, agent
 // typing flag) lives in `@/lib/sse`. This provider only owns the
-// lifecycle of the transport + the React-facing status state that
-// `useSseConnection` exposes to reconnect badges.
+// lifecycle of the transport + the React-facing status state.
 //
 // The deployment admin shell uses the sibling `AdminSseProvider`
 // below. Keeping the providers distinct prevents workspace slug churn
@@ -175,22 +173,4 @@ export function AdminSseProvider({ children }: { children: ReactNode }) {
   );
 
   return <SseCtx.Provider value={value}>{children}</SseCtx.Provider>;
-}
-
-/**
- * Subscribe to the live SSE connection state.
- *
- * Returns `{ status, lastEventId }` so components (e.g. the header
- * reconnect badge) can reflect transport health without reaching
- * into the transport itself.
- */
-export function useSseConnection(): SseCtxValue {
-  const v = use(SseCtx);
-  // Fall back to a closed/null state when the hook is called outside
-  // `<SseProvider>`. Throwing would make the hook unusable in
-  // storybook / styleguide / shallow tests that don't mount the
-  // full provider tree; the fallback is a safe no-op ("no live
-  // stream").
-  if (!v) return { status: "closed", lastEventId: null };
-  return v;
 }

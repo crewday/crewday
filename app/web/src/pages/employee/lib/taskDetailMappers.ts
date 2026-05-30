@@ -126,11 +126,11 @@ export function normalizeTaskDetail(payload: ApiTask | TaskDetailResponse): Norm
   };
 }
 
-export function isTaskDetailResponse(payload: ApiTask | TaskDetailResponse): payload is TaskDetailResponse {
+function isTaskDetailResponse(payload: ApiTask | TaskDetailResponse): payload is TaskDetailResponse {
   return "task" in payload;
 }
 
-export function normalizeTask(task: ApiTask): NormalizedTask {
+function normalizeTask(task: ApiTask): NormalizedTask {
   // code-health: ignore[ccn] Boundary mapper intentionally enumerates nullable API fallbacks field-by-field.
   const state = task.state ?? task.status ?? "pending";
   return {

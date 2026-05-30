@@ -71,5 +71,3 @@ export function ForbiddenPanel({ detail }: { detail?: string }) {
     </div>
   );
 }
-
-export default RequirePermission;

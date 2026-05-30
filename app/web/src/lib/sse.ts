@@ -222,8 +222,8 @@ export interface SseEvent {
 // Agent-typing cache (§14 "Agent turn indicator")
 // ---------------------------------------------------------------------------
 //
-// The `agent.turn.{started,finished}` pair drives a boolean cache the
-// chat surfaces read via `useAgentTyping`. A 60 s local safety net
+// The `agent.turn.{started,finished}` pair drives an activity cache the
+// chat surfaces read via `useAgentActivity`. A 60 s local safety net
 // drops the flag if a `finished` event is lost, matching the spec's
 // "or a local 60-second timeout" bullet. Keyed per scope — two
 // concurrent task-scoped chats don't share one indicator.
@@ -302,7 +302,7 @@ function finishToolActivity(
  * `EventSource.onopen` so a dropped session can't leave the bubble
  * stuck on reconnect (§14 "clears on SSE reconnect").
  */
-export function clearAllTyping(qc: QueryClient): void {
+function clearAllTyping(qc: QueryClient): void {
   for (const [sig, handle] of typingTimers) {
     clearTimeout(handle);
     const [prefix, taskId] = sig.split(":");
@@ -1329,7 +1329,7 @@ export function backoffDelayMs(
 // ---------------------------------------------------------------------------
 
 /**
- * Connection status reported by `useSseConnection`.
+ * Connection status reported by the SSE providers.
  *
  * - `connecting` — a fresh `EventSource` has been constructed but has
  *   not yet fired `onopen`.
@@ -1528,23 +1528,4 @@ export function connectEventStream(opts: ConnectOptions): SseConnection {
       setStatus("closed");
     },
   };
-}
-
-// ---------------------------------------------------------------------------
-// Legacy API — one-shot start helper
-// ---------------------------------------------------------------------------
-
-/**
- * Start a single long-lived stream and return a teardown function.
- * Kept so existing callers (tests, the placeholder in `main.tsx`
- * history) compile; product code should prefer `<SseProvider>` from
- * `@/context/SseContext`.
- */
-export function startEventStream(
-  qc: QueryClient,
-  slug: string | null = null,
-): () => void {
-  if (typeof EventSource === "undefined") return () => undefined;
-  const conn = connectEventStream({ slug, qc });
-  return () => conn.close();
 }

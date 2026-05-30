@@ -1,5 +1,4 @@
 import type {
-  InventoryItem,
   Organization,
   Property,
   PropertyWorkspace,
@@ -167,19 +166,6 @@ export function mapReservation(row: ReservationRow): Stay {
   };
 }
 
-export function mapInventoryItem(row: InventoryItemRow): InventoryItem {
-  return {
-    id: row.id,
-    property_id: row.property_id,
-    name: row.name,
-    sku: row.sku,
-    on_hand: row.on_hand,
-    par: row.reorder_point ?? 0,
-    unit: row.unit,
-    area: "",
-  };
-}
-
 export function mapMembership(row: MembershipRow): PropertyWorkspace {
   return {
     property_id: row.property_id,
@@ -235,7 +221,7 @@ function stringField(value: unknown): string {
   return typeof value === "string" ? value : "";
 }
 
-export function normalizeAddress(row: PropertyDetailRow): PropertyAddress {
+function normalizeAddress(row: PropertyDetailRow): PropertyAddress {
   const addressJson = row.address_json ?? {};
   const country = stringField(addressJson.country) || row.country;
   return {

@@ -1,7 +1,7 @@
 export const DEFAULT_LOCALE = "en-US";
 export const PSEUDO_LOCALE = "qps-ploc";
 
-export const SUPPORTED_LOCALES = [DEFAULT_LOCALE, "fr", "es", PSEUDO_LOCALE] as const;
+const SUPPORTED_LOCALES = [DEFAULT_LOCALE, "fr", "es", PSEUDO_LOCALE] as const;
 
 export type SupportedLocale = (typeof SUPPORTED_LOCALES)[number];
 

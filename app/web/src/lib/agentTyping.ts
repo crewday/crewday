@@ -28,7 +28,3 @@ export function useAgentActivity(
   if (typeof q.data === "boolean") return { typing: q.data };
   return q.data ?? { typing: false };
 }
-
-export function useAgentTyping(scope: AgentTurnScope, taskId?: string): boolean {
-  return useAgentActivity(scope, taskId).typing;
-}
