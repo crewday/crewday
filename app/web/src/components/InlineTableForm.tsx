@@ -31,6 +31,7 @@ export type InlineTableColumnWidth =
   | { flex?: number; min?: number | string; max?: number | string };
 
 const DELETE_KEY_WINDOW_MS = 650;
+const DETAIL_COLUMN_KEY = "__detail";
 let createRowCounter = 0;
 
 export interface InlineTableColumn<TDraft> {
@@ -837,6 +838,7 @@ export function InlineTableForm<TDraft>({
               if (renderEditing || controlsDisabled || !onEdit) return;
               editRow(row.id, columnKey);
             };
+            const activateDetail = () => activateCell(DETAIL_COLUMN_KEY);
 
             return (
               <div
@@ -995,7 +997,23 @@ export function InlineTableForm<TDraft>({
                     role="row"
                   >
                     <div className="inline-table-form__detail-body" role="cell">
-                      {detail}
+                      {detail ? (
+                        <div
+                          className="inline-table-form__detail-content"
+                          data-inline-table-row={row.id}
+                          data-inline-table-column={DETAIL_COLUMN_KEY}
+                          onClick={(event) => {
+                            if (isInteractiveEventTarget(event.target)) return;
+                            if (activationMode === "singleClick" && !isTrailingCreate) activateDetail();
+                          }}
+                          onDoubleClick={() => {
+                            if (activationMode !== "doubleClick") return;
+                            activateDetail();
+                          }}
+                        >
+                          {detail}
+                        </div>
+                      ) : null}
                       {row.validation ? (
                         <p className="inline-table-form__message inline-table-form__message--validation">
                           {row.validation}

@@ -1879,6 +1879,240 @@ describe("InlineTableForm", () => {
     expect(screen.getByLabelText("Owner")).toHaveFocus();
   });
 
+  it("enters edit mode from a read detail note on single click and focuses the note field", async () => {
+    function Harness() {
+      const [rows, setRows] = useState<InlineTableRow<Draft>[]>([
+        {
+          id: "r-1",
+          editing: false,
+          dirty: false,
+          draft: { title: "Confirm linen", owner: "maria", note: "Bring spare keys." },
+        },
+      ]);
+      return (
+        <InlineTableForm
+          ariaLabel="Detail note rows"
+          columns={columns}
+          rows={rows}
+          saveMode="explicit"
+          onDraftChange={vi.fn()}
+          onSave={vi.fn()}
+          onCancel={vi.fn()}
+          onEdit={(rowId) => {
+            setRows((current) => current.map((row) => (
+              row.id === rowId ? { ...row, editing: true } : row
+            )));
+          }}
+          renderDetail={({ row, update, disabled }) => (
+            row.editing ? (
+              <InlineNoteField
+                value={row.draft.note}
+                disabled={disabled}
+                ariaLabel="Note"
+                onChange={(note) => update({ note })}
+              />
+            ) : <span>{row.draft.note}</span>
+          )}
+        />
+      );
+    }
+
+    render(<Harness />);
+
+    fireEvent.click(screen.getByText("Bring spare keys."));
+
+    await waitFor(() => expect(screen.getByLabelText("Note")).toHaveFocus());
+  });
+
+  it("selects a read detail note on single click in double-click mode and edits it on double click", async () => {
+    function Harness() {
+      const [rows, setRows] = useState<InlineTableRow<Draft>[]>([
+        {
+          id: "r-1",
+          editing: false,
+          dirty: false,
+          draft: { title: "Confirm linen", owner: "maria", note: "Bring spare keys." },
+        },
+      ]);
+      return (
+        <InlineTableForm
+          ariaLabel="Double-click detail note rows"
+          columns={columns}
+          rows={rows}
+          saveMode="explicit"
+          activationMode="doubleClick"
+          onDraftChange={vi.fn()}
+          onSave={vi.fn()}
+          onCancel={vi.fn()}
+          onEdit={(rowId) => {
+            setRows((current) => current.map((row) => (
+              row.id === rowId ? { ...row, editing: true } : row
+            )));
+          }}
+          renderDetail={({ row, update, disabled }) => (
+            row.editing ? (
+              <InlineNoteField
+                value={row.draft.note}
+                disabled={disabled}
+                ariaLabel="Note"
+                onChange={(note) => update({ note })}
+              />
+            ) : <span>{row.draft.note}</span>
+          )}
+        />
+      );
+    }
+
+    render(<Harness />);
+
+    fireEvent.click(screen.getByText("Bring spare keys."));
+    const rowGroup = screen.getByLabelText("Confirm linen");
+    expect(rowGroup).toHaveClass("is-selected");
+    expect(rowGroup).toHaveFocus();
+    expect(screen.queryByLabelText("Note")).toBeNull();
+
+    fireEvent.doubleClick(screen.getByText("Bring spare keys."));
+
+    await waitFor(() => expect(screen.getByLabelText("Note")).toHaveFocus());
+  });
+
+  it("does not enter edit mode from disabled or saving detail notes", () => {
+    const onEdit = vi.fn();
+    render(
+      <InlineTableForm
+        ariaLabel="Guarded detail note rows"
+        columns={columns}
+        rows={[
+          {
+            id: "disabled",
+            editing: false,
+            disabled: true,
+            draft: { title: "Locked", owner: "maria", note: "Locked note" },
+          },
+          {
+            id: "saving",
+            editing: false,
+            saving: true,
+            draft: { title: "Saving", owner: "maria", note: "Saving note" },
+          },
+        ]}
+        saveMode="explicit"
+        onDraftChange={vi.fn()}
+        onSave={vi.fn()}
+        onCancel={vi.fn()}
+        onEdit={onEdit}
+        renderDetail={({ row }) => <span>{row.draft.note}</span>}
+      />,
+    );
+
+    fireEvent.click(screen.getByText("Locked note"));
+    fireEvent.click(screen.getByText("Saving note"));
+
+    expect(onEdit).not.toHaveBeenCalled();
+  });
+
+  it("autosaves a dirty row before activating a read detail note on another row", async () => {
+    const onSave = vi.fn();
+    const onEdit = vi.fn();
+
+    function Harness() {
+      const [rows, setRows] = useState<InlineTableRow<Draft>[]>([
+        {
+          ...rowWithTitle("r-1", "Confirm linen"),
+          editing: true,
+          dirty: true,
+          draft: { title: "Confirm linen", owner: "maria", note: "Original note" },
+        },
+        {
+          ...rowWithTitle("r-2", "Restock towels"),
+          draft: { title: "Restock towels", owner: "enzo", note: "Bring spare keys." },
+        },
+      ]);
+
+      return (
+        <InlineTableForm
+          ariaLabel="Autosave detail note switch rows"
+          columns={columns}
+          rows={rows}
+          saveMode="autosave"
+          onDraftChange={vi.fn()}
+          onSave={(rowId) => {
+            onSave(rowId);
+            setRows((current) => current.map((row) => (
+              row.id === rowId ? { ...row, editing: false, dirty: false } : row
+            )));
+          }}
+          onCancel={vi.fn()}
+          onEdit={(rowId) => {
+            onEdit(rowId);
+            setRows((current) => current.map((row) => (
+              row.id === rowId ? { ...row, editing: true } : row
+            )));
+          }}
+          renderDetail={({ row, update, disabled }) => (
+            row.editing ? (
+              <InlineNoteField
+                value={row.draft.note}
+                disabled={disabled}
+                ariaLabel={`Note ${row.id}`}
+                onChange={(note) => update({ note })}
+              />
+            ) : <span>{row.draft.note}</span>
+          )}
+        />
+      );
+    }
+
+    render(<Harness />);
+
+    fireEvent.click(screen.getByText("Bring spare keys."));
+
+    expect(onSave).toHaveBeenCalledWith("r-1");
+    expect(onEdit).toHaveBeenCalledWith("r-2");
+    expect(onSave.mock.invocationCallOrder[0]).toBeLessThan(onEdit.mock.invocationCallOrder[0]!);
+    await waitFor(() => expect(screen.getByLabelText("Note r-2")).toHaveFocus());
+  });
+
+  it("does not activate a trailing create row detail note", () => {
+    const onEdit = vi.fn();
+    render(
+      <InlineTableForm
+        ariaLabel="Trailing detail note rows"
+        columns={columns}
+        rows={[
+          {
+            id: "r-1",
+            editing: false,
+            dirty: false,
+            draft: { title: "Existing", owner: "maria", note: "Existing note" },
+          },
+        ]}
+        saveMode="explicit"
+        trailingCreateRow={{
+          id: "create",
+          editing: true,
+          dirty: false,
+          isNew: true,
+          draft: { title: "", owner: "maria", note: "Draft note" },
+        }}
+        onDraftChange={vi.fn()}
+        onSave={vi.fn()}
+        onCancel={vi.fn()}
+        onEdit={onEdit}
+        renderDetail={({ row }) => <span>{row.draft.note}</span>}
+      />,
+    );
+
+    const createGroup = screen.getByText("Draft note").closest("[data-inline-table-row-group]");
+    fireEvent.click(screen.getByText("Draft note"));
+
+    expect(onEdit).not.toHaveBeenCalled();
+    expect(createGroup).toHaveClass(
+      "inline-table-form__group--trailing-create",
+      "is-editing",
+    );
+  });
+
   it("does not enter edit mode when single-clicking interactive read content", () => {
     const onEdit = vi.fn();
     const interactiveColumns: InlineTableColumn<Draft>[] = [

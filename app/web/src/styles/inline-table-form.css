@@ -823,6 +823,10 @@
   background: color-mix(in srgb, var(--paper) 78%, var(--card));
 }
 
+.inline-table-form__detail-content {
+  display: contents;
+}
+
 .inline-table-form__message,
 .inline-table-form__meta {
   margin: 0;
