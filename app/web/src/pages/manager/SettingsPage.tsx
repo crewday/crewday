@@ -488,7 +488,7 @@ function WorkspaceDetailsForm({ settings }: { settings: WorkspaceSettings }) {
             value={draft}
             onChange={(event) => setDraft(event.target.value)}
             disabled={save.isPending}
-          />
+           aria-label="Display name"/>
         </div>
         <p className="settings-editor__help form-layout__help">
           Shown in workspace lists, page titles, and notifications.
@@ -658,8 +658,7 @@ function WorkspaceLifecycleDialog({
             value={draft}
             onChange={(event) => setDraft(event.target.value)}
             disabled={pending}
-            autoFocus
-          />
+           aria-label="field Type to confirm workspace-danger-dialog__input"/>
         </label>
         {error ? <p className="form-error" role="alert">{error}</p> : null}
         <div className="modal__actions">
@@ -904,10 +903,10 @@ export default function SettingsPage() {
           normal selection immediately.
         </p>
         {deleteResult ? (
-          <p className="workspace-danger-actions__notice" role="status">
+          <output className="workspace-danger-actions__notice">
             Deletion scheduled. This workspace is archived now and will be purged after{" "}
             <time dateTime={deleteResult.purge_after}>{formatDeadline(deleteResult.purge_after)}</time>.
-          </p>
+          </output>
         ) : null}
         <ul className="workspace-danger-actions">
           <li className="workspace-danger-action">
@@ -969,7 +968,7 @@ export default function SettingsPage() {
               navigate(route, { replace: true });
             }}
           >
-            Continue
+              Continue workspace deletion
           </button>
         ) : null}
       </div>

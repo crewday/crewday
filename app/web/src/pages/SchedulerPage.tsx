@@ -264,7 +264,7 @@ export default function SchedulerPage() {
               </div>
             ))}
             {usersToShow.map((u) => (
-              <div key={u.id} className="scheduler-row" role="row">
+              <div key={u.id} className="scheduler-row">
                 <div className="scheduler-row__user">
                   <strong>{u.first_name || "—"}</strong>
                   {scope !== "client" && u.display_name && (

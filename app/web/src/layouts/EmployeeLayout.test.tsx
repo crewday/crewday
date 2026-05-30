@@ -15,8 +15,8 @@ import type { Me } from "@/types/api";
 import EmployeeLayout from "./EmployeeLayout";
 
 vi.mock("@/components/AgentSidebar", () => ({
-  default: function MockAgentSidebar({ role }: { role: string }): ReactElement {
-    return <aside data-testid="agent-sidebar">agent:{role}</aside>;
+  default: function MockAgentSidebar({ agentRole }: { agentRole: string }): ReactElement {
+    return <aside data-testid="agent-sidebar">agent:{agentRole}</aside>;
   },
 }));
 

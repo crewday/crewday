@@ -113,7 +113,7 @@ function ProviderPanel({
       <table className="table chat-gateway-panel__table">
         <thead>
           <tr>
-            <th>Field</th><th>Value</th><th>Last edit</th><th></th>
+            <th>Field</th><th>Value</th><th>Last edit</th><th aria-label="Actions"></th>
           </tr>
         </thead>
         <tbody>
@@ -141,7 +141,7 @@ function ProviderPanel({
           <table className="table chat-gateway-panel__table">
             <thead>
               <tr>
-                <th>Name</th><th>Purpose</th><th>Status</th><th>Last sync</th><th></th>
+                <th>Name</th><th>Purpose</th><th>Status</th><th>Last sync</th><th aria-label="Actions"></th>
               </tr>
             </thead>
             <tbody>
@@ -216,7 +216,7 @@ function TestInboundPanel({ provider }: { provider: AdminChatProvider | undefine
             className="input mono"
             value={externalContact}
             onChange={(e) => setExternalContact(e.target.value)}
-          />
+           aria-label="field From input mono"/>
         </label>
         <label className="field">
           <span>Language</span>
@@ -224,17 +224,18 @@ function TestInboundPanel({ provider }: { provider: AdminChatProvider | undefine
             className="input"
             value={languageHint}
             onChange={(e) => setLanguageHint(e.target.value)}
-          />
+           aria-label="field Language input"/>
         </label>
-        <label className="field chat-gateway-test__message">
+        <div className="field chat-gateway-test__message">
           <span>Inbound message</span>
           <AutoGrowTextarea
             className="textarea"
+            aria-label="Inbound message"
             value={bodyMd}
             onChange={(e) => setBodyMd(e.target.value)}
             rows={3}
           />
-        </label>
+        </div>
         <button
           type="button"
           className="btn btn--moss"

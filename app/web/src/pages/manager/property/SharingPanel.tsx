@@ -125,7 +125,7 @@ export default function SharingPanel({
 
       <table className="table">
         <thead>
-          <tr><th>Workspace</th><th>Membership</th><th>Since</th><th></th></tr>
+          <tr><th>Workspace</th><th>Membership</th><th>Since</th><th aria-label="Actions"></th></tr>
         </thead>
         <tbody>
           {detail.memberships.map((m) => {

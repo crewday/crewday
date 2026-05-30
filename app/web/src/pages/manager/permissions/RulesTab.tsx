@@ -130,7 +130,7 @@ export default function RulesTab() {
               <th>Action</th>
               <th>Default (if no rule matches)</th>
               <th>Active rules on this workspace</th>
-              <th></th>
+              <th aria-label="Actions"></th>
             </tr>
           </thead>
           <tbody>

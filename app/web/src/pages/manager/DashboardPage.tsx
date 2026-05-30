@@ -35,6 +35,10 @@ import type {
   BroadcastSendResponse,
 } from "@/types/messaging";
 
+const COMBOBOX_ROLE = "combobox";
+const LISTBOX_ROLE = "listbox";
+const OPTION_ROLE = "option";
+
 interface BroadcastAudienceOption {
   token: string;
   label: string;
@@ -207,6 +211,7 @@ function BroadcastRecipientPicker({
     >
       <div
         className="broadcast-recipient-picker__control"
+        role="presentation"
         onMouseDown={(event) => {
           if (event.target === event.currentTarget) inputRef.current?.focus();
         }}
@@ -234,7 +239,7 @@ function BroadcastRecipientPicker({
         <input
           id={inputId}
           ref={inputRef}
-          role="combobox"
+          role={COMBOBOX_ROLE}
           aria-label="Recipients"
           aria-autocomplete="list"
           aria-expanded={open}
@@ -257,17 +262,18 @@ function BroadcastRecipientPicker({
       </div>
       {open && (
         <div className="broadcast-recipient-picker__popover">
-          <ul id={listId} className="broadcast-recipient-picker__list" role="listbox">
+          <div id={listId} className="broadcast-recipient-picker__list" role={LISTBOX_ROLE}>
             {loading ? (
-              <li className="broadcast-recipient-picker__empty">Loading recipients...</li>
+              <div className="broadcast-recipient-picker__empty">Loading recipients...</div>
             ) : filteredOptions.length === 0 ? (
-              <li className="broadcast-recipient-picker__empty">No matching audiences</li>
+              <div className="broadcast-recipient-picker__empty">No matching audiences</div>
             ) : (
               filteredOptions.map((option, index) => (
-                <li
+                <button
+                  type="button"
                   id={`${listId}-${option.token}`}
                   key={option.token}
-                  role="option"
+                  role={OPTION_ROLE}
                   aria-selected={index === activeIndex}
                   className={
                     "broadcast-recipient-picker__option" +
@@ -288,10 +294,10 @@ function BroadcastRecipientPicker({
                   <span className="broadcast-recipient-picker__option-kind">
                     {option.kind === "group" ? "Group" : "Person"}
                   </span>
-                </li>
+                </button>
               ))
             )}
-          </ul>
+          </div>
         </div>
       )}
     </div>
@@ -441,9 +447,9 @@ export default function DashboardPage() {
         }
       >
           {broadcastNotice && (
-            <div className="form-notice form-notice--success" role="status">
+            <output className="form-notice form-notice--success">
               {broadcastNotice}
-            </div>
+            </output>
           )}
           {sendBroadcast.isError && (
             <div className="form-notice form-notice--error" role="alert">
@@ -474,6 +480,7 @@ export default function DashboardPage() {
               value={broadcastSubject}
               onChange={(e) => setBroadcastSubject(e.target.value)}
               placeholder="e.g. Storm watch"
+              aria-label="Subject"
             />
           </FormField>
 

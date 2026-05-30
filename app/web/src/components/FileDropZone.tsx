@@ -1,12 +1,13 @@
 import {
+  useCallback,
+  useEffect,
   useId,
   useRef,
   useState,
   type ChangeEvent,
-  type DragEvent,
-  type KeyboardEvent,
-  type MouseEvent,
 } from "react";
+
+const BUTTON_ROLE = "button";
 
 interface FileDropZoneProps {
   title: string;
@@ -34,6 +35,7 @@ export default function FileDropZone(props: FileDropZoneProps) {
   } = props;
   const inputId = useId();
   const inputRef = useRef<HTMLInputElement>(null);
+  const labelRef = useRef<HTMLLabelElement>(null);
   const [dragActive, setDragActive] = useState(false);
   const classes = [
     "upload-dropzone",
@@ -44,67 +46,83 @@ export default function FileDropZone(props: FileDropZoneProps) {
     .filter(Boolean)
     .join(" ");
 
-  function emitFiles(files: FileList | File[] | null): void {
+  const emitFiles = useCallback((files: FileList | File[] | null): void => {
     if (disabled || !files?.length) return;
     onFiles(Array.from(files));
-  }
+  }, [disabled, onFiles]);
 
   function handleChange(event: ChangeEvent<HTMLInputElement>): void {
     emitFiles(event.currentTarget.files);
     event.currentTarget.value = "";
   }
 
-  function isFileDrag(event: DragEvent<HTMLLabelElement>): boolean {
-    return event.dataTransfer.types.includes("Files");
+  function isFileDrag(event: globalThis.DragEvent): boolean {
+    return event.dataTransfer?.types.includes("Files") ?? false;
   }
 
-  function handleClick(event: MouseEvent<HTMLLabelElement>): void {
-    if (disabled) event.preventDefault();
-  }
+  useEffect(() => {
+    const label = labelRef.current;
+    if (!label) return undefined;
 
-  function handleDragOver(event: DragEvent<HTMLLabelElement>): void {
-    if (!isFileDrag(event)) return;
-    event.preventDefault();
-    if (disabled) {
-      event.dataTransfer.dropEffect = "none";
-      setDragActive(false);
-      return;
+    function handleClick(event: MouseEvent): void {
+      if (disabled) event.preventDefault();
     }
-    setDragActive(true);
-    event.dataTransfer.dropEffect = "copy";
-  }
 
-  function handleDragLeave(): void {
-    setDragActive(false);
-  }
+    function handleDragOver(event: globalThis.DragEvent): void {
+      const dataTransfer = event.dataTransfer;
+      if (!dataTransfer || !isFileDrag(event)) return;
+      event.preventDefault();
+      if (disabled) {
+        dataTransfer.dropEffect = "none";
+        setDragActive(false);
+        return;
+      }
+      setDragActive(true);
+      dataTransfer.dropEffect = "copy";
+    }
 
-  function handleDrop(event: DragEvent<HTMLLabelElement>): void {
-    if (!isFileDrag(event)) return;
-    event.preventDefault();
-    setDragActive(false);
-    if (disabled) return;
-    emitFiles(event.dataTransfer.files);
-  }
+    function handleDragLeave(): void {
+      setDragActive(false);
+    }
 
-  function handleKeyDown(event: KeyboardEvent<HTMLLabelElement>): void {
-    if (disabled) return;
-    if (event.key !== "Enter" && event.key !== " ") return;
-    event.preventDefault();
-    inputRef.current?.click();
-  }
+    function handleDrop(event: globalThis.DragEvent): void {
+      const dataTransfer = event.dataTransfer;
+      if (!dataTransfer || !isFileDrag(event)) return;
+      event.preventDefault();
+      setDragActive(false);
+      if (disabled) return;
+      emitFiles(dataTransfer.files);
+    }
+
+    function handleKeyDown(event: KeyboardEvent): void {
+      if (disabled) return;
+      if (event.key !== "Enter" && event.key !== " ") return;
+      event.preventDefault();
+      inputRef.current?.click();
+    }
+
+    label.addEventListener("click", handleClick);
+    label.addEventListener("dragover", handleDragOver);
+    label.addEventListener("dragleave", handleDragLeave);
+    label.addEventListener("drop", handleDrop);
+    label.addEventListener("keydown", handleKeyDown);
+    return () => {
+      label.removeEventListener("click", handleClick);
+      label.removeEventListener("dragover", handleDragOver);
+      label.removeEventListener("dragleave", handleDragLeave);
+      label.removeEventListener("drop", handleDrop);
+      label.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [disabled, emitFiles]);
 
   return (
     <label
+      ref={labelRef}
       className={classes}
       htmlFor={inputId}
-      role="button"
+      role={BUTTON_ROLE}
       aria-disabled={disabled}
       tabIndex={disabled ? -1 : 0}
-      onClick={handleClick}
-      onDragOver={handleDragOver}
-      onDragLeave={handleDragLeave}
-      onDrop={handleDrop}
-      onKeyDown={handleKeyDown}
     >
       <input
         ref={inputRef}

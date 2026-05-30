@@ -147,14 +147,14 @@ function renderModal(onClose = vi.fn()) {
       }
     >
       <FormModalField label="Name" requirement="required">
-        <input required />
+        <input required  aria-label="Name"/>
       </FormModalField>
       <FormModalGrid data-testid="modal-grid">
         <FormModalField label="SKU" requirement="optional">
-          <input />
+          <input  aria-label="SKU"/>
         </FormModalField>
         <FormModalField label="Unit" requirement="required">
-          <input required />
+          <input required  aria-label="Unit"/>
         </FormModalField>
       </FormModalGrid>
     </FormModal>,
@@ -244,7 +244,7 @@ describe("FormModal", () => {
     const { rerender } = render(
       <FormModal open title="Create item" onClose={vi.fn()}>
         <FormModalField label="Name" requirement="required">
-          <input required />
+          <input required  aria-label="Name"/>
         </FormModalField>
       </FormModal>,
     );
@@ -255,7 +255,7 @@ describe("FormModal", () => {
     rerender(
       <FormModal open={false} title="Create item" onClose={vi.fn()}>
         <FormModalField label="Name" requirement="required">
-          <input required />
+          <input required  aria-label="Name"/>
         </FormModalField>
       </FormModal>,
     );

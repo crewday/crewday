@@ -452,6 +452,7 @@ export default function EmployeeDetailPage() {
                     type="checkbox"
                     checked={selectedRoleIds.has(role.id)}
                     onChange={(event) => toggleRole(role.id, event.currentTarget.checked)}
+                    aria-label={`${role.name} ${role.key}`}
                   />
                   <span>{role.name}</span>
                   <code className="inline-code">{role.key}</code>
@@ -629,7 +630,7 @@ export default function EmployeeDetailPage() {
                       <th>Gross</th>
                       <th>Net</th>
                       <th>Status</th>
-                      <th></th>
+                      <th aria-label="Actions"></th>
                     </tr>
                   </thead>
                   <tbody>

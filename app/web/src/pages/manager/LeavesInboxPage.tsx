@@ -61,7 +61,7 @@ export default function LeavesInboxPage() {
         <table className="table table--roomy">
           <thead>
             <tr>
-              <th>Employee</th><th>Dates</th><th>Days</th><th>Category</th><th>Note</th><th></th>
+              <th>Employee</th><th>Dates</th><th>Days</th><th>Category</th><th>Note</th><th aria-label="Actions"></th>
             </tr>
           </thead>
           <tbody>

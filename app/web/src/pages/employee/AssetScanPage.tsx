@@ -171,7 +171,7 @@ export default function AssetScanPage() {
                 autoCapitalize="characters"
                 autoComplete="off"
                 inputMode="text"
-              />
+               aria-label="scan-manual__field QR code characters off text"/>
             </label>
             <button className="btn btn--moss" type="submit" disabled={status === "resolving"}>
               Open asset

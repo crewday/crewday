@@ -41,9 +41,8 @@ export function DayCellView(props: DayCellViewProps) {
     return "quiet";
   })();
   return (
-    <div
-      role="button"
-      tabIndex={0}
+    <button
+      type="button"
       data-schedule-iso={cell.iso}
       aria-label={
         `Open schedule for ${label.weekday} ${label.day} ${label.month}`
@@ -98,6 +97,6 @@ export function DayCellView(props: DayCellViewProps) {
           {emptyLabel}
         </span>
       )}
-    </div>
+    </button>
   );
 }

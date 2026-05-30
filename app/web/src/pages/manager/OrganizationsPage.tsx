@@ -215,22 +215,24 @@ export default function OrganizationsPage() {
           <header className="panel__head"><h2>Counterparties</h2></header>
           <ul className="org-list">
             {visibleOrgs.map((o) => (
-              <li
-                key={o.id}
-                className={"org-list__row" + (o.id === selectedOid ? " org-list__row--active" : "")}
-                onClick={() => setActiveOid(o.id)}
-              >
-                <div>
-                  <strong>{o.name}</strong>
-                  {o.legal_name && o.legal_name !== o.name && (
-                    <div className="muted">{o.legal_name}</div>
-                  )}
-                </div>
-                <div className="org-list__chips">
-                  {o.is_client && <Chip tone="moss" size="sm">Client</Chip>}
-                  {o.is_supplier && <Chip tone="sky" size="sm">Supplier</Chip>}
-                  <Chip tone="ghost" size="sm">{o.default_currency}</Chip>
-                </div>
+              <li key={o.id}>
+                <button
+                  type="button"
+                  className={"org-list__row" + (o.id === selectedOid ? " org-list__row--active" : "")}
+                  onClick={() => setActiveOid(o.id)}
+                >
+                  <span>
+                    <strong>{o.name}</strong>
+                    {o.legal_name && o.legal_name !== o.name && (
+                      <span className="muted">{o.legal_name}</span>
+                    )}
+                  </span>
+                  <span className="org-list__chips">
+                    {o.is_client && <Chip tone="moss" size="sm">Client</Chip>}
+                    {o.is_supplier && <Chip tone="sky" size="sm">Supplier</Chip>}
+                    <Chip tone="ghost" size="sm">{o.default_currency}</Chip>
+                  </span>
+                </button>
               </li>
             ))}
           </ul>
@@ -375,20 +377,19 @@ function NewOrganizationButton({
                     placeholder="Workspace default"
                     maxLength={3}
                     autoCapitalize="characters"
-                  />
+                   aria-label="field asset-create__field Default currency defaultCurrency Workspace default characters"/>
                 </label>
               </FormModalGrid>
               <label className="field asset-create__field">
                 <span>Display name</span>
                 <input
-                  autoFocus
                   required
                   aria-invalid={nameInvalid}
                   aria-describedby={nameInvalid ? formErrorId : undefined}
                   value={draft.displayName}
                   onChange={(event) => update("displayName", event.target.value)}
                   placeholder="e.g. Dupont Family"
-                />
+                 aria-label="field asset-create__field Display name displayName e.g. Dupont Family"/>
               </label>
               <label className="field asset-create__field">
                 <span>Legal name</span>
@@ -396,7 +397,7 @@ function NewOrganizationButton({
                   value={draft.legalName}
                   onChange={(event) => update("legalName", event.target.value)}
                   placeholder="Optional invoice name"
-                />
+                 aria-label="field asset-create__field Legal name legalName invoice name"/>
               </label>
             </section>
 
@@ -410,7 +411,7 @@ function NewOrganizationButton({
                   value={draft.addressLine1}
                   onChange={(event) => update("addressLine1", event.target.value)}
                   autoComplete="address-line1"
-                />
+                 aria-label="field asset-create__field Address line 1 addressLine1 address-line1"/>
               </label>
               <label className="field asset-create__field">
                 <span>Address line 2</span>
@@ -418,7 +419,7 @@ function NewOrganizationButton({
                   value={draft.addressLine2}
                   onChange={(event) => update("addressLine2", event.target.value)}
                   autoComplete="address-line2"
-                />
+                 aria-label="field asset-create__field Address line 2 addressLine2 address-line2"/>
               </label>
               <FormModalGrid className="asset-create__grid">
                 <label className="field asset-create__field">
@@ -427,7 +428,7 @@ function NewOrganizationButton({
                     value={draft.locality}
                     onChange={(event) => update("locality", event.target.value)}
                     autoComplete="address-level2"
-                  />
+                   aria-label="field asset-create__field City or locality locality address-level2"/>
                 </label>
                 <label className="field asset-create__field">
                   <span>State or region</span>
@@ -435,7 +436,7 @@ function NewOrganizationButton({
                     value={draft.region}
                     onChange={(event) => update("region", event.target.value)}
                     autoComplete="address-level1"
-                  />
+                   aria-label="field asset-create__field State or region region address-level1"/>
                 </label>
               </FormModalGrid>
               <FormModalGrid className="asset-create__grid">
@@ -445,7 +446,7 @@ function NewOrganizationButton({
                     value={draft.postalCode}
                     onChange={(event) => update("postalCode", event.target.value)}
                     autoComplete="postal-code"
-                  />
+                   aria-label="field asset-create__field Postal code postalCode postal-code"/>
                 </label>
                 <label className="field asset-create__field">
                   <span>Country</span>
@@ -454,7 +455,7 @@ function NewOrganizationButton({
                     onChange={(event) => update("country", event.target.value)}
                     autoComplete="country-name"
                     placeholder="US"
-                  />
+                   aria-label="field asset-create__field Country country country-name US"/>
                 </label>
               </FormModalGrid>
             </section>

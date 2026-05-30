@@ -182,7 +182,7 @@ export default function ChatChannelsMeCard({ me }: { me: Me }) {
                     placeholder="424242"
                     value={code}
                     onChange={(e) => setCode(e.target.value)}
-                  />
+                   aria-label="me-chat-channels__field 6-digit code numeric \\d{6} 424242"/>
                 </label>
                 <div className="me-chat-channels__actions">
                   <button className="btn btn--moss btn--sm" type="submit">
@@ -219,7 +219,7 @@ export default function ChatChannelsMeCard({ me }: { me: Me }) {
                     placeholder="+33 6 00 00 00 00"
                     value={address}
                     onChange={(e) => setAddress(e.target.value)}
-                  />
+                   aria-label="me-chat-channels__field E.164 phone number tel +33 6 00 00 00 00"/>
                 </label>
                 <button className="btn btn--moss btn--sm" type="submit">
                   Send code

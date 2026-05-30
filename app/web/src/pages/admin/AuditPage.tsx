@@ -167,12 +167,12 @@ export default function AdminAuditPage() {
               value={filter.action ?? ""}
               placeholder="deployment.budget.updated"
               onChange={(e) => setFilterParam("action", e.target.value.trim())}
-            />
-            <datalist id="audit-action-suggestions">
-              {actionSuggestions.map((a) => (
-                <option key={a} value={a} />
-              ))}
-            </datalist>
+             aria-label="field field--grow Action audit-action-suggestions deployment.budget.updated action audit-action-suggestions"/>
+              <datalist id="audit-action-suggestions">
+                {actionSuggestions.map((a) => (
+                <option key={a} value={a}>{a}</option>
+                ))}
+              </datalist>
           </label>
           <label className="field">
             <span>Actor ID</span>
@@ -180,7 +180,7 @@ export default function AdminAuditPage() {
               value={filter.actor_id ?? ""}
               placeholder="u-elodie"
               onChange={(e) => setFilterParam("actor_id", e.target.value.trim())}
-            />
+             aria-label="field Actor ID u-elodie actor_id"/>
           </label>
           <label className="field">
             <span>From</span>
@@ -188,7 +188,7 @@ export default function AdminAuditPage() {
               type="date"
               value={filter.since ?? ""}
               onChange={(e) => setFilterParam("since", e.target.value)}
-            />
+             aria-label="field From date since"/>
           </label>
           <label className="field">
             <span>Until</span>
@@ -196,7 +196,7 @@ export default function AdminAuditPage() {
               type="date"
               value={filter.until ?? ""}
               onChange={(e) => setFilterParam("until", e.target.value)}
-            />
+             aria-label="field Until date until"/>
           </label>
           {filterActive && (
             <button

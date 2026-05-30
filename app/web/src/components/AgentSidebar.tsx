@@ -26,10 +26,10 @@ import type { AgentAction, AgentMessage, AgentTurnScope, Role } from "@/types/ap
 // selects the per-role log/message endpoints and gates the
 // manager-only "Pending approvals" block.
 interface AgentSidebarProps {
-  role: Role;
+  agentRole: Role;
 }
 
-export default function AgentSidebar({ role }: AgentSidebarProps) {
+export default function AgentSidebar({ agentRole: role }: AgentSidebarProps) {
   const [collapsed, setCollapsed] = useState<boolean>(() => initialAgentCollapsed());
   const [draft, setDraft] = useState("");
   const logRef = useRef<HTMLDivElement>(null);
@@ -277,9 +277,9 @@ function AgentActivityLine({ label, live = false }: { label: string; live?: bool
     <div className="agent-activity">
       <span aria-hidden="true">{label}</span>
       {live && (
-        <span className="sr-only" role="status" aria-live="polite">
+        <output className="sr-only" aria-live="polite">
           {label}
-        </span>
+        </output>
       )}
     </div>
   );

@@ -26,7 +26,7 @@ export function SchedulePhoneWeek({
   return (
     <>
       {group.cells.map((cell) => (
-        <div key={cell.iso} role="listitem">
+        <div key={cell.iso}>
           <DayCellView
             cell={cell}
             data={data}

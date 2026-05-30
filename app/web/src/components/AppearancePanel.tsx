@@ -51,7 +51,7 @@ export default function AppearancePanel({
                 checked={selected}
                 onChange={() => setTheme(c.value)}
                 className="theme-choice__input"
-              />
+               aria-label="theme-choice theme-choice--selected radio theme-preference theme-choice__input true theme-choice__icon theme-choice__body muted"/>
               <Icon size={18} aria-hidden="true" className="theme-choice__icon" />
               <div className="theme-choice__body">
                 <strong>{c.label}</strong>

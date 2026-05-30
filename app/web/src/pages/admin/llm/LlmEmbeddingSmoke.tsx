@@ -63,12 +63,12 @@ export default function LlmEmbeddingSmoke({
           value={text}
           onChange={(event) => setText(event.target.value)}
           aria-invalid={clientErr === "Text is required."}
-        />
+         aria-label="llm-playground__field Text Text is required."/>
       </label>
       {smoke.isPending ? (
-        <p className="llm-playground__status" role="status">
+        <output className="llm-playground__status">
           Running embedding smoke...
-        </p>
+        </output>
       ) : null}
       <div className="llm-playground__actions">
         <button

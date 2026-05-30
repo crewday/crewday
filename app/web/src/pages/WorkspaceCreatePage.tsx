@@ -111,7 +111,7 @@ export default function WorkspaceCreatePage(): ReactElement {
                 value={name}
                 onChange={(event) => setName(event.target.value)}
                 data-testid="workspace-create-name"
-              />
+               aria-label="field Workspace name text Villa Sud organization workspace-create-name"/>
             </label>
 
             <label className="field">
@@ -128,7 +128,7 @@ export default function WorkspaceCreatePage(): ReactElement {
                 onChange={(event) => setSlug(normalizeWorkspaceSlugInput(event.target.value))}
                 data-testid="workspace-create-slug"
                 aria-describedby="workspace-create-slug-hint"
-              />
+               aria-label="field Workspace handle text villa-sud off url [a-z][a-z0-9-]{1,38}[a-z0-9] workspace-create-slug workspace-create-slug-hint workspace-create-slug-hint login__hint Lowercase letters, digits, and hyphens. Lives at /w/&lt;handle&gt;/ ."/>
               <span id="workspace-create-slug-hint" className="login__hint">
                 Lowercase letters, digits, and hyphens. Lives at <code>/w/&lt;handle&gt;/</code>.
               </span>

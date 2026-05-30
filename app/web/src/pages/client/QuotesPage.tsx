@@ -149,7 +149,7 @@ export default function ClientQuotesPage() {
         <div className="panel">
           <table className="table">
             <thead>
-              <tr><th>Property</th><th>Work order</th><th>Total</th><th>Status</th><th>Decided</th><th></th></tr>
+              <tr><th>Property</th><th>Work order</th><th>Total</th><th>Status</th><th>Decided</th><th aria-label="Actions"></th></tr>
             </thead>
             <tbody>
               {quotes.map((quote) => {

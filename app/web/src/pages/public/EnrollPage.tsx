@@ -218,9 +218,9 @@ function EnrollErrorView({
 
 function VerifyingView() {
   return (
-    <div role="status" aria-live="polite">
+    <output aria-live="polite">
       <h1 className="login__headline">Checking your link…</h1>
       <p className="login__sub">One moment — we're confirming the recovery token.</p>
-    </div>
+    </output>
   );
 }

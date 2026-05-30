@@ -184,7 +184,7 @@ export default function ClientInvoicesPage() {
                 <th>Due</th>
                 <th>Proof</th>
                 <th>Reminder</th>
-                <th></th>
+                <th aria-label="Actions"></th>
               </tr>
             </thead>
             <tbody>

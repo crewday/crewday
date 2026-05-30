@@ -29,6 +29,8 @@ import { ApiError } from "@/lib/api";
 import { verifySignupToken } from "@/auth/passkey-register";
 import { pickRoleLanding, useAuth } from "@/auth";
 
+const STATUS_ROLE = "status";
+
 type VerifyState =
   | { kind: "idle" }
   | { kind: "verifying" }
@@ -125,10 +127,10 @@ export default function SignupVerifyPage(): ReactElement {
 
 function VerifyingView(): ReactElement {
   return (
-    <div role="status" aria-live="polite" data-testid="signup-verify-pending">
+    <output role={STATUS_ROLE} aria-live="polite" data-testid="signup-verify-pending">
       <h1 className="login__headline">Confirming your link…</h1>
       <p className="login__sub">One moment — we're verifying your signup token.</p>
-    </div>
+    </output>
   );
 }
 

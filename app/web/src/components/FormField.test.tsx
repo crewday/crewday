@@ -8,10 +8,10 @@ describe("FormField", () => {
     render(
       <form>
         <FormField label="Name" requirement="required">
-          <input />
+          <input  aria-label="Name"/>
         </FormField>
         <FormField label="Notes" requirement="optional">
-          <textarea />
+          <textarea  aria-label="Notes"/>
         </FormField>
       </form>,
     );
@@ -41,7 +41,7 @@ describe("FormField", () => {
         helpId="threshold-help"
         helpText="Used to flag low stock."
       >
-        <input aria-describedby="threshold-help" />
+        <input aria-describedby="threshold-help"  aria-label="Threshold"/>
       </FormField>,
     );
 

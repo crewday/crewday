@@ -113,23 +113,25 @@ export function FilterChipGroup<T extends string>({
 }) {
   return (
     <div className="desk-filters">
-      <span
+      <button
+        type="button"
         className={"chip chip--ghost chip--sm chip--interactive" + (value === "" ? " chip--active" : "")}
         onClick={() => onChange("")}
       >
         {allLabel}
-      </span>
+      </button>
       {options.map((opt) => {
         const tone = opt.tone ?? "ghost";
         const active = value === opt.value ? " chip--active" : "";
         return (
-          <span
+          <button
+            type="button"
             key={opt.value}
             className={"chip chip--" + tone + " chip--sm chip--interactive" + active}
             onClick={() => onChange(opt.value)}
           >
             {opt.label}
-          </span>
+          </button>
         );
       })}
     </div>

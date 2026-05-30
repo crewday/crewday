@@ -48,7 +48,7 @@ describe("AgentSidebar", () => {
     try {
       renderWithProviders(
         <MemoryRouter initialEntries={["/w/crewday/today"]}>
-          <AgentSidebar role="employee" />
+          <AgentSidebar agentRole="employee" />
         </MemoryRouter>,
         { queryClient: makeTestQueryClient() },
       );
@@ -114,7 +114,7 @@ describe("AgentSidebar", () => {
     try {
       renderWithProviders(
         <MemoryRouter initialEntries={["/w/crewday/today"]}>
-          <AgentSidebar role="manager" />
+          <AgentSidebar agentRole="manager" />
           <LocationProbe />
         </MemoryRouter>,
         { queryClient: makeTestQueryClient() },
@@ -204,7 +204,7 @@ describe("AgentSidebar", () => {
     try {
       renderWithProviders(
         <MemoryRouter initialEntries={["/w/crewday/dashboard"]}>
-          <AgentSidebar role="manager" />
+          <AgentSidebar agentRole="manager" />
         </MemoryRouter>,
         { queryClient: makeTestQueryClient() },
       );
@@ -238,7 +238,7 @@ describe("AgentSidebar", () => {
     try {
       const { container } = renderWithProviders(
         <MemoryRouter initialEntries={["/w/crewday/today"]}>
-          <AgentSidebar role="employee" />
+          <AgentSidebar agentRole="employee" />
         </MemoryRouter>,
         { queryClient: makeTestQueryClient() },
       );
@@ -277,7 +277,7 @@ describe("AgentSidebar", () => {
     try {
       renderWithProviders(
         <MemoryRouter initialEntries={["/w/crewday/today"]}>
-          <AgentSidebar role="employee" />
+          <AgentSidebar agentRole="employee" />
         </MemoryRouter>,
         { queryClient: makeTestQueryClient() },
       );
@@ -333,7 +333,7 @@ describe("AgentSidebar", () => {
     try {
       renderWithProviders(
         <MemoryRouter initialEntries={["/w/crewday/today"]}>
-          <AgentSidebar role="employee" />
+          <AgentSidebar agentRole="employee" />
         </MemoryRouter>,
         { queryClient: makeTestQueryClient() },
       );
@@ -392,7 +392,7 @@ describe("AgentSidebar", () => {
     try {
       renderWithProviders(
         <MemoryRouter initialEntries={["/w/crewday/today"]}>
-          <AgentSidebar role="manager" />
+          <AgentSidebar agentRole="manager" />
         </MemoryRouter>,
         { queryClient: makeTestQueryClient() },
       );
@@ -447,7 +447,7 @@ describe("AgentSidebar", () => {
     try {
       renderWithProviders(
         <MemoryRouter initialEntries={["/w/crewday/dashboard"]}>
-          <AgentSidebar role="manager" />
+          <AgentSidebar agentRole="manager" />
         </MemoryRouter>,
         { queryClient: makeTestQueryClient() },
       );
@@ -509,7 +509,7 @@ describe("AgentSidebar", () => {
     try {
       renderWithProviders(
         <MemoryRouter initialEntries={["/w/crewday/dashboard"]}>
-          <AgentSidebar role="manager" />
+          <AgentSidebar agentRole="manager" />
         </MemoryRouter>,
         { queryClient: makeTestQueryClient() },
       );
@@ -574,7 +574,7 @@ describe("AgentSidebar", () => {
     try {
       renderWithProviders(
         <MemoryRouter initialEntries={["/admin/usage"]}>
-          <AgentSidebar role="admin" />
+          <AgentSidebar agentRole="admin" />
         </MemoryRouter>,
         { queryClient: makeTestQueryClient() },
       );
@@ -643,7 +643,7 @@ describe("AgentSidebar", () => {
     try {
       renderWithProviders(
         <MemoryRouter initialEntries={["/admin/dashboard"]}>
-          <AgentSidebar role="admin" />
+          <AgentSidebar agentRole="admin" />
         </MemoryRouter>,
         { queryClient: makeTestQueryClient() },
       );
@@ -684,7 +684,7 @@ describe("AgentSidebar", () => {
     try {
       renderWithProviders(
         <MemoryRouter initialEntries={["/w/crewday/today"]}>
-          <AgentSidebar role="employee" />
+          <AgentSidebar agentRole="employee" />
         </MemoryRouter>,
         { queryClient: makeTestQueryClient() },
       );

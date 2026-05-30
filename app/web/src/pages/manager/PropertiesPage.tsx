@@ -367,7 +367,7 @@ export default function PropertiesPage() {
           {canCreateProperty ? (
             <p className="muted">Create the first property to start tracking stays, closures, and work areas.</p>
           ) : isCheckingCreatePermission ? (
-            <p className="muted" role="status" aria-live="polite">Checking whether you can add a property.</p>
+            <output className="muted" aria-live="polite">Checking whether you can add a property.</output>
           ) : createPermissionLookupFailed ? (
             <p className="muted">Could not verify whether you can add a property. Refresh or ask an owner or manager.</p>
           ) : (

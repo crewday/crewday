@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { DragEvent, FormEvent, KeyboardEvent, ReactNode } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { GripVertical, Plus, Trash2 } from "lucide-react";
@@ -25,6 +25,7 @@ import type { LlmIndexes } from "./lib/llmIndexes";
 
 const DEFAULT_LLM_CAPABILITY = "default";
 const INHERITANCE_FORM_ID = "llm-assignment-inheritance-form";
+const BUTTON_ROLE = "button";
 
 interface AssignmentModalProps {
   capabilityKey: string | null;
@@ -1036,8 +1037,31 @@ function ProviderModelRow({
   children?: ReactNode;
 }) {
   const label = providerModelLabelOrUnknown(providerModel, indexes);
+  const cardRef = useRef<HTMLElement>(null);
+  useEffect(() => {
+    const card = cardRef.current;
+    if (!card) return undefined;
+    const handleDragStart = (event: globalThis.DragEvent) => {
+      onDragStart(event as unknown as DragEvent<HTMLElement>);
+    };
+    const handleDragEnd = (event: globalThis.DragEvent) => {
+      onDragEnd(event as unknown as DragEvent<HTMLElement>);
+    };
+    const handleKeyDown = (event: globalThis.KeyboardEvent) => {
+      onKeyDown?.(event as unknown as KeyboardEvent<HTMLElement>);
+    };
+    card.addEventListener("dragstart", handleDragStart);
+    card.addEventListener("dragend", handleDragEnd);
+    card.addEventListener("keydown", handleKeyDown);
+    return () => {
+      card.removeEventListener("dragstart", handleDragStart);
+      card.removeEventListener("dragend", handleDragEnd);
+      card.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [onDragEnd, onDragStart, onKeyDown]);
   return (
     <article
+      ref={cardRef}
       className={[
         "llm-assignment-provider-model",
         `llm-assignment-provider-model--${variant}`,
@@ -1046,12 +1070,10 @@ function ProviderModelRow({
         .filter(Boolean)
         .join(" ")}
       tabIndex={variant === "selected" && draggable ? 0 : undefined}
+      role={BUTTON_ROLE}
       aria-label={ariaLabel}
       aria-keyshortcuts={variant === "selected" ? "Alt+ArrowUp Alt+ArrowDown" : undefined}
       draggable={draggable}
-      onDragStart={onDragStart}
-      onDragEnd={onDragEnd}
-      onKeyDown={onKeyDown}
     >
       <span className="llm-assignment-provider-model__handle" aria-hidden="true">
         <GripVertical size={15} />

@@ -44,9 +44,9 @@ export function RequireAuth({
     // wordmark) is one CSS edit away — the component contract stays
     // "render *something* without flashing /login or the chrome".
     return (
-      <div className="auth-hold" role="status" aria-live="polite" aria-busy="true">
+      <output className="auth-hold" aria-live="polite" aria-busy="true">
         <span className="auth-hold__label">Checking your session…</span>
-      </div>
+      </output>
     );
   }
 
@@ -87,8 +87,8 @@ function ExternalRedirect({
     redirectExternal(to);
   }, [redirectExternal, to]);
   return (
-    <div className="auth-hold" role="status" aria-live="polite" aria-busy="true">
+    <output className="auth-hold" aria-live="polite" aria-busy="true">
       <span className="auth-hold__label">Opening crew.day…</span>
-    </div>
+    </output>
   );
 }

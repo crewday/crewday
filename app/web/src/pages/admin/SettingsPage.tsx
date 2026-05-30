@@ -299,7 +299,7 @@ export default function AdminSettingsPage() {
               className="input input--inline"
               value={signupValue(s, signupDraft, "signup_disposable_domains_path")}
               onChange={(e) => setSignup("signup_disposable_domains_path", e.target.value)}
-            />
+             aria-label="form-row form-label Disposable domains path text input input--inline signup_disposable_domains_path signup_disposable_domains_path"/>
           </label>
           <label className="form-row">
             <span className="form-label">Throttle overrides</span>
@@ -383,7 +383,7 @@ export default function AdminSettingsPage() {
                         value={String(settingInputValue(row, drafts))}
                         disabled={locked}
                         onChange={(e) => setDraft(row.key, Number(e.target.value))}
-                      />
+                       aria-label="Field"/>
                     ) : row.kind === "json" ? (
                       <>
                         <AutoGrowTextarea
@@ -406,7 +406,7 @@ export default function AdminSettingsPage() {
                           placeholder={displayStub(row.value) || "not configured"}
                           disabled={locked}
                           onChange={(e) => setDraft(row.key, e.target.value)}
-                        />
+                         aria-label="Field"/>
                         {!parsed.ok && Object.prototype.hasOwnProperty.call(drafts, row.key) && (
                           <div className="table__sub muted">{parsed.message}</div>
                         )}
@@ -418,7 +418,7 @@ export default function AdminSettingsPage() {
                         value={String(settingInputValue(row, drafts))}
                         disabled={locked}
                         onChange={(e) => setDraft(row.key, e.target.value)}
-                      />
+                       aria-label="Field"/>
                     )}
                   </td>
                   <td className="mono muted">

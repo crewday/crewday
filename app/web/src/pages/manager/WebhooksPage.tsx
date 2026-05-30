@@ -161,7 +161,7 @@ export default function WebhooksPage() {
         <table className="table table--roomy">
           <thead>
             <tr>
-              <th>URL</th><th>Events</th><th>Last delivery</th><th>Status</th><th></th>
+              <th>URL</th><th>Events</th><th>Last delivery</th><th>Status</th><th aria-label="Actions"></th>
             </tr>
           </thead>
           <tbody>
@@ -283,7 +283,7 @@ function CreateDialog(props: CreateDialogProps) {
       }
     >
         <FormField label="Name" requirement="required" className="webhook-subscription-form__field sheet-form__field">
-          <input value={name} onChange={(e) => onName(e.target.value)} placeholder="hermes-prod" required />
+          <input value={name} onChange={(e) => onName(e.target.value)} placeholder="hermes-prod" required  aria-label="Name"/>
         </FormField>
         <FormField label="URL" requirement="required" className="webhook-subscription-form__field sheet-form__field">
           <input
@@ -292,7 +292,7 @@ function CreateDialog(props: CreateDialogProps) {
             onChange={(e) => onUrl(e.target.value)}
             placeholder="https://example.com/crewday"
             required
-          />
+           aria-label="URL"/>
         </FormField>
         <FormField label="Events" requirement="required" className="webhook-subscription-form__field sheet-form__field">
           <AutoGrowTextarea
@@ -303,7 +303,12 @@ function CreateDialog(props: CreateDialogProps) {
           />
         </FormField>
         <label className="field--inline">
-          <input type="checkbox" checked={active} onChange={(e) => onActive(e.target.checked)} />
+          <input
+            type="checkbox"
+            checked={active}
+            onChange={(e) => onActive(e.target.checked)}
+            aria-label="Active"
+          />
           <span>Active</span>
         </label>
 
@@ -361,7 +366,7 @@ function DeliveryLogDrawer({
 
   return (
     <>
-      <div className="day-drawer__scrim" onClick={onClose} />
+      <button type="button" className="day-drawer__scrim" aria-label="Close delivery log" onClick={onClose} />
       <aside className="day-drawer" role="dialog" aria-label={`Delivery log for ${webhook.url}`}>
         <header className="day-drawer__head">
           <div>

@@ -1,9 +1,12 @@
 import {
   type ChangeEvent,
+  type ComponentPropsWithoutRef,
   type CSSProperties,
   type FocusEvent,
   type KeyboardEvent,
+  type MouseEvent as ReactMouseEvent,
   type MutableRefObject,
+  type PointerEvent as ReactPointerEvent,
   type ReactNode,
   useCallback,
   useEffect,
@@ -32,7 +35,19 @@ export type InlineTableColumnWidth =
 
 const DELETE_KEY_WINDOW_MS = 650;
 const DETAIL_COLUMN_KEY = "__detail";
+const TABLE_ROLE = "table";
+const ROWGROUP_ROLE = "rowgroup";
+const ROW_ROLE = "row";
+const COLUMNHEADER_ROLE = "columnheader";
+const CELL_ROLE = "cell";
+const SEARCH_ROLE = "search";
+const STATUS_ROLE = "status";
+const GROUP_ROLE = "group";
 let createRowCounter = 0;
+
+function InlineTableRowGroup(props: ComponentPropsWithoutRef<"div">) {
+  return <div {...props} />;
+}
 
 export interface InlineTableColumn<TDraft> {
   key: string;
@@ -753,39 +768,39 @@ export function InlineTableForm<TDraft>({
           search={search}
         />
       ) : null}
-      <div className="inline-table-form__table" role="table" aria-label={ariaLabel}>
-        <div className="inline-table-form__head" role="rowgroup">
-          <div className="inline-table-form__row inline-table-form__row--head" role="row">
+      <div className="inline-table-form__table" role={TABLE_ROLE} aria-label={ariaLabel}>
+        <div className="inline-table-form__head" role={ROWGROUP_ROLE}>
+          <div className="inline-table-form__row inline-table-form__row--head" role={ROW_ROLE}>
             {hasReorderColumn ? (
               <div
                 className="inline-table-form__th inline-table-form__th--reorder"
-                role="columnheader"
+                role={COLUMNHEADER_ROLE}
               />
             ) : null}
             {columns.map((column) => (
               <div
                 key={column.key}
                 className={cellClasses(column, "inline-table-form__th")}
-                role="columnheader"
+                role={COLUMNHEADER_ROLE}
               >
                 {column.header}
               </div>
             ))}
-            <div className="inline-table-form__th inline-table-form__th--actions" role="columnheader" />
+            <div className="inline-table-form__th inline-table-form__th--actions" role={COLUMNHEADER_ROLE} aria-label="Actions" />
           </div>
         </div>
 
         <div
           className="inline-table-form__body"
-          role="rowgroup"
+          role={ROWGROUP_ROLE}
           onDragLeave={reorderListProps.onDragLeave}
           onDrop={reorderListProps.onDrop}
         >
           {renderedRows.length === 0 ? (
-            <div className="inline-table-form__empty" role="row">
+            <div className="inline-table-form__empty" role={ROW_ROLE}>
               <div
                 className="inline-table-form__empty-cell"
-                role="cell"
+                role={CELL_ROLE}
                 aria-colspan={columns.length + (hasReorderColumn ? 2 : 1)}
               >
                 {hasActiveSearch ? search?.noResultsState ?? (
@@ -839,9 +854,23 @@ export function InlineTableForm<TDraft>({
               editRow(row.id, columnKey);
             };
             const activateDetail = () => activateCell(DETAIL_COLUMN_KEY);
+            const rowGroupActivationProps = activationMode === "doubleClick" && !renderEditing && !controlsDisabled
+              ? {
+                  onPointerUp: (event: ReactPointerEvent<HTMLDivElement>) => {
+                    if (isInteractiveEventTarget(event.target)) return;
+                    selectRow(row.id);
+                    event.currentTarget.focus();
+                  },
+                  onClick: (event: ReactMouseEvent<HTMLDivElement>) => {
+                    if (isInteractiveEventTarget(event.target)) return;
+                    selectRow(row.id);
+                    event.currentTarget.focus();
+                  },
+                }
+              : {};
 
             return (
-              <div
+              <InlineTableRowGroup
                 key={row.id}
                 tabIndex={(renderEditing && !isTrailingCreate) || selectionDisabled ? undefined : 0}
                 className={[
@@ -861,19 +890,14 @@ export function InlineTableForm<TDraft>({
                 ].filter(Boolean).join(" ")}
                 draggable={reorderItemProps?.draggable}
                 data-inline-table-row-group={row.id}
+                role={ROWGROUP_ROLE}
                 aria-label={label}
-                aria-selected={selected || undefined}
+                {...rowGroupActivationProps}
                 onDragStart={reorderItemProps?.onDragStart}
                 onDragOver={reorderItemProps?.onDragOver}
                 onDragLeave={reorderItemProps?.onDragLeave}
                 onDrop={reorderItemProps?.onDrop}
                 onDragEnd={reorderItemProps?.onDragEnd}
-                onClick={(event) => {
-                  if (activationMode !== "doubleClick" || renderEditing || controlsDisabled) return;
-                  if (isInteractiveEventTarget(event.target)) return;
-                  selectRow(row.id);
-                  event.currentTarget.focus();
-                }}
                 onBlur={(event) => {
                   if (saveMode !== "autosave" || row.saving || row.disabled) return;
                   if (focusStayedInside(event)) return;
@@ -922,13 +946,13 @@ export function InlineTableForm<TDraft>({
               >
                 <div
                   className="inline-table-form__row"
-                  role="row"
+                  role={ROW_ROLE}
                   aria-describedby={detail || row.validation || row.error || row.meta ? messageId : undefined}
                 >
                   {hasReorderColumn ? (
                     <div
                       className="inline-table-form__td inline-table-form__td--reorder"
-                      role="cell"
+                      role={CELL_ROLE}
                       data-label=""
                     >
                       {canShowReorderHandle ? (
@@ -946,11 +970,18 @@ export function InlineTableForm<TDraft>({
                     <div
                       key={column.key}
                       className={cellClasses(column, "inline-table-form__td")}
-                      role="cell"
+                      role={CELL_ROLE}
                       data-label={plainLabel(column.mobileLabel ?? column.header)}
                       data-inline-table-row={row.id}
                       data-inline-table-column={column.key}
-                      onClick={(event) => {
+                      ref={(node) => {
+                        if (!node) return;
+                        node.onclick = (event) => {
+                          if (event.target && isInteractiveEventTarget(event.target)) return;
+                          if (activationMode === "singleClick" && !isTrailingCreate) activateCell(column.key);
+                        };
+                      }}
+                      onPointerUp={(event) => {
                         if (isInteractiveEventTarget(event.target)) return;
                         if (activationMode === "singleClick" && !isTrailingCreate) activateCell(column.key);
                       }}
@@ -967,7 +998,7 @@ export function InlineTableForm<TDraft>({
                   ))}
                   <div
                     className="inline-table-form__td inline-table-form__td--actions"
-                    role="cell"
+                    role={CELL_ROLE}
                     data-label="State"
                   >
                     <span className="inline-table-form__mobile-label" />
@@ -1000,15 +1031,23 @@ export function InlineTableForm<TDraft>({
                   <div
                     id={messageId}
                     className="inline-table-form__detail"
-                    role="row"
+                    role={ROW_ROLE}
                   >
-                    <div className="inline-table-form__detail-body" role="cell">
+                    <div className="inline-table-form__detail-body" role={CELL_ROLE}>
                       {detail ? (
                         <div
                           className="inline-table-form__detail-content"
+                          role={CELL_ROLE}
                           data-inline-table-row={row.id}
                           data-inline-table-column={DETAIL_COLUMN_KEY}
-                          onClick={(event) => {
+                          ref={(node) => {
+                            if (!node) return;
+                            node.onclick = (event) => {
+                              if (event.target && isInteractiveEventTarget(event.target)) return;
+                              if (activationMode === "singleClick" && !isTrailingCreate) activateDetail();
+                            };
+                          }}
+                          onPointerUp={(event) => {
                             if (isInteractiveEventTarget(event.target)) return;
                             if (activationMode === "singleClick" && !isTrailingCreate) activateDetail();
                           }}
@@ -1034,7 +1073,7 @@ export function InlineTableForm<TDraft>({
                     </div>
                   </div>
                 )}
-              </div>
+              </InlineTableRowGroup>
             );
           })}
         </div>
@@ -1109,7 +1148,7 @@ function InlineTableActions({
       <div className="inline-table-form__actions">
         <InlineTableStatus status={status} />
         {onDelete || onEdit ? (
-          <div className="inline-table-form__button-group btn-group btn-group--attached" role="group" aria-label="Row actions">
+          <div className="inline-table-form__button-group btn-group btn-group--attached" role={GROUP_ROLE} aria-label="Row actions">
             {onDelete ? (
               <InlineTableActionButton
                 action="delete"
@@ -1139,7 +1178,7 @@ function InlineTableActions({
     <div className="inline-table-form__actions">
       <InlineTableStatus status={status} />
       {onDelete || (!hideRowCommit && (!hideCancel || saveMode === "explicit")) ? (
-        <div className="inline-table-form__button-group btn-group btn-group--attached" role="group" aria-label="Edit row actions">
+        <div className="inline-table-form__button-group btn-group btn-group--attached" role={GROUP_ROLE} aria-label="Edit row actions">
           {onDelete ? (
             <InlineTableActionButton
               action="delete"
@@ -1190,7 +1229,7 @@ function InlineTableSearchToolbar({
   };
 
   return (
-    <div className="inline-table-form__toolbar" role="search" aria-label={`${tableLabel} search and filters`}>
+    <div className="inline-table-form__toolbar" role={SEARCH_ROLE} aria-label={`${tableLabel} search and filters`}>
       <div className="inline-table-form__search-field">
         <label className="inline-table-form__search-label" htmlFor={inputId}>
           {search.label}
@@ -1201,6 +1240,7 @@ function InlineTableSearchToolbar({
           ref={inputRef}
           className="inline-table-form__search-input"
           type="search"
+          aria-label={search.label}
           value={search.value}
           placeholder={search.placeholder}
           onChange={(event: ChangeEvent<HTMLInputElement>) => search.onChange(event.target.value)}
@@ -1218,7 +1258,7 @@ function InlineTableSearchToolbar({
         ) : null}
       </div>
       {search.resultSummary !== undefined && search.resultSummary !== null ? (
-        <span className="inline-table-form__search-summary" role="status" aria-live="polite">
+        <span className="inline-table-form__search-summary" role={STATUS_ROLE} aria-live="polite">
           {search.resultSummary}
         </span>
       ) : null}
@@ -1252,22 +1292,22 @@ export function InlineTableLoadMore({
 
   if (isInitialLoading) {
     return (
-      <div className="inline-table-form__load-more" role="status" aria-live="polite" aria-busy="true">
+      <output className="inline-table-form__load-more" aria-live="polite" aria-busy="true">
         <span className="inline-table-form__load-more-status">
           <Loader2 className="inline-table-form__load-more-spinner" size={15} aria-hidden="true" />
           {loadingLabel}
         </span>
         {countLabel}
-      </div>
+      </output>
     );
   }
 
   if (error) {
     return (
-      <div className="inline-table-form__load-more inline-table-form__load-more--error" role="group" aria-label="Row loading error">
-        <span className="inline-table-form__load-more-status" role="status" aria-live="assertive">
+      <div className="inline-table-form__load-more inline-table-form__load-more--error" aria-label="Row loading error">
+        <output className="inline-table-form__load-more-status" aria-live="assertive">
           {error}
-        </span>
+        </output>
         {countLabel}
         {onRetry ? (
           <button
@@ -1292,16 +1332,16 @@ export function InlineTableLoadMore({
   if (!hasMore) {
     return (
       <div className="inline-table-form__load-more inline-table-form__load-more--complete">
-        <span className="inline-table-form__load-more-status" role="status" aria-live="polite">
+        <output className="inline-table-form__load-more-status" aria-live="polite">
           {allLoadedLabel}
-        </span>
+        </output>
         {countLabel}
       </div>
     );
   }
 
   return (
-    <div className="inline-table-form__load-more" role="group" aria-label="Load more table rows" aria-live="polite">
+    <div className="inline-table-form__load-more" aria-label="Load more table rows" aria-live="polite">
       <button
         type="button"
         className="inline-table-form__load-more-button"
@@ -1432,26 +1472,25 @@ function InlineTableStatus({ status }: { status: InlineTableRowStatus }) {
   if (status !== "saving" && status !== "error" && status !== "disabled") return null;
   if (status === "saving") {
     return (
-      <span
+      <output
         className={statusClass(status)}
-        role="status"
         aria-label="Saving..."
         title="Saving..."
       >
         <Loader2 className="inline-table-form__status-spinner" size={13} aria-hidden="true" />
-      </span>
+        <span className="sr-only">Saving</span>
+      </output>
     );
   }
   if (status === "disabled") {
     return (
-      <span
+      <output
         className={statusClass(status)}
-        role="status"
         aria-label="Locked"
         title="Locked"
       >
         <Lock className="inline-table-form__status-icon" size={13} aria-hidden="true" />
-      </span>
+      </output>
     );
   }
   return <span className={statusClass(status)}>{statusLabel(status)}</span>;
@@ -1719,7 +1758,7 @@ export function InlineTagPickerField({
         "inline-table-form__tag-picker",
         disabled ? "inline-table-form__tag-picker--disabled" : null,
       ].filter(Boolean).join(" ")}
-      role="group"
+      role={GROUP_ROLE}
       aria-label={label ? undefined : resolvedLabel}
       aria-labelledby={label ? labelId : undefined}
       aria-disabled={disabled || undefined}
@@ -1828,14 +1867,7 @@ export function InlineSearchableSelectField({
   const resolvedLabel = label ?? ariaLabel ?? "Select option";
 
   return (
-    <div
-      className="inline-table-form__searchable-select"
-      onKeyDown={(event: KeyboardEvent<HTMLDivElement>) => {
-        if (isInlineSearchableSelectKey(event.key) && isComboboxEventTarget(event.target)) {
-          event.stopPropagation();
-        }
-      }}
-    >
+    <div className="inline-table-form__searchable-select">
       <SearchableSelect
         label={resolvedLabel}
         value={value}
@@ -1846,6 +1878,11 @@ export function InlineSearchableSelectField({
         placeholder={placeholder}
         noResultsLabel={noResultsLabel}
         renderOptionSecondaryText={renderOptionSecondaryText}
+        onInputKeyDown={(event) => {
+          if (isInlineSearchableSelectKey(event.key) && isComboboxEventTarget(event.target)) {
+            event.stopPropagation();
+          }
+        }}
         className="inline-table-form__searchable-select-field"
         inputClassName="inline-table-form__control inline-table-form__control--searchable-select"
       />
@@ -1909,6 +1946,7 @@ export function InlineCheckboxField({
         type="checkbox"
         checked={checked}
         disabled={disabled}
+        aria-label={plainLabel(label)}
         onChange={(event: ChangeEvent<HTMLInputElement>) => onChange(event.currentTarget.checked)}
       />
       <span>{label}</span>

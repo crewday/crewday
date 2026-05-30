@@ -432,7 +432,6 @@ function NewAssetButton({
               <label className="field asset-create__field">
                 <span>Name</span>
                 <input
-                  autoFocus
                   required
                   aria-invalid={nameInvalid}
                   aria-describedby={nameInvalid ? formErrorId : undefined}
@@ -442,7 +441,7 @@ function NewAssetButton({
                     setFormError(null);
                   }}
                   placeholder="e.g. Kitchen fridge"
-                />
+                 aria-label="field asset-create__field Name e.g. Kitchen fridge"/>
               </label>
               <FormModalGrid className="asset-create__grid">
                 <SearchableSelect
@@ -510,11 +509,11 @@ function NewAssetButton({
               <FormModalGrid className="asset-create__grid">
                 <label className="field asset-create__field">
                   <span>Make</span>
-                  <input value={make} onChange={(event) => setMake(event.target.value)} />
+                  <input value={make} onChange={(event) => setMake(event.target.value)}  aria-label="field asset-create__field Make"/>
                 </label>
                 <label className="field asset-create__field">
                   <span>Model</span>
-                  <input value={model} onChange={(event) => setModel(event.target.value)} />
+                  <input value={model} onChange={(event) => setModel(event.target.value)}  aria-label="field asset-create__field Model"/>
                 </label>
               </FormModalGrid>
               <FormModalGrid className="asset-create__grid">
@@ -523,7 +522,7 @@ function NewAssetButton({
                   <input
                     value={serialNumber}
                     onChange={(event) => setSerialNumber(event.target.value)}
-                  />
+                   aria-label="field asset-create__field Serial number"/>
                 </label>
                 <label className="field asset-create__field">
                   <span>Status</span>
@@ -550,7 +549,7 @@ function NewAssetButton({
                     type="date"
                     value={installedOn}
                     onChange={(event) => setInstalledOn(event.target.value)}
-                  />
+                   aria-label="field asset-create__field Installed on date"/>
                 </label>
                 <label className="field asset-create__field">
                   <span>Purchased on</span>
@@ -558,7 +557,7 @@ function NewAssetButton({
                     type="date"
                     value={purchasedOn}
                     onChange={(event) => setPurchasedOn(event.target.value)}
-                  />
+                   aria-label="field asset-create__field Purchased on date"/>
                 </label>
               </FormModalGrid>
               <FormModalGrid className="asset-create__grid">
@@ -573,7 +572,7 @@ function NewAssetButton({
                     value={purchasePrice}
                     onChange={(event) => setPurchasePrice(event.target.value)}
                     placeholder="0.00"
-                  />
+                   aria-label="field asset-create__field Purchase price number 0 0.01 0.00"/>
                 </label>
                 <label className="field asset-create__field">
                   <span>Currency</span>
@@ -584,7 +583,7 @@ function NewAssetButton({
                     onChange={(event) => setPurchaseCurrency(event.target.value)}
                     placeholder="USD"
                     maxLength={3}
-                  />
+                   aria-label="field asset-create__field Currency USD"/>
                 </label>
               </FormModalGrid>
               <FormModalGrid className="asset-create__grid">
@@ -593,7 +592,7 @@ function NewAssetButton({
                   <input
                     value={purchaseVendor}
                     onChange={(event) => setPurchaseVendor(event.target.value)}
-                  />
+                   aria-label="field asset-create__field Vendor"/>
                 </label>
                 <label className="field asset-create__field">
                   <span>Warranty expires</span>
@@ -601,7 +600,7 @@ function NewAssetButton({
                     type="date"
                     value={warrantyExpiresOn}
                     onChange={(event) => setWarrantyExpiresOn(event.target.value)}
-                  />
+                   aria-label="field asset-create__field Warranty expires date"/>
                 </label>
               </FormModalGrid>
               <label className="field asset-create__field asset-create__field--short">
@@ -614,7 +613,7 @@ function NewAssetButton({
                   aria-describedby={lifespanInvalid ? formErrorId : undefined}
                   value={expectedLifespanYears}
                   onChange={(event) => setExpectedLifespanYears(event.target.value)}
-                />
+                 aria-label="field asset-create__field asset-create__field--short Expected lifespan years number 1 1"/>
               </label>
             </section>
 
@@ -628,23 +627,24 @@ function NewAssetButton({
                 checked={guestVisible}
                 onChange={(event) => setGuestVisible(event.target.checked)}
               />
-              <label className="field asset-create__field">
+              <div className="field asset-create__field">
                 <span>Guest instructions</span>
                 <AutoGrowTextarea
                   value={guestInstructions}
+                  aria-label="Guest instructions"
                   onChange={(event) => setGuestInstructions(event.target.value)}
                 />
-              </label>
+              </div>
             </section>
 
             <section className="asset-create__section" aria-labelledby="asset-create-notes">
               <h4 id="asset-create-notes" className="asset-create__section-title">
                 Notes
               </h4>
-              <label className="field asset-create__field">
+              <div className="field asset-create__field">
                 <span>Internal notes</span>
-                <AutoGrowTextarea value={notes} onChange={(event) => setNotes(event.target.value)} />
-              </label>
+                <AutoGrowTextarea value={notes} aria-label="Internal notes" onChange={(event) => setNotes(event.target.value)} />
+              </div>
             </section>
 
             <section className="asset-create__section" aria-labelledby="asset-create-documents">
@@ -660,9 +660,9 @@ function NewAssetButton({
                 onFiles={addDocuments}
               />
               {createdAssetAfterUploadFailure ? (
-                <p className="form-notice form-notice--error" role="status">
+                <output className="form-notice form-notice--error">
                   The asset was created. Retry the failed document uploads or close this form.
-                </p>
+                </output>
               ) : null}
               {queuedDocuments.length > 0 ? (
                 <div className="asset-create__documents" aria-label="Queued documents">
@@ -698,7 +698,7 @@ function NewAssetButton({
                             onChange={(event) =>
                               updateDocument(doc.localId, { title: event.target.value })
                             }
-                          />
+                           aria-label="field asset-create__field Title"/>
                         </label>
                       </FormModalGrid>
                       <button

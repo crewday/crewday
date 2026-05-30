@@ -128,7 +128,7 @@ export default function RecurrencePicker({
           </>
         )}
       >
-        <div className="recurrence-picker__tabs" role="group" aria-label="Recurrence editor mode">
+        <div className="recurrence-picker__tabs" aria-label="Recurrence editor mode">
           <button
             type="button"
             className={panel === "friendly" ? "recurrence-picker__tab is-active" : "recurrence-picker__tab"}
@@ -211,6 +211,7 @@ function FriendlyRecurrenceFields({
         <FormField label="Repeats" requirement="required" className="form-modal__field recurrence-picker__field">
           <select
             className="input recurrence-picker__select"
+            aria-label="Repeats"
             value={mode}
             onChange={(event) => onModeChange(event.currentTarget.value as FriendlyMode)}
           >
@@ -229,6 +230,7 @@ function FriendlyRecurrenceFields({
                 min={1}
                 max={52}
                 value={interval}
+                aria-label="Every weeks"
                 onChange={(event) => onIntervalChange(clampNumber(event.currentTarget.value, 1, 52))}
               />
               <span>week{interval === 1 ? "" : "s"}</span>
@@ -268,6 +270,7 @@ function FriendlyRecurrenceFields({
             min={1}
             max={31}
             value={monthDay}
+            aria-label="Day of month"
             onChange={(event) => onMonthDayChange(clampNumber(event.currentTarget.value, 1, 31))}
           />
         </FormField>
@@ -295,6 +298,7 @@ function AdvancedRecurrenceField({
       <textarea
         className="input recurrence-picker__raw"
         value={value}
+        aria-label="Raw RRULE"
         aria-invalid={Boolean(error)}
         aria-describedby={error ? "recurrence-advanced-error" : undefined}
         onChange={(event) => onChange(event.currentTarget.value)}

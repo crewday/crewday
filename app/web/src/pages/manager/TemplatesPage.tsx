@@ -367,7 +367,7 @@ function NewTemplateForm({
             maxLength={200}
             aria-invalid={clientError === "Name is required."}
             aria-describedby={errorId}
-          />
+           aria-label="Name"/>
         </FormField>
         <FormField label="Description" requirement="optional" className="template-create-form__field sheet-form__field">
           <AutoGrowTextarea
@@ -398,12 +398,12 @@ function NewTemplateForm({
               required
               aria-invalid={clientError === "Duration must be between 1 and 1440 minutes."}
               aria-describedby={errorId}
-            />
+             aria-label="Duration"/>
           </FormField>
           <FormField label="Priority" requirement="required" className="template-create-form__field sheet-form__field">
             <select
               value={priority}
-              onChange={(event) => setPriority(event.target.value as TaskPriority)}
+              onChange={(event) => setPriority(event.target.value as TaskPriority)} aria-label="Priority"
             >
               <option value="low">Low</option>
               <option value="normal">Normal</option>
@@ -415,7 +415,7 @@ function NewTemplateForm({
         <FormField label="Photo evidence" requirement="required" className="template-create-form__field sheet-form__field">
         <select
           value={photoEvidence}
-          onChange={(event) => setPhotoEvidence(event.target.value as PhotoEvidence)}
+          onChange={(event) => setPhotoEvidence(event.target.value as PhotoEvidence)} aria-label="Photo evidence"
         >
           <option value="disabled">Disabled</option>
           <option value="optional">Optional</option>
@@ -442,6 +442,7 @@ function NewTemplateForm({
           type="checkbox"
           checked={autoShift}
           onChange={(event) => setAutoShift(event.target.checked)}
+          aria-label="Start shift automatically from generated tasks"
         />
         <span className="checkbox__box" aria-hidden="true">
           <svg className="checkbox__tick" viewBox="0 0 18 18">
@@ -766,14 +767,13 @@ function ChecklistEditor({ template }: ChecklistEditorProps): ReactElement {
         deleteActionLabel="Delete"
         emptyState="No checklist items yet."
       />
-      <span
-        role="status"
+      <output
         aria-live="polite"
         aria-atomic="true"
         className="sr-only"
       >
         {announcement}
-      </span>
+      </output>
     </>
   );
 }

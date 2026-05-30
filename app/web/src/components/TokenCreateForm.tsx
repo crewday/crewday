@@ -119,7 +119,7 @@ export default function TokenCreateForm(props: TokenCreateFormProps) {
           placeholder={labelPlaceholder}
           maxLength={labelMaxLength}
           required
-        />
+         aria-label="Name a human label that shows up in the audit log"/>
       </div>
 
       {allowDelegated && (
@@ -137,7 +137,7 @@ export default function TokenCreateForm(props: TokenCreateFormProps) {
                 name={`${labelId}-kind`}
                 checked={kind === "scoped"}
                 onChange={() => setKind("scoped")}
-              />
+               aria-label="tokens-kind-picker__opt scoped tokens-kind-picker__opt--active radio scoped scoped tokens-kind-picker__title Scoped tokens-kind-picker__sub Pick the exact verbs your script needs. Bypasses your role grants and stays valid even if your access changes later."/>
               <span className="tokens-kind-picker__title">Scoped</span>
               <span className="tokens-kind-picker__sub">
                 Pick the exact verbs your script needs. Bypasses your role grants and
@@ -155,7 +155,7 @@ export default function TokenCreateForm(props: TokenCreateFormProps) {
                 name={`${labelId}-kind`}
                 checked={kind === "delegated"}
                 onChange={() => setKind("delegated")}
-              />
+               aria-label="tokens-kind-picker__opt delegated tokens-kind-picker__opt--active radio delegated delegated tokens-kind-picker__title Delegated tokens-kind-picker__sub Inherits your grants at request time. Dies the moment your account is archived or your role changes. Used by embedded chat agents."/>
               <span className="tokens-kind-picker__title">Delegated</span>
               <span className="tokens-kind-picker__sub">
                 Inherits your grants at request time. Dies the moment your account is
@@ -204,6 +204,7 @@ export default function TokenCreateForm(props: TokenCreateFormProps) {
                         type="checkbox"
                         checked={on}
                         onChange={() => togglePick(scope.key)}
+                        aria-label={scope.key}
                       />
                       <span className="tokens-scope-list__check" aria-hidden="true">
                         <Check size={12} strokeWidth={2.5} />
@@ -236,6 +237,7 @@ export default function TokenCreateForm(props: TokenCreateFormProps) {
                       type="checkbox"
                       checked={on}
                       onChange={() => togglePick(scope.key)}
+                      aria-label={scope.key}
                     />
                     {scope.key}
                   </label>

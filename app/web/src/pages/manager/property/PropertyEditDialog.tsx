@@ -249,7 +249,7 @@ export default function PropertyEditDialog(props: PropertyEditDialogProps) {
               value={draft.name}
               onChange={(event) => setDraft({ ...draft, name: event.currentTarget.value })}
               required
-            />
+             aria-label="Name"/>
           </FormField>
           <FormField
             label="Kind"
@@ -260,7 +260,7 @@ export default function PropertyEditDialog(props: PropertyEditDialogProps) {
               value={draft.kind}
               onChange={(event) =>
                 setDraft({ ...draft, kind: event.currentTarget.value as Property["kind"] })
-              }
+              } aria-label="Kind"
             >
               {PROPERTY_KIND_OPTIONS.map((kind) => (
                 <option key={kind.value} value={kind.value}>{kind.label}</option>
@@ -271,31 +271,31 @@ export default function PropertyEditDialog(props: PropertyEditDialogProps) {
             <input
               value={draft.line1}
               onChange={(event) => setDraft({ ...draft, line1: event.currentTarget.value })}
-            />
+             aria-label="Address line 1"/>
           </FormField>
           <FormField label="Address line 2" requirement="optional" className="property-edit-dialog__field sheet-form__field">
             <input
               value={draft.line2}
               onChange={(event) => setDraft({ ...draft, line2: event.currentTarget.value })}
-            />
+             aria-label="Address line 2"/>
           </FormField>
           <FormField label="City" requirement="optional" className="property-edit-dialog__field sheet-form__field">
             <input
               value={draft.city}
               onChange={(event) => setDraft({ ...draft, city: event.currentTarget.value })}
-            />
+             aria-label="City"/>
           </FormField>
           <FormField label="State / province" requirement="optional" className="property-edit-dialog__field sheet-form__field">
             <input
               value={draft.state_province}
               onChange={(event) => setDraft({ ...draft, state_province: event.currentTarget.value })}
-            />
+             aria-label="State / province"/>
           </FormField>
           <FormField label="Postal code" requirement="optional" className="property-edit-dialog__field sheet-form__field">
             <input
               value={draft.postal_code}
               onChange={(event) => setDraft({ ...draft, postal_code: event.currentTarget.value })}
-            />
+             aria-label="Postal code"/>
           </FormField>
           <CountrySelect
             value={draft.country}
@@ -313,14 +313,14 @@ export default function PropertyEditDialog(props: PropertyEditDialogProps) {
             <input
               value={draft.locale}
               onChange={(event) => setDraft({ ...draft, locale: event.currentTarget.value })}
-            />
+             aria-label="Locale"/>
           </FormField>
           <FormField label="Default currency" requirement="optional" className="property-edit-dialog__field sheet-form__field">
             <input
               value={draft.default_currency}
               onChange={(event) => setDraft({ ...draft, default_currency: event.currentTarget.value })}
               maxLength={3}
-            />
+             aria-label="Default currency"/>
           </FormField>
         </FormModalGrid>
         <FormField label="Notes" requirement="optional" className="property-edit-dialog__field sheet-form__field">

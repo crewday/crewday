@@ -336,7 +336,7 @@ export default function ManagerLayout() {
         </section>
 
         {/* Sibling of <Outlet />. Do not nest. */}
-        <AgentSidebar role="manager" />
+        <AgentSidebar agentRole="manager" />
 
         <BottomTabs />
       </div>

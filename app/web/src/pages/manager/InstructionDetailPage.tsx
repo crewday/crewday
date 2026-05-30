@@ -353,15 +353,15 @@ export default function InstructionDetailPage() {
             </div>
           </header>
           <div className="instruction-detail-editor__grid">
-            <label className="instruction-detail-editor__field">
+            <div className="instruction-detail-editor__field">
               <span>Title</span>
               <InlineTextField
                 value={draft.title}
                 ariaLabel="Title"
                 onChange={(title) => setDraft({ ...draft, title })}
               />
-            </label>
-            <label className="instruction-detail-editor__field">
+            </div>
+            <div className="instruction-detail-editor__field">
               <span>Scope</span>
               <InlineSelectField
                 value={draft.scope}
@@ -369,7 +369,7 @@ export default function InstructionDetailPage() {
                 ariaLabel="Scope"
                 onChange={(scope) => setDraft(nextScopePatch(draft, scope as InstructionScope))}
               />
-            </label>
+            </div>
           </div>
           {draft.scope === "property" ? (
             <div className="instruction-detail-editor__field">
@@ -444,14 +444,14 @@ export default function InstructionDetailPage() {
               onChange={(tags) => setDraft({ ...draft, tags: normalizedTags(tags) })}
             />
           </div>
-          <label className="instruction-detail-editor__field">
+          <div className="instruction-detail-editor__field">
             <span>Change note</span>
             <InlineTextField
               value={draft.change_note}
               ariaLabel="Change note"
               onChange={(change_note) => setDraft({ ...draft, change_note })}
             />
-          </label>
+          </div>
           {save.isError && <p className="form-error">Failed to save.</p>}
         </form>
       ) : null}
@@ -505,12 +505,17 @@ export default function InstructionDetailPage() {
       </section>
 
       {versionsOpen && (
-        <div className="day-drawer__scrim" onClick={closeVersions}>
+        <div
+          className="day-drawer__scrim"
+          role="presentation"
+          onClick={(event) => {
+            if (event.target === event.currentTarget) closeVersions();
+          }}
+        >
           <aside
             className="day-drawer"
             role="dialog"
             aria-label="Instruction history"
-            onClick={(event) => event.stopPropagation()}
           >
             <header className="day-drawer__head">
               <div>

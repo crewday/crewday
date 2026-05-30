@@ -121,7 +121,7 @@ export default function IssueNewPage() {
             required
             value={title}
             onChange={(e) => setTitle(e.target.value)}
-          />
+           aria-label="field Short title title e.g. Bathroom tap dripping"/>
         </label>
 
         <SearchableSelect
@@ -140,7 +140,7 @@ export default function IssueNewPage() {
             placeholder="e.g. Master bathroom"
             value={area}
             onChange={(e) => setArea(e.target.value)}
-          />
+           aria-label="field Area area e.g. Master bathroom"/>
         </label>
 
         <label className="field">
@@ -154,7 +154,7 @@ export default function IssueNewPage() {
                   value={c}
                   checked={category === c}
                   onChange={() => setCategory(c)}
-                />
+                 aria-label="chip-radio radio category"/>
                 <span>{cap(c)}</span>
               </label>
             ))}
@@ -172,22 +172,23 @@ export default function IssueNewPage() {
                   value={s}
                   checked={severity === s}
                   onChange={() => setSeverity(s)}
-                />
+                 aria-label="chip-radio radio severity"/>
                 <span>{label}</span>
               </label>
             ))}
           </div>
         </label>
 
-        <label className="field">
+        <div className="field">
           <span>What happened?</span>
           <AutoGrowTextarea
             name="body"
+            aria-label="What happened?"
             placeholder="What you saw, what you tried, anything the manager should know."
             value={body}
             onChange={(e) => setBody(e.target.value)}
           />
-        </label>
+        </div>
 
         <div className="form__row">
           {/* Not migrated yet: issue creation still posts JSON and does not attach the selected file. */}

@@ -1006,7 +1006,7 @@ export default function StaysPage() {
               <FormField label="Provider" requirement="required" className="ical-feed-form__field sheet-form__field">
                 <select
                   value={icalForm.provider}
-                  onChange={(event) => setIcalForm({ ...icalForm, provider: event.target.value as IcalProvider })}
+                  onChange={(event) => setIcalForm({ ...icalForm, provider: event.target.value as IcalProvider })} aria-label="Provider"
                 >
                   {PROVIDERS.map((provider) => (
                     <option key={provider.value} value={provider.value}>{provider.label}</option>
@@ -1023,7 +1023,7 @@ export default function StaysPage() {
                   aria-invalid={icalNotice?.tone === "error"}
                   aria-describedby={describedBy(icalDuplicate && icalDuplicateId, icalNotice && icalNoticeId)}
                   onChange={(event) => setIcalForm({ ...icalForm, url: event.target.value })}
-                />
+                 aria-label="Feed URL"/>
               </FormField>
             </FormModalGrid>
 

@@ -606,11 +606,9 @@ describe("Admin LlmPage", () => {
 
       fireEvent.change(graphSearch(), { target: { value: "no such model" } });
 
-      expect(
-        screen.getByText(
-          'No providers, models, assignments, or capabilities match "no such model".',
-        ),
-      ).toHaveAttribute("role", "status");
+      expect(screen.getByRole("status")).toHaveTextContent(
+        'No providers, models, assignments, or capabilities match "no such model".',
+      );
       expect(screen.queryByRole("button", { name: /^OpenRouter provider,/ })).toBeNull();
       expect(document.querySelector(".llm-graph__edge")).not.toBeInTheDocument();
       expect(graphColumnCounts()).toEqual(["0", "0", "0"]);

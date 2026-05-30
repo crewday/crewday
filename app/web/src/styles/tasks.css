@@ -61,6 +61,7 @@
   display: inline-flex; align-items: center; gap: 4px;
   padding: 3px 10px; border-radius: 999px;
   font-size: 12px; font-weight: 500; line-height: 1.4;
+  font-family: inherit;
   background: var(--paper-2); color: var(--ink-2);
   border: 1px solid transparent; white-space: nowrap;
 }

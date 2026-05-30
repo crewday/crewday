@@ -563,9 +563,9 @@ export default function PropertyClosuresPage() {
       <div className="panel">
         {archivedClosureCount > 0 ? (
           <div className="property-closure-archive-control">
-            <span className="property-closure-archive-control__count" role="status" aria-live="polite">
+            <output className="property-closure-archive-control__count" aria-live="polite">
               {archivedClosureCount} past {archivedClosureNoun} {showArchivedClosures ? "shown" : "hidden"}
-            </span>
+            </output>
             <button
               type="button"
               className="property-closure-archive-control__button"

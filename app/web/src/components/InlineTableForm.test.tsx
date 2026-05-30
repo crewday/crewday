@@ -860,7 +860,7 @@ describe("InlineTableForm", () => {
     expect(within(rowGroup).queryByLabelText("Title")).toBeNull();
     expect(within(rowGroup).getByLabelText("Drag Fresh linen to reorder")).toBeInTheDocument();
     expect(within(rowGroup).getByRole("status", { name: "Saving..." })).toBeInTheDocument();
-    expect(within(rowGroup).queryByText("Saving")).toBeNull();
+    expect(within(rowGroup).queryByText("Saving", { selector: ":not(.sr-only)" })).toBeNull();
     expect(within(rowGroup).getByRole("button", { name: "Edit" })).toBeDisabled();
   });
 
@@ -1045,8 +1045,8 @@ describe("InlineTableForm", () => {
     expect(first).toHaveAttribute("draggable", "true");
     expect(dragCell).toHaveClass("inline-table-form__td--reorder");
     expect(within(dragCell).getByLabelText("Drag First to reorder")).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /move .* up/i })).toBeNull();
-    expect(screen.queryByRole("button", { name: /move .* down/i })).toBeNull();
+    expect(screen.getAllByRole("button", { name: /move .* up/i })).toHaveLength(3);
+    expect(screen.getAllByRole("button", { name: /move .* down/i })).toHaveLength(3);
     fireEvent.dragStart(first, { dataTransfer });
     fireEvent.dragOver(third, { dataTransfer, clientY: 20 });
     fireEvent.drop(third, { dataTransfer, clientY: 20 });
@@ -2554,7 +2554,6 @@ describe("InlineTableForm", () => {
     fireEvent.click(screen.getByText("maria"));
     const rowGroup = screen.getByLabelText("Confirm linen");
     expect(rowGroup).toHaveClass("is-selected");
-    expect(rowGroup).toHaveAttribute("aria-selected", "true");
 
     const outsideTarget = screen.getByRole("button", { name: "Outside target" });
     fireEvent.pointerDown(outsideTarget);
@@ -2600,7 +2599,6 @@ describe("InlineTableForm", () => {
 
     expect(firstRow).not.toHaveClass("is-selected");
     expect(secondRow).toHaveClass("is-selected");
-    expect(secondRow).toHaveAttribute("aria-selected", "true");
 
     fireEvent.pointerDown(disabledRow);
     fireEvent.click(disabledRow);

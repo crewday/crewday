@@ -245,6 +245,7 @@ export default function AdminLlmPage() {
         <div
           className="llm-graph"
           ref={graphRef}
+          role="presentation"
           onClick={clearSelectionFromGraphBackground}
         >
           <svg
@@ -356,9 +357,9 @@ export default function AdminLlmPage() {
             }
           />
           {searchResult?.hasQuery && !searchResult.hasMatches ? (
-            <div className="llm-graph__empty" role="status">
+            <output className="llm-graph__empty">
               No providers, models, assignments, or capabilities match "{searchQuery}".
-            </div>
+            </output>
           ) : null}
         </div>
 

@@ -146,7 +146,7 @@ export function OverrideDialog({
             name="avail"
             checked={available}
             onChange={() => setAvailable(true)}
-          />
+           aria-label="radio avail Working"/>
           <span>Working</span>
         </label>
         <label>
@@ -155,7 +155,7 @@ export function OverrideDialog({
             name="avail"
             checked={!available}
             onChange={() => setAvailable(false)}
-          />
+           aria-label="radio avail Off"/>
           <span>Off</span>
         </label>
       </fieldset>
@@ -163,10 +163,10 @@ export function OverrideDialog({
       {available && (
         <FormModalGrid className="availability-override-form__grid">
           <FormModalField label="From" requirement="required" className="availability-override-form__field">
-            <input type="time" value={starts} onChange={(e) => setStarts(e.target.value)} />
+            <input type="time" value={starts} onChange={(e) => setStarts(e.target.value)}  aria-label="From"/>
           </FormModalField>
           <FormModalField label="Until" requirement="required" className="availability-override-form__field">
-            <input type="time" value={ends} onChange={(e) => setEnds(e.target.value)} />
+            <input type="time" value={ends} onChange={(e) => setEnds(e.target.value)}  aria-label="Until"/>
           </FormModalField>
         </FormModalGrid>
       )}
@@ -176,7 +176,7 @@ export function OverrideDialog({
           value={reason}
           onChange={(e) => setReason(e.target.value)}
           placeholder="Doctor appointment, covering Maria…"
-        />
+         aria-label="Reason"/>
       </FormModalField>
     </FormModal>
   );
@@ -244,15 +244,15 @@ export function LeaveDialog({
     >
       <FormModalGrid className="leave-request-form__grid">
         <FormModalField label="From" requirement="required" className="leave-request-form__field">
-          <input type="date" value={starts} required onChange={(e) => setStarts(e.target.value)} />
+          <input type="date" value={starts} required onChange={(e) => setStarts(e.target.value)}  aria-label="From"/>
         </FormModalField>
         <FormModalField label="Until" requirement="required" className="leave-request-form__field">
-          <input type="date" value={ends} required onChange={(e) => setEnds(e.target.value)} />
+          <input type="date" value={ends} required onChange={(e) => setEnds(e.target.value)}  aria-label="Until"/>
         </FormModalField>
       </FormModalGrid>
 
       <FormModalField label="Category" requirement="required" className="leave-request-form__field">
-        <select value={category} onChange={(e) => setCategory(e.target.value as Leave["category"])}>
+        <select value={category} onChange={(e) => setCategory(e.target.value as Leave["category"])} aria-label="Category">
           {LEAVE_CATEGORIES.map((c) => (
             <option key={c.value} value={c.value}>{c.label}</option>
           ))}
@@ -260,7 +260,7 @@ export function LeaveDialog({
       </FormModalField>
 
       <FormModalField label="Note" requirement="optional" className="leave-request-form__field">
-        <input value={note} onChange={(e) => setNote(e.target.value)} placeholder="Family visit, medical…" />
+        <input value={note} onChange={(e) => setNote(e.target.value)} placeholder="Family visit, medical…"  aria-label="Note"/>
       </FormModalField>
     </FormModal>
   );

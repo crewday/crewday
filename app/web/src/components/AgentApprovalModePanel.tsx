@@ -107,7 +107,7 @@ export default function AgentApprovalModePanel({
                 checked={selected}
                 onChange={() => set.mutate(c.value)}
                 className="agent-mode-choice__input"
-              />
+               aria-label="agent-mode-choice agent-mode-choice--selected radio agent-approval-mode agent-mode-choice__input agent-mode-choice__body agent-mode-choice__head muted agent-mode-choice__desc"/>
               <div className="agent-mode-choice__body">
                 <div className="agent-mode-choice__head">
                   <strong>{c.label}</strong>

@@ -31,7 +31,7 @@ export default function WorkspacePickList({
   toForWorkspace,
 }: WorkspacePickListProps) {
   return (
-    <ul className={["workspace-pick-list", className].filter(Boolean).join(" ")} role="list" aria-label={label}>
+    <ul className={["workspace-pick-list", className].filter(Boolean).join(" ")} aria-label={label}>
       {workspaces.map((workspace, idx) => {
         const slug = workspaceSlug(workspace);
         const role = labelForRole(workspace.grant_role);

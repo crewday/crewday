@@ -227,7 +227,7 @@ function ExpenseCorrectionButton({ expense, onApproved }: ExpenseCorrectionButto
                   : undefined
               }
               onChange={(event) => setAmount(event.target.value)}
-            />
+             aria-label="Amount"/>
           {amountError !== null && (
             <p id={`expense-correction-amount-error-${expense.id}`} className="form-field-error">
               {amountError}
@@ -247,7 +247,7 @@ function ExpenseCorrectionButton({ expense, onApproved }: ExpenseCorrectionButto
                   : undefined
               }
               onChange={(event) => setCurrency(event.target.value)}
-            />
+             aria-label="Currency"/>
           {currencyError !== null && (
             <p id={`expense-correction-currency-error-${expense.id}`} className="form-field-error">
               {currencyError}
@@ -265,7 +265,7 @@ function ExpenseCorrectionButton({ expense, onApproved }: ExpenseCorrectionButto
                   ? `expense-correction-category-error-${expense.id}`
                   : undefined
               }
-              onChange={(event) => setCategory(event.target.value as ExpenseCategory)}
+              onChange={(event) => setCategory(event.target.value as ExpenseCategory)} aria-label="Category"
             >
               {EXPENSE_CATEGORIES.map((value) => (
                 <option key={value} value={value}>{expenseCategoryLabel(value)}</option>
@@ -388,9 +388,9 @@ export default function ExpensesApprovalsPage() {
           <span className="muted">Primary queue — work top to bottom.</span>
         </header>
         {decisionNotice !== null && (
-          <p className="login__notice" role="status">
+          <output className="login__notice">
             {decisionNotice}
-          </p>
+          </output>
         )}
 
         <ul className="approval-list approval-list--wide">

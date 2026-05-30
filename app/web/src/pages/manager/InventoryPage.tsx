@@ -595,7 +595,7 @@ function NewInventoryItemForm({
           required
           aria-invalid={clientErr === "Name is required."}
           aria-describedby={errId}
-        />
+         aria-label="Name"/>
       </FormModalField>
       <FormModalGrid>
         <FormModalField label="Unit" requirement="required">
@@ -606,14 +606,14 @@ function NewInventoryItemForm({
             list="inventory-unit-options"
             aria-invalid={clientErr === "Unit is required."}
             aria-describedby={errId}
-          />
+           aria-label="Unit"/>
           <datalist id="inventory-unit-options">
-            <option value="each" />
-            <option value="roll" />
-            <option value="pack" />
-            <option value="bottle" />
-            <option value="kg" />
-            <option value="L" />
+            <option value="each">each</option>
+            <option value="roll">roll</option>
+            <option value="pack">pack</option>
+            <option value="bottle">bottle</option>
+            <option value="kg">kg</option>
+            <option value="L">L</option>
           </datalist>
         </FormModalField>
         <FormModalField label="SKU" requirement="optional">
@@ -622,7 +622,7 @@ function NewInventoryItemForm({
             onChange={(e) => setSku(e.target.value)}
             aria-invalid={serverErr === "SKU already exists for this property."}
             aria-describedby={errId}
-          />
+           aria-label="SKU"/>
         </FormModalField>
       </FormModalGrid>
       <FormModalField label="Barcode" requirement="optional">
@@ -631,7 +631,7 @@ function NewInventoryItemForm({
           onChange={(e) => setBarcode(e.target.value)}
           aria-invalid={serverErr === "Barcode already exists for this property."}
           aria-describedby={errId}
-        />
+         aria-label="Barcode"/>
       </FormModalField>
       <FormModalGrid>
         <FormModalField
@@ -650,7 +650,7 @@ function NewInventoryItemForm({
             required
             aria-invalid={clientErr === "Reorder point must be zero or more."}
             aria-describedby={describedBy(reorderPointHelpId, errId)}
-          />
+           aria-label="Reorder point"/>
         </FormModalField>
         <FormModalField
           label="Reorder target"
@@ -670,7 +670,7 @@ function NewInventoryItemForm({
               clientErr === "Reorder target must be at least the reorder point."
             }
             aria-describedby={describedBy(reorderTargetHelpId, errId)}
-          />
+           aria-label="Reorder target"/>
         </FormModalField>
       </FormModalGrid>
       {err && (
@@ -861,11 +861,7 @@ function InventoryDrawer({ item, onClose }: { item: InventoryItem; onClose: () =
           </div>
           <div
             className="inv-hero__gauge"
-            role="progressbar"
-            aria-valuemin={0}
-            aria-valuemax={item.par || 1}
-            aria-valuenow={item.on_hand}
-            aria-label="Stock vs par"
+            aria-hidden="true"
           >
             <div
               className={`inv-hero__gauge-fill inv-hero__gauge-fill--${statusTone}`}
@@ -922,7 +918,7 @@ function InventoryDrawer({ item, onClose }: { item: InventoryItem; onClose: () =
                     value={reorderPoint}
                     onChange={(e) => setReorderPoint(e.target.value)}
                     required
-                  />
+                   aria-label="field inv-adjust__field Par inv-adjust__input-row inv-adjust__input mono number 0.01 0 inv-adjust__unit"/>
                   <span className="inv-adjust__unit">{item.unit}</span>
                 </div>
               </label>
@@ -937,7 +933,7 @@ function InventoryDrawer({ item, onClose }: { item: InventoryItem; onClose: () =
                     value={reorderTarget}
                     onChange={(e) => setReorderTarget(e.target.value)}
                     required
-                  />
+                   aria-label="field inv-adjust__field Target inv-adjust__input-row inv-adjust__input mono number 0.01 0 inv-adjust__unit"/>
                   <span className="inv-adjust__unit">{item.unit}</span>
                 </div>
               </label>
@@ -987,7 +983,7 @@ function InventoryDrawer({ item, onClose }: { item: InventoryItem; onClose: () =
                     value={observed}
                     onChange={(e) => setObserved(e.target.value)}
                     required
-                  />
+                   aria-label="field inv-adjust__field Observed count inv-adjust__input-row inv-adjust__input mono number 0.01 0 inv-adjust__unit"/>
                   <span className="inv-adjust__unit">{item.unit}</span>
                 </div>
               </label>
@@ -1008,15 +1004,16 @@ function InventoryDrawer({ item, onClose }: { item: InventoryItem; onClose: () =
                 </select>
               </label>
             </div>
-            <label className="field">
+            <div className="field">
               <span>Note (optional)</span>
               <AutoGrowTextarea
                 className="inv-adjust__note"
+                aria-label="Note (optional)"
                 placeholder="e.g. Found in garage, soaked in rain."
                 value={note}
                 onChange={(e) => setNote(e.target.value)}
               />
-            </label>
+            </div>
             <div className="inv-adjust__footer">
               <div
                 className={`inv-delta inv-delta--${

@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import { useId, type ReactNode } from "react";
 
 interface RegistryCheckPillProps {
   checked: boolean;
@@ -11,6 +11,7 @@ export default function RegistryCheckPill({
   children,
   onChange,
 }: RegistryCheckPillProps) {
+  const labelId = useId();
   const className = [
     "llm-registry-form__check",
     checked
@@ -25,8 +26,9 @@ export default function RegistryCheckPill({
         className="llm-registry-form__check-input"
         checked={checked}
         onChange={(e) => onChange(e.target.checked)}
+        aria-labelledby={labelId}
       />
-      <span>{children}</span>
+      <span id={labelId}>{children}</span>
     </label>
   );
 }

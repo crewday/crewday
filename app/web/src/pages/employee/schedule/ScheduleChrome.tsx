@@ -50,7 +50,7 @@ export function ScheduleBanner({
   onReview: (iso: string) => void;
 }) {
   return (
-    <div className="schedule-banner schedule-banner--pending" role="status">
+    <output className="schedule-banner schedule-banner--pending">
       <span className="schedule-banner__text">
         <strong>
           {allPending.length} booking{allPending.length === 1 ? "" : "s"}{" "}
@@ -67,7 +67,7 @@ export function ScheduleBanner({
           Review
         </button>
       )}
-    </div>
+    </output>
   );
 }
 

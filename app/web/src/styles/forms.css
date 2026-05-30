@@ -652,14 +652,21 @@
   box-shadow: var(--shadow);
 }
 .searchable-select__option {
+  appearance: none;
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: var(--space-6);
+  width: 100%;
   min-width: 0;
   min-height: 38px;
   padding: var(--space-4) var(--space-5);
+  border: 0;
   border-radius: 8px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
   color: var(--ink);
   cursor: pointer;
 }
@@ -800,14 +807,20 @@
   box-shadow: var(--shadow);
 }
 .broadcast-recipient-picker__option {
+  appearance: none;
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: var(--space-6);
+  width: 100%;
   min-height: 44px;
   padding: var(--space-4) var(--space-5);
+  border: 0;
   border-radius: 8px;
+  background: transparent;
   color: var(--ink);
+  font: inherit;
+  text-align: left;
   cursor: pointer;
 }
 .broadcast-recipient-picker__option:hover,

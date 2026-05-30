@@ -244,7 +244,7 @@ export function InfiniteStaysAgenda(props: InfiniteStaysAgendaProps) {
         </div>
       </div>
 
-      <div className="schedule__agenda" role="list">
+      <div className="schedule__agenda">
         <div
           ref={topSentinelRef}
           className="schedule__sentinel schedule__sentinel--top"
@@ -431,7 +431,7 @@ function StaysPhoneWeek(props: {
   return (
     <>
       {group.cells.map((cell) => (
-        <div key={cell.iso} role="listitem">
+        <div key={cell.iso}>
           <StaysDayCell
             cell={cell}
             today={today}

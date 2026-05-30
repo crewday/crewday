@@ -154,7 +154,7 @@ export function WorkspaceGate({
     // pure UX polish, not a new permission edge.
     const isAdmin = user?.is_deployment_admin === true;
     return (
-      <div className="auth-gate" role="dialog" aria-modal="true" aria-labelledby="auth-gate-title">
+      <dialog open className="auth-gate" aria-modal="true" aria-labelledby="auth-gate-title">
         <div className="auth-gate__panel">
           <h1 id="auth-gate-title" className="auth-gate__title">No workspaces yet</h1>
           <p className="auth-gate__sub">
@@ -182,14 +182,14 @@ export function WorkspaceGate({
             </button>
           </div>
         </div>
-      </div>
+      </dialog>
     );
   }
 
   // 2+ workspaces: pick one. Hold-pattern style matches `<RequireAuth>`'s
   // loading state so the transition between the two doesn't flash.
   return (
-    <div className="auth-gate" role="dialog" aria-modal="true" aria-labelledby="auth-gate-title">
+    <dialog open className="auth-gate" aria-modal="true" aria-labelledby="auth-gate-title">
       <div className="auth-gate__panel">
         <h1 id="auth-gate-title" className="auth-gate__title">Pick a workspace</h1>
         <p className="auth-gate__sub">
@@ -210,7 +210,7 @@ export function WorkspaceGate({
           </button>
         </div>
       </div>
-    </div>
+    </dialog>
   );
 }
 

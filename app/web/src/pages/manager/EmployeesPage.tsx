@@ -114,13 +114,13 @@ export default function EmployeesPage() {
         <table className="table table--roomy">
           <thead>
             <tr>
-              <th></th>
+              <th aria-label="Actions"></th>
               <th>Name</th>
               <th>Roles</th>
               <th>Properties</th>
               <th>Phone</th>
               <th>Status</th>
-              <th></th>
+              <th aria-label="Actions"></th>
             </tr>
           </thead>
           <tbody>
@@ -656,16 +656,15 @@ function InviteEmployeeAction() {
         <>
           {sentInvite ? (
             <>
-              <p className="form-notice form-notice--success" role="status">
+              <output className="form-notice form-notice--success">
                 Invite sent to {sentInvite.pending_email}. They will receive the acceptance link by email.
-              </p>
+              </output>
               <p className="muted table__mono">Invite ID: {sentInvite.invite_id}</p>
             </>
           ) : (
             <>
               <FormField label="Full name" requirement="required" className="invite-employee-form__field sheet-form__field">
                 <input
-                  autoFocus
                   required
                   value={name}
                   onChange={(event) => {
@@ -673,7 +672,7 @@ function InviteEmployeeAction() {
                     setFormError(null);
                   }}
                   placeholder="e.g. Riley Chen"
-                />
+                 aria-label="Full name"/>
               </FormField>
 
               <FormField label="Email" requirement="required" className="invite-employee-form__field sheet-form__field">
@@ -686,7 +685,7 @@ function InviteEmployeeAction() {
                     setFormError(null);
                   }}
                   placeholder="riley@example.com"
-                />
+                 aria-label="Email"/>
               </FormField>
             </>
           )}

@@ -417,7 +417,7 @@ function AgentDocDetail({
         onChange={onBodyChange}
       />
       <div className="agent-docs__detail-grid">
-        <label className="agent-docs__field">
+        <div className="agent-docs__field">
           <span className="agent-docs__detail-label">Change note</span>
           <InlineNoteField
             value={draft.notes}
@@ -426,7 +426,7 @@ function AgentDocDetail({
             placeholder="Optional operator note for this save."
             onChange={onNotesChange}
           />
-        </label>
+        </div>
         <div className="agent-docs__side">
           <div>
             <span className="agent-docs__detail-label">Capabilities</span>

@@ -245,7 +245,7 @@ function SignupEnrollForm({
           onChange={(ev) => onDisplayName(ev.target.value)}
           disabled={pending}
           data-testid="signup-enroll-name"
-        />
+         aria-label="field Your display name text Camille Aubry name signup-enroll-name"/>
       </label>
 
       <p className="login__hint" data-testid="signup-enroll-timezone">

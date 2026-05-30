@@ -186,7 +186,7 @@ export default function AdminLayout() {
         </section>
 
         {/* Sibling of <Outlet />. Do not nest. */}
-        <AgentSidebar role="admin" />
+        <AgentSidebar agentRole="admin" />
       </div>
     </ShellNavProvider>
   );

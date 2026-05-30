@@ -138,9 +138,8 @@ function NotificationItem({
     >
       <div
         className="notification-card__status"
-        aria-label={isUnread ? "Unread notification" : "Read notification"}
-        role="img"
       >
+        <span className="sr-only">{isUnread ? "Unread notification" : "Read notification"}</span>
         {isUnread ? <Mail size={18} strokeWidth={1.8} /> : <MailOpen size={18} strokeWidth={1.8} />}
       </div>
       <article className="notification-card__body" aria-label={notificationTitle(notification)}>

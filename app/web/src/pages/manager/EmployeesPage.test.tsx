@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { MemoryRouter } from "react-router-dom";
 import {
@@ -394,7 +394,7 @@ describe("<EmployeesPage> work-role catalog", () => {
     const { requests } = renderEmployees([
       {
         path: "/w/acme/api/v1/work_roles?limit=500",
-        respond: { body: { data: roles, next_cursor: null, has_more: false } },
+        respond: () => ({ body: { data: [...roles], next_cursor: null, has_more: false } }),
       },
       {
         path: "/w/acme/api/v1/work_roles",
@@ -426,6 +426,9 @@ describe("<EmployeesPage> work-role catalog", () => {
     });
     fireEvent.click(within(catalog).getByRole("button", { name: "Save" }));
 
+    await waitFor(() => {
+      expect(requests.some((request) => request.method === "POST")).toBe(true);
+    });
     expect(await screen.findByText("Pool technician")).toBeInTheDocument();
     expect(within(screen.getByLabelText("New work role")).getByLabelText("Name")).toHaveValue("");
     const createRequest = requests.find((request) => request.method === "POST");
@@ -457,7 +460,8 @@ describe("<EmployeesPage> work-role catalog", () => {
     fireEvent.click(within(catalog).getByRole("button", { name: "Save" }));
 
     expect(await within(catalog).findByText("Saving")).toBeInTheDocument();
-    expect(within(catalog).getByRole("button", { name: "Save" })).toBeDisabled();
+    expect(within(catalog).getByRole("status", { name: "Saving..." })).toBeInTheDocument();
+    expect(within(catalog).queryByRole("button", { name: "Save" })).toBeNull();
   });
 
   it("surfaces duplicate-key and validation errors from the API", async () => {
@@ -523,12 +527,11 @@ describe("<EmployeesPage> work-role catalog", () => {
     expect(within(catalog).getByText("Use lowercase letters, numbers, or underscores")).toBeInTheDocument();
     expect(within(catalog).getByText("Choose an icon from the catalog")).toBeInTheDocument();
     expect(within(catalog).getByText("Description is too long")).toBeInTheDocument();
-    expect(nameInput).toHaveAttribute("aria-invalid", "true");
-    expect(keyInput).toHaveAttribute("aria-invalid", "true");
-    expect(descriptionInput).toHaveAttribute("aria-invalid", "true");
-    expect(within(catalog).getByRole("button", { name: "Icon: No icon. Edit icon" })).toHaveAttribute(
-      "aria-invalid",
-      "true",
+    expect(within(catalog).getByLabelText("Name")).toHaveAttribute("aria-invalid", "true");
+    expect(within(catalog).getByLabelText("Key")).toHaveAttribute("aria-invalid", "true");
+    expect(within(catalog).getByLabelText("Description")).toHaveAttribute("aria-invalid", "true");
+    expect(within(catalog).getByRole("button", { name: "Icon: No icon. Edit icon" })).toHaveAccessibleDescription(
+      "Choose an icon from the catalog",
     );
     expect(within(catalog).getByRole("alert")).toHaveTextContent(
       "Could not save work role. Name is too short",

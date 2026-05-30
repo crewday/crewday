@@ -1,13 +1,12 @@
 import {
   createContext,
-  type FocusEvent,
-  type KeyboardEvent,
   type ReactNode,
   useCallback,
   useContext,
   useEffect,
   useId,
   useMemo,
+  useRef,
   useState,
 } from "react";
 import { X } from "lucide-react";
@@ -21,6 +20,7 @@ import {
 
 const AUTO_DISMISS_MS = 9_000;
 const MAX_TOASTS = 4;
+const STATUS_ROLE = "status";
 
 interface ErrorToastItem {
   key: string;
@@ -148,6 +148,7 @@ function ErrorToast({
   onUpdate: (key: string, patch: Partial<ErrorToastItem>) => void;
 }) {
   const detailsId = useId();
+  const toastRef = useRef<HTMLElement | null>(null);
 
   useEffect(() => {
     if (toast.expanded || toast.hovered || toast.focused) return undefined;
@@ -159,34 +160,43 @@ function ErrorToast({
     onUpdate(toast.key, { expanded: !toast.expanded });
   };
 
-  const onFocusCapture = () => {
-    onUpdate(toast.key, { focused: true });
-  };
-
-  const onBlurCapture = (event: FocusEvent<HTMLElement>) => {
-    if (event.currentTarget.contains(event.relatedTarget)) return;
-    onUpdate(toast.key, { focused: false });
-  };
-
-  const onKeyDown = (event: KeyboardEvent<HTMLElement>) => {
-    if (event.key === "Escape") {
+  useEffect(() => {
+    const node = toastRef.current;
+    if (!node) return undefined;
+    const onMouseEnter = () => onUpdate(toast.key, { hovered: true });
+    const onMouseLeave = () => onUpdate(toast.key, { hovered: false });
+    const onFocusIn = () => onUpdate(toast.key, { focused: true });
+    const onFocusOut = (event: FocusEvent) => {
+      if (event.relatedTarget instanceof Node && node.contains(event.relatedTarget)) return;
+      onUpdate(toast.key, { focused: false });
+    };
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
       event.stopPropagation();
       onDismiss(toast.key);
-    }
-  };
+    };
+    node.addEventListener("mouseenter", onMouseEnter);
+    node.addEventListener("mouseleave", onMouseLeave);
+    node.addEventListener("focusin", onFocusIn);
+    node.addEventListener("focusout", onFocusOut);
+    node.addEventListener("keydown", onKeyDown);
+    return () => {
+      node.removeEventListener("mouseenter", onMouseEnter);
+      node.removeEventListener("mouseleave", onMouseLeave);
+      node.removeEventListener("focusin", onFocusIn);
+      node.removeEventListener("focusout", onFocusOut);
+      node.removeEventListener("keydown", onKeyDown);
+    };
+  }, [onDismiss, onUpdate, toast.key]);
 
   return (
     <section
+      ref={toastRef}
       className={`error-toast${toast.expanded ? " error-toast--expanded" : ""}`}
-      role="status"
+      role={STATUS_ROLE}
       aria-live="polite"
       aria-atomic="true"
       data-source={toast.source}
-      onMouseEnter={() => onUpdate(toast.key, { hovered: true })}
-      onMouseLeave={() => onUpdate(toast.key, { hovered: false })}
-      onFocusCapture={onFocusCapture}
-      onBlurCapture={onBlurCapture}
-      onKeyDown={onKeyDown}
     >
       <div className="error-toast__head">
         <button

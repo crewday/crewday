@@ -126,9 +126,9 @@ function ActivityLine({ label, live = false }: { label: string; live?: boolean }
     <div className="chat-activity">
       <span aria-hidden="true">{label}</span>
       {live && (
-        <span className="sr-only" role="status" aria-live="polite">
+        <output className="sr-only" aria-live="polite">
           {label}
-        </span>
+        </output>
       )}
     </div>
   );

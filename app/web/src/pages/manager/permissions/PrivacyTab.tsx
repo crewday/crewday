@@ -98,10 +98,10 @@ export default function PrivacyTab() {
       </header>
 
       {selected.length === 0 ? (
-        <p className="agent-prefs__banner" role="status">
+        <output className="agent-prefs__banner">
           No agent PII consent selected. Legal names, email addresses,
           phone numbers, and addresses are redacted before agents use them.
-        </p>
+        </output>
       ) : null}
 
       <fieldset className="permissions__privacy-choices" aria-label="Agent PII consent">

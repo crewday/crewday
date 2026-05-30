@@ -109,7 +109,7 @@ export default function StyleguidePage() {
 
           <h3>Vertical stack (<code>--stack</code>)</h3>
           <div className="btn-group btn-group--stack">
-            <button className="btn btn--moss btn--block">Continue</button>
+            <button type="button" className="btn btn--moss btn--block">Continue sign in</button>
             <button className="btn btn--ghost btn--block">Use a different account</button>
             <button className="btn btn--ghost btn--block">Back</button>
           </div>
@@ -122,7 +122,7 @@ export default function StyleguidePage() {
       <section className="styleguide__section">
         <h2>Task card</h2>
         <div className="demo-row demo-row--stack">
-          <a className="task-card task-card--now" href="#">
+          <a className="task-card task-card--now" href="/styleguide">
             <div className="task-card__head">
               <span className="chip chip--moss">Villa Sud</span>
               <span className="chip chip--rust">High priority</span>

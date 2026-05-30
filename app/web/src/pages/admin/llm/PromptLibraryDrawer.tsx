@@ -31,10 +31,12 @@ export default function PromptLibraryDrawer({
   return (
     <div
       className="llm-prompt-drawer-backdrop"
-      onClick={onClose}
+      onClick={(event) => {
+        if (event.target === event.currentTarget) onClose();
+      }}
       role="presentation"
     >
-      <aside className="llm-prompt-drawer" onClick={(e) => e.stopPropagation()}>
+      <aside className="llm-prompt-drawer">
         <header className="llm-prompt-drawer__head">
           <h2>Prompt library</h2>
           <button className="btn btn--ghost" onClick={onClose}>

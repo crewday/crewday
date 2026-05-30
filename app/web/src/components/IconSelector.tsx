@@ -16,6 +16,8 @@ import {
 import type { FieldRequirement } from "@/components/FormField";
 import SearchField from "@/components/SearchField";
 
+const GROUP_ROLE = "group";
+
 interface IconSelectorProps {
   label: string;
   value: string;
@@ -59,6 +61,7 @@ export default function IconSelector({
   const rootRef = useRef<HTMLDivElement>(null);
   const previewRef = useRef<HTMLButtonElement>(null);
   const searchRef = useRef<HTMLInputElement>(null);
+  const popoverRef = useRef<HTMLDivElement>(null);
   const selectedName = isAssetIconName(value) ? value : "";
   const hasUnknownValue = value.trim() !== "" && !selectedName;
   const selectedLabel = hasUnknownValue ? "Unknown icon" : selectedName ? labelForIconName(selectedName) : "No icon";
@@ -103,19 +106,25 @@ export default function IconSelector({
     return () => document.removeEventListener("pointerdown", closeFromOutside);
   }, [isOpen]);
 
+  useEffect(() => {
+    const popover = popoverRef.current;
+    if (!isOpen || !popover) return undefined;
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      event.stopPropagation();
+      setIsOpen(false);
+      previewRef.current?.focus();
+    };
+    popover.addEventListener("keydown", handleKeyDown);
+    return () => popover.removeEventListener("keydown", handleKeyDown);
+  }, [isOpen]);
+
   function chooseIcon(nextName: string): void {
     if (!nextName || isAssetIconName(nextName)) {
       onChange(nextName);
       setIsOpen(false);
       previewRef.current?.focus();
     }
-  }
-
-  function handleKeyDown(event: ReactKeyboardEvent<HTMLDivElement>): void {
-    if (!isOpen || event.key !== "Escape") return;
-    event.stopPropagation();
-    setIsOpen(false);
-    previewRef.current?.focus();
   }
 
   function handlePreviewKeyDown(event: ReactKeyboardEvent<HTMLButtonElement>): void {
@@ -125,7 +134,7 @@ export default function IconSelector({
   }
 
   return (
-    <div className={classes} ref={rootRef} onKeyDown={handleKeyDown}>
+    <div className={classes} ref={rootRef}>
       <span className="form-field__label">
         {label}{" "}
         <span className={`form-field__requirement form-field__requirement--${requirement}`}>
@@ -141,7 +150,6 @@ export default function IconSelector({
           aria-haspopup="dialog"
           aria-expanded={isOpen}
           aria-controls={isOpen ? controlId : undefined}
-          aria-invalid={error ? true : undefined}
           aria-describedby={error ? errorId : hasUnknownValue ? `${controlId}-unknown` : undefined}
           aria-label={`${label}: ${selectedLabel}. Edit icon`}
           title={`${label}: ${selectedLabel}. Edit icon`}
@@ -163,9 +171,10 @@ export default function IconSelector({
 
         {isOpen ? (
           <div
+            ref={popoverRef}
             id={controlId}
             className={`icon-selector__popover icon-selector__popover--${popoverPlacement}`}
-            role="dialog"
+            role={GROUP_ROLE}
             aria-label={`${label} choices`}
           >
             <SearchField
@@ -179,7 +188,7 @@ export default function IconSelector({
               placeholder="Search icons"
             />
 
-            <div className="icon-selector__grid" role="group" aria-label={`${label} choices`}>
+            <div className="icon-selector__grid" aria-label={`${label} choices`}>
               {allowEmpty ? (
                 <button
                   type="button"
@@ -218,9 +227,9 @@ export default function IconSelector({
               })}
 
               {visibleOptions.length === 0 ? (
-                <p className="icon-selector__empty" role="status">
+                <output className="icon-selector__empty">
                   No matching icons.
-                </p>
+                </output>
               ) : null}
             </div>
           </div>

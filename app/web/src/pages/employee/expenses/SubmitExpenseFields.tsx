@@ -51,7 +51,7 @@ export function SubmitExpenseFields(props: SubmitExpenseFieldsProps) {
             name="currency"
             value={values.currency}
             onChange={(e) => onFieldChange("currency", e.target.value)}
-          />
+           aria-label="field field--currency Currency currency currency"/>
         </label>
       </div>
       <TextField
@@ -75,18 +75,19 @@ export function SubmitExpenseFields(props: SubmitExpenseFieldsProps) {
         isScanned={isScanned}
         onChange={(value) => onFieldChange("category", value)}
       />
-      <label className={`field ${confidenceClass(confidences.note_md)}`}>
+      <div className={`field ${confidenceClass(confidences.note_md)}`}>
         <span>
           Note
           <ConfidenceChip isScanned={isScanned} confidence={confidences.note_md} />
         </span>
         <AutoGrowTextarea
           name="note_md"
+          aria-label="Note"
           placeholder="What it was for"
           value={values.note_md}
           onChange={(e) => onFieldChange("note_md", e.target.value)}
         />
-      </label>
+      </div>
     </>
   );
 }
@@ -133,7 +134,7 @@ function TextField(props: TextFieldProps) {
         required={required}
         value={value}
         onChange={(e) => onChange(e.target.value)}
-      />
+       aria-label="field--grow"/>
     </label>
   );
 }
@@ -186,7 +187,7 @@ function CategoryField({
               value={c.value}
               checked={value === c.value}
               onChange={() => onChange(c.value)}
-            />
+             aria-label="chip-radio radio category"/>
             <span>{c.label}</span>
           </label>
         ))}

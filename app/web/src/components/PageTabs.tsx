@@ -168,7 +168,7 @@ function InPlacePageTabs(props: InPlacePageTabsProps & { className: string }) {
   };
 
   return (
-    <div className={className} role="tablist" aria-label={ariaLabel} onKeyDown={handleKeyDown}>
+    <div className={className} role="tablist" tabIndex={-1} aria-label={ariaLabel} onKeyDown={handleKeyDown}>
       {tabs.map((tab) => {
         const active = tab.key === selected;
         return (

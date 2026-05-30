@@ -98,8 +98,8 @@ describe("Admin AuditPage", () => {
 
       // The user row should render and the agent row filtered out by
       // the client-side actor_kind tab.
-      expect(await screen.findByText("deployment.budget.updated")).toBeInTheDocument();
-      expect(screen.queryByText("deployment.budget.adjusted")).toBeNull();
+      expect(await screen.findByText("deployment.budget.updated", { selector: "code" })).toBeInTheDocument();
+      expect(screen.queryByText("deployment.budget.adjusted", { selector: "code" })).toBeNull();
 
       const auditCall = fake.calls.find((c) => c.startsWith("/admin/api/v1/audit?"));
       expect(auditCall).toBeTruthy();

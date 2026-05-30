@@ -323,9 +323,9 @@ export default function PayPage() {
         </form>
       </dialog>
       {closeSucceeded && (
-        <p role="status" className="muted">
+        <output className="muted">
           Period locked. Pay data refreshed.
-        </p>
+        </output>
       )}
 
       <section className="grid grid--stats">
@@ -358,7 +358,7 @@ export default function PayPage() {
           <thead>
             <tr>
               <th>Employee</th><th>Hours</th><th>Overtime</th><th>Gross</th>
-              <th>Reimbursements</th><th>Net</th><th>Status</th><th></th>
+              <th>Reimbursements</th><th>Net</th><th>Status</th><th aria-label="Actions"></th>
             </tr>
           </thead>
           <tbody>

@@ -52,21 +52,21 @@ vi.mock("@/layouts/EmployeeLayout", async () => {
     "react-router-dom",
   );
   const { useEffect } = await vi.importActual<typeof import("react")>("react");
-  function MockAgentSidebar({ role }: { role: "employee" | "manager" }): ReactElement {
-    mockRenders.agentSidebar(role);
+  function MockAgentSidebar({ agentRole }: { agentRole: "employee" | "manager" }): ReactElement {
+    mockRenders.agentSidebar(agentRole);
     useEffect(() => {
-      mockRenders.agentSidebarMount(role);
+      mockRenders.agentSidebarMount(agentRole);
       if (!mockRenders.agentFetches) return;
-      void fetch(`/w/ws_1/api/v1/agent/${role}/log`);
-    }, [role]);
-    return <aside data-testid="agent-sidebar">agent:{role}</aside>;
+      void fetch(`/w/ws_1/api/v1/agent/${agentRole}/log`);
+    }, [agentRole]);
+    return <aside data-testid="agent-sidebar">agent:{agentRole}</aside>;
   }
   return {
     default: function MockEmployeeLayout(): ReactElement {
       mockRenders.employeeLayout();
       return (
         <div data-testid="employee-layout">
-          <MockAgentSidebar role="employee" />
+          <MockAgentSidebar agentRole="employee" />
           <RouterOutlet />
         </div>
       );
@@ -79,16 +79,16 @@ vi.mock("@/layouts/ManagerLayout", async () => {
     "react-router-dom",
   );
   const { useEffect } = await vi.importActual<typeof import("react")>("react");
-  function MockAgentSidebar({ role }: { role: "employee" | "manager" }): ReactElement {
-    mockRenders.agentSidebar(role);
+  function MockAgentSidebar({ agentRole }: { agentRole: "employee" | "manager" }): ReactElement {
+    mockRenders.agentSidebar(agentRole);
     useEffect(() => {
-      mockRenders.agentSidebarMount(role);
-    }, [role]);
+      mockRenders.agentSidebarMount(agentRole);
+    }, [agentRole]);
     useEffect(() => {
       if (!mockRenders.agentFetches) return;
-      void fetch(`/w/ws_1/api/v1/agent/${role}/log`);
-    }, [role]);
-    return <aside data-testid="agent-sidebar">agent:{role}</aside>;
+      void fetch(`/w/ws_1/api/v1/agent/${agentRole}/log`);
+    }, [agentRole]);
+    return <aside data-testid="agent-sidebar">agent:{agentRole}</aside>;
   }
   return {
     default: function MockManagerLayout(): ReactElement {
@@ -98,7 +98,7 @@ vi.mock("@/layouts/ManagerLayout", async () => {
       }, []);
       return (
         <div data-testid="manager-layout">
-          <MockAgentSidebar role="manager" />
+          <MockAgentSidebar agentRole="manager" />
           <RouterOutlet />
         </div>
       );

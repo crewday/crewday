@@ -104,6 +104,7 @@ describe("AvatarEditor", () => {
         },
       });
 
+      await screen.findByText("Drag to reposition, slide to zoom.");
       fireEvent.click(await screen.findByRole("button", { name: "Save" }));
 
       await waitFor(() => {

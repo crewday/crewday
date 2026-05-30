@@ -258,7 +258,7 @@ export default function LlmPlayground({
               onChange={(event) => setImageUrl(event.target.value)}
               placeholder="https://example.com/image.jpg"
               aria-describedby={errId}
-            />
+             aria-label="Image URL"/>
           </FormModalField>
           <FileDropZone
             title={imageFile ? imageFile.name : "Upload image"}
@@ -287,7 +287,7 @@ export default function LlmPlayground({
               onChange={(event) => setAudioUrl(event.target.value)}
               placeholder="https://example.com/audio.mp3"
               aria-describedby={errId}
-            />
+             aria-label="Audio URL"/>
           </FormModalField>
           <FileDropZone
             title={audioFile ? audioFile.name : "Upload audio"}
@@ -312,9 +312,9 @@ export default function LlmPlayground({
       ) : null}
 
       {playground.isPending ? (
-        <p className="llm-playground__status" role="status">
+        <output className="llm-playground__status">
           Running playground test...
-        </p>
+        </output>
       ) : null}
 
       {result ? (

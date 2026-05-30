@@ -44,9 +44,9 @@ export function RequirePermission({
 
   if (!userId || !resolvedScopeId || q.isPending) {
     return (
-      <div className="auth-hold" role="status" aria-live="polite" aria-busy="true">
+      <output className="auth-hold" aria-live="polite" aria-busy="true">
         <span className="auth-hold__label">Checking permissions...</span>
-      </div>
+      </output>
     );
   }
 

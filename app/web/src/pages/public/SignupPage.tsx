@@ -81,6 +81,7 @@ declare global {
 
 const TURNSTILE_SCRIPT_ID = "crewday-turnstile-script";
 const TURNSTILE_SCRIPT_SRC = "https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit";
+const STATUS_ROLE = "status";
 
 export default function SignupPage(): ReactElement {
   const [email, setEmail] = useState("");
@@ -208,7 +209,7 @@ export default function SignupPage(): ReactElement {
             value={email}
             onChange={(ev) => setEmail(ev.target.value)}
             data-testid="signup-email"
-          />
+           aria-label="field Your email email you@example.com email signup-email"/>
         </label>
 
         <label className="field">
@@ -225,7 +226,7 @@ export default function SignupPage(): ReactElement {
             onChange={(ev) => setSlug(normalizeWorkspaceSlugInput(ev.target.value))}
             data-testid="signup-slug"
             aria-describedby="signup-slug-hint"
-          />
+           aria-label="field Workspace handle text villa-sud off url [a-z][a-z0-9-]{1,38}[a-z0-9] signup-slug signup-slug-hint signup-slug-hint login__hint Lowercase letters, digits, and hyphens. Lives at /w/&lt;handle&gt;/ ."/>
           <span id="signup-slug-hint" className="login__hint">
             Lowercase letters, digits, and hyphens. Lives at <code>/w/&lt;handle&gt;/</code>.
           </span>
@@ -293,7 +294,7 @@ function SignupSentConfirmation({
   headingRef: RefObject<HTMLHeadingElement | null>;
 }): ReactElement {
   return (
-    <div data-testid="signup-sent" role="status" aria-live="polite">
+    <output data-testid="signup-sent" role={STATUS_ROLE} aria-live="polite">
       <h1 className="login__headline" ref={headingRef} tabIndex={-1}>
         Check your email
       </h1>
@@ -305,7 +306,7 @@ function SignupSentConfirmation({
         Nothing in your inbox? Check spam, wait a minute, then start over. Repeated requests
         may be rate-limited.
       </p>
-    </div>
+    </output>
   );
 }
 

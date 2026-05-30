@@ -45,6 +45,8 @@ import { useMutation } from "@tanstack/react-query";
 import { sanitizeNext } from "@/auth";
 import { ApiError, fetchJson } from "@/lib/api";
 
+const STATUS_ROLE = "status";
+
 interface RecoverRequestBody {
   email: string;
   // Forward-compat: the server will accept this once the step-up
@@ -184,7 +186,7 @@ export default function RecoverPage() {
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}
                     data-testid="recover-email"
-                  />
+                   aria-label="field Your email email you@example.com email recover-email"/>
                 </label>
 
                 <label className="field field--inline">
@@ -193,6 +195,7 @@ export default function RecoverPage() {
                     checked={stepUp}
                     onChange={(e) => setStepUp(e.target.checked)}
                     data-testid="recover-stepup-toggle"
+                    aria-label="I'm a manager or owner (I have a break-glass code)"
                   />
                   <span>I'm a manager or owner (I have a break-glass code)</span>
                 </label>
@@ -208,7 +211,7 @@ export default function RecoverPage() {
                       value={code}
                       onChange={(e) => setCode(e.target.value)}
                       data-testid="recover-code"
-                    />
+                     aria-label="field Break-glass code recovery-code XXXXXXXXXX one-time-code recover-code"/>
                   </label>
                 ) : null}
 
@@ -257,7 +260,7 @@ function RecoverSentConfirmation({
   headingRef: RefObject<HTMLHeadingElement | null>;
 }): ReactElement {
   return (
-    <div data-testid="recover-sent" role="status" aria-live="polite">
+    <output data-testid="recover-sent" role={STATUS_ROLE} aria-live="polite">
       <h1 className="login__headline" ref={headingRef} tabIndex={-1}>
         Check your email
       </h1>
@@ -269,7 +272,7 @@ function RecoverSentConfirmation({
         Nothing in your inbox? Check spam, wait a minute, then try again. Repeated requests may be
         rate-limited.
       </p>
-    </div>
+    </output>
   );
 }
 

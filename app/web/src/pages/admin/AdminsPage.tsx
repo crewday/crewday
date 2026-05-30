@@ -81,7 +81,7 @@ export default function AdminAdminsPage() {
               <th>Role</th>
               <th>Granted</th>
               <th>Granted by</th>
-              <th></th>
+              <th aria-label="Actions"></th>
             </tr>
           </thead>
           <tbody>
@@ -128,7 +128,7 @@ export default function AdminAdminsPage() {
               placeholder="admin@example.com"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
-            />
+             aria-label="form-row form-label Email email input input--inline admin@example.com"/>
           </label>
           <div className="form-row">
             <span className="form-label">Promote to owner?</span>

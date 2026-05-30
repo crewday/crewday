@@ -1,5 +1,18 @@
-import { type AriaAttributes, type ReactNode, useEffect, useId, useMemo, useRef, useState } from "react";
+import {
+  type AriaAttributes,
+  type KeyboardEvent,
+  type ReactNode,
+  useEffect,
+  useId,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import FormField, { type FieldRequirement } from "@/components/FormField";
+
+const COMBOBOX_ROLE = "combobox";
+const LISTBOX_ROLE = "listbox";
+const OPTION_ROLE = "option";
 
 export interface SearchableSelectOption {
   value: string;
@@ -33,6 +46,7 @@ interface SearchableSelectProps {
   placeholder?: string;
   noResultsLabel?: string;
   renderOptionSecondaryText?: (option: SearchableSelectOption) => ReactNode;
+  onInputKeyDown?: (event: KeyboardEvent<HTMLInputElement>) => void;
   "aria-describedby"?: string;
   "aria-invalid"?: AriaAttributes["aria-invalid"];
 }
@@ -57,6 +71,7 @@ export default function SearchableSelect({
   placeholder = "Search...",
   noResultsLabel = "No matches",
   renderOptionSecondaryText = defaultOptionSecondaryText,
+  onInputKeyDown,
   "aria-describedby": ariaDescribedBy,
   "aria-invalid": ariaInvalid,
 }: SearchableSelectProps) {
@@ -64,6 +79,7 @@ export default function SearchableSelect({
   const fieldId = id ?? generatedFieldId;
   const listboxId = useId();
   const inputRef = useRef<HTMLInputElement | null>(null);
+  const activeIndexRef = useRef(0);
   const selectOptions = useMemo(() => withBlankOption(options, blankOption), [blankOption, options]);
   const [query, setQuery] = useState(() => selectedLabel(selectOptions, value));
   const [open, setOpen] = useState(false);
@@ -123,17 +139,15 @@ export default function SearchableSelect({
   function openAtSelected() {
     setOpen(true);
     if (selectedOption?.disabled) {
-      setActiveIndex(
-        firstEnabledIndex(
-          selectOptions.slice(
-            selectedOpenStartIndex,
-            selectedOpenStartIndex + MAX_VISIBLE_OPTIONS,
-          ),
+      updateActiveIndex(firstEnabledIndex(
+        selectOptions.slice(
+          selectedOpenStartIndex,
+          selectedOpenStartIndex + MAX_VISIBLE_OPTIONS,
         ),
-      );
+      ));
       return;
     }
-    setActiveIndex(selectedOpenActiveIndex);
+    updateActiveIndex(selectedOpenActiveIndex);
   }
 
   function moveActive(direction: -1 | 1) {
@@ -145,8 +159,15 @@ export default function SearchableSelect({
         : direction === -1 && selectedOptionIndex < 0
           ? maxIndex
           : selectedOpenActiveIndex;
-      return nextEnabledIndex(visibleOptions, startIndex, direction, maxIndex);
+      const nextIndex = nextEnabledIndex(visibleOptions, startIndex, direction, maxIndex);
+      activeIndexRef.current = nextIndex;
+      return nextIndex;
     });
+  }
+
+  function updateActiveIndex(nextIndex: number) {
+    activeIndexRef.current = nextIndex;
+    setActiveIndex(nextIndex);
   }
 
   return (
@@ -161,7 +182,7 @@ export default function SearchableSelect({
         ref={inputRef}
         id={fieldId}
         className={inputClasses}
-        role="combobox"
+        role={COMBOBOX_ROLE}
         type="text"
         value={query}
         disabled={disabled}
@@ -169,6 +190,7 @@ export default function SearchableSelect({
         placeholder={placeholder}
         autoComplete="off"
         aria-autocomplete="list"
+        aria-label={label}
         aria-required={required || undefined}
         aria-expanded={open}
         aria-invalid={isInvalid ? true : ariaInvalid}
@@ -183,13 +205,12 @@ export default function SearchableSelect({
           const nextQuery = event.currentTarget.value;
           setQuery(nextQuery);
           setOpen(true);
-          setActiveIndex(
-            firstEnabledIndex(
-              filterOptions(selectOptions, nextQuery).slice(0, MAX_VISIBLE_OPTIONS),
-            ),
-          );
+          updateActiveIndex(firstEnabledIndex(
+            filterOptions(selectOptions, nextQuery).slice(0, MAX_VISIBLE_OPTIONS),
+          ));
         }}
         onKeyDown={(event) => {
+          onInputKeyDown?.(event);
           if (disabled) return;
           if (event.key === "ArrowDown") {
             event.preventDefault();
@@ -199,7 +220,7 @@ export default function SearchableSelect({
             moveActive(-1);
           } else if (event.key === "Enter" && open) {
             event.preventDefault();
-            const option = visibleOptions[activeIndex];
+            const option = visibleOptions[activeIndexRef.current];
             if (option) commit(option);
           } else if (event.key === "Escape") {
             event.preventDefault();
@@ -210,23 +231,25 @@ export default function SearchableSelect({
       {name ? <input type="hidden" name={name} value={value} disabled={disabled} /> : null}
       {open && (
         <div className="searchable-select__popover">
-          <ul id={listboxId} className="searchable-select__list" role="listbox" aria-label={label}>
+          <div id={listboxId} className="searchable-select__list" role={LISTBOX_ROLE} aria-label={label}>
             {visibleOptions.map((option, index) => {
               const secondaryText = renderOptionSecondaryText(option);
               return (
-                <li
+                <button
+                  type="button"
                   id={optionId(listboxId, index)}
                   key={option.value}
-                  role="option"
+                  role={OPTION_ROLE}
                   aria-selected={option.value === selectedOption?.value}
                   aria-disabled={option.disabled || undefined}
+                  disabled={option.disabled}
                   className={[
                     "searchable-select__option",
                     index === activeIndex ? "is-active" : null,
                     option.disabled ? "is-disabled" : null,
                   ].filter(Boolean).join(" ")}
                   onMouseEnter={() => {
-                    if (!option.disabled) setActiveIndex(index);
+                    if (!option.disabled) updateActiveIndex(index);
                   }}
                   onMouseDown={(event) => {
                     event.preventDefault();
@@ -235,13 +258,13 @@ export default function SearchableSelect({
                 >
                   <span className="searchable-select__label">{option.label}</span>
                   {secondaryText ? <span className="searchable-select__value">{secondaryText}</span> : null}
-                </li>
+                </button>
               );
             })}
             {visibleOptions.length === 0 && (
-              <li className="searchable-select__empty" aria-live="polite">{noResultsLabel}</li>
+              <div className="searchable-select__empty" aria-live="polite">{noResultsLabel}</div>
             )}
-          </ul>
+          </div>
         </div>
       )}
     </FormField>

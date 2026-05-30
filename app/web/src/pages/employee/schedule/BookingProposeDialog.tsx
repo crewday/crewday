@@ -102,10 +102,10 @@ export function BookingProposeDialog({
 
       <FormModalGrid className="booking-propose-form__grid">
         <FormModalField label="From" requirement="required" className="booking-propose-form__field">
-          <input type="time" value={starts} onChange={(e) => setStarts(e.target.value)} required />
+          <input type="time" value={starts} onChange={(e) => setStarts(e.target.value)} required  aria-label="From"/>
         </FormModalField>
         <FormModalField label="Until" requirement="required" className="booking-propose-form__field">
-          <input type="time" value={ends} onChange={(e) => setEnds(e.target.value)} required />
+          <input type="time" value={ends} onChange={(e) => setEnds(e.target.value)} required  aria-label="Until"/>
         </FormModalField>
       </FormModalGrid>
 
@@ -114,7 +114,7 @@ export function BookingProposeDialog({
           value={notes}
           onChange={(e) => setNotes(e.target.value)}
           placeholder="Swung by for forgotten laundry…"
-        />
+         aria-label="Notes"/>
       </FormModalField>
     </FormModal>
   );

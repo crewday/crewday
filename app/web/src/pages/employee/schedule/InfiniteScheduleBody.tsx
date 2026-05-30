@@ -187,7 +187,7 @@ export function InfiniteScheduleBody(props: BodyProps) {
           </div>
         )}
 
-        <div className="schedule__agenda" role="list">
+        <div className="schedule__agenda">
           <div
             ref={topSentinelRef}
             className="schedule__sentinel schedule__sentinel--top"

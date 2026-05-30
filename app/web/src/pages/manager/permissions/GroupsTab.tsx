@@ -82,21 +82,23 @@ export default function GroupsTab() {
         </header>
         <ul className="permissions__group-list">
           {groupRows.map((g) => (
-            <li
-              key={g.id}
-              className={`permissions__group-row ${selectedId === g.id ? "permissions__group-row--active" : ""}`}
-              onClick={() => setSelected(g.id)}
-            >
-              <div className="permissions__group-name">
-                {g.name}
-                {g.system ? (
-                  <Chip tone="moss" size="sm">system</Chip>
-                ) : null}
-                {isDerivedGroup(g) ? (
-                  <Chip tone="sand" size="sm">derived</Chip>
-                ) : null}
-              </div>
-              <div className="permissions__group-key mono muted">{g.slug}</div>
+            <li key={g.id}>
+              <button
+                type="button"
+                className={`permissions__group-row ${selectedId === g.id ? "permissions__group-row--active" : ""}`}
+                onClick={() => setSelected(g.id)}
+              >
+                <span className="permissions__group-name">
+                  {g.name}
+                  {g.system ? (
+                    <Chip tone="moss" size="sm">system</Chip>
+                  ) : null}
+                  {isDerivedGroup(g) ? (
+                    <Chip tone="sand" size="sm">derived</Chip>
+                  ) : null}
+                </span>
+                <span className="permissions__group-key mono muted">{g.slug}</span>
+              </button>
             </li>
           ))}
           {groupRows.length === 0 ? (
@@ -138,7 +140,7 @@ export default function GroupsTab() {
                     <tr>
                       <th>User</th>
                       <th>Email</th>
-                      <th></th>
+                      <th aria-label="Actions"></th>
                     </tr>
                   </thead>
                   <tbody>

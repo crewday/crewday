@@ -99,9 +99,9 @@ export default function EmployeeLayout() {
   );
   const pendingBadge = pendingMutationCount > 0
     ? (
-        <div className="offline-queue-badge" role="status" aria-live="polite">
+        <output className="offline-queue-badge" aria-live="polite">
           {pendingMutationCount} queued — will sync
-        </div>
+        </output>
       )
     : null;
   const navAction = (
@@ -139,9 +139,9 @@ export default function EmployeeLayout() {
       </div>
 
       {pendingMutationCount > 0 && (
-        <div className="offline-queue-badge offline-queue-badge--phone" role="status" aria-live="polite">
+        <output className="offline-queue-badge offline-queue-badge--phone" aria-live="polite">
           {pendingMutationCount} queued — will sync
-        </div>
+        </output>
       )}
 
       {!isChat && <div className="phone__dock">{bookingHint}</div>}
@@ -151,7 +151,7 @@ export default function EmployeeLayout() {
       {/* Sibling of <Outlet />. Do not nest. The CSS hides this rail
           below the desktop breakpoint; on phones, the bottom Chat tab
           navigates to /chat full-screen instead. */}
-      <AgentSidebar role="employee" />
+      <AgentSidebar agentRole="employee" />
     </main>
   );
 }

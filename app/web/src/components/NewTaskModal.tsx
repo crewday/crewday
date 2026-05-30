@@ -177,7 +177,6 @@ export default function NewTaskButton() {
       >
         <FormModalField label="Title" requirement="required" className="new-task-form__field">
           <input
-            autoFocus
             required
             value={title}
             onChange={(e) => {
@@ -185,7 +184,7 @@ export default function NewTaskButton() {
               setFormError(null);
             }}
             placeholder="e.g. Call back Maria about the stay"
-          />
+           aria-label="Title"/>
         </FormModalField>
 
         <FormModalField label="Due" requirement="required" className="new-task-form__field">
@@ -197,7 +196,7 @@ export default function NewTaskButton() {
               setDue(e.target.value);
               setFormError(null);
             }}
-          />
+           aria-label="Due"/>
         </FormModalField>
 
         <SearchableSelect

@@ -658,14 +658,14 @@ function ProviderForm(props: ProviderFormProps) {
             required
             aria-invalid={clientErr === "Name is required."}
             aria-describedby={errId}
-          />
+           aria-label="Name"/>
         </FormModalField>
         <FormModalGrid>
           <FormModalField label="Type" requirement="required">
             <select
               value={providerType}
               onChange={(e) => setProviderType(e.target.value as LlmProviderType)}
-              required
+              required aria-label="Type"
             >
               <option value="openrouter">OpenRouter</option>
               <option value="openai_compatible">OpenAI compatible</option>
@@ -683,7 +683,7 @@ function ProviderForm(props: ProviderFormProps) {
                 `${providerTypeLabel(providerType)} providers need an API endpoint.`
               }
               aria-describedby={errId}
-            />
+             aria-label="API endpoint"/>
           </FormModalField>
         </FormModalGrid>
         <FormModalField label="Enabled" requirement="required">
@@ -691,7 +691,7 @@ function ProviderForm(props: ProviderFormProps) {
             type="checkbox"
             checked={enabled}
             onChange={(e) => setEnabled(e.target.checked)}
-          />
+           aria-label="Enabled"/>
         </FormModalField>
         {mode === "edit" && provider && providerAllowsApiKey(provider.provider_type) ? (
           <div className="llm-provider-key">
@@ -769,7 +769,7 @@ function ProviderForm(props: ProviderFormProps) {
               required
               aria-invalid={clientErr === "Timeout must be at least 1 second."}
               aria-describedby={errId}
-            />
+             aria-label="Timeout seconds"/>
           </FormModalField>
           <FormModalField label="Requests per minute" requirement="required">
             <input
@@ -780,7 +780,7 @@ function ProviderForm(props: ProviderFormProps) {
               required
               aria-invalid={clientErr === "Requests per minute must be at least 1."}
               aria-describedby={errId}
-            />
+             aria-label="Requests per minute"/>
           </FormModalField>
         </FormModalGrid>
         {err ? (
@@ -1009,7 +1009,7 @@ function ModelForm({
           placeholder="google/gemma-4-31b-it"
           aria-invalid={openRouterErr ? true : undefined}
           aria-describedby={describedBy(openRouterErrId, openRouterStatusId)}
-        />
+         aria-label="OpenRouter model"/>
         <button
           type="button"
           className="btn btn--ghost llm-openrouter-loader__button"
@@ -1020,15 +1020,14 @@ function ModelForm({
         </button>
       </div>
       {openRouterPreview.isPending || openRouterStatus ? (
-        <p
+        <output
           id="llm-openrouter-status"
           className="llm-openrouter-loader__status"
-          role="status"
         >
           {openRouterPreview.isPending
             ? "Loading OpenRouter metadata..."
             : openRouterStatus}
-        </p>
+        </output>
       ) : null}
       {openRouterPricing ? (
         <p className="llm-openrouter-loader__pricing">
@@ -1212,7 +1211,7 @@ function ModelForm({
               required
               aria-invalid={clientErr === "Canonical name is required."}
               aria-describedby={errId}
-            />
+             aria-label="Canonical name"/>
           </FormModalField>
           <FormModalField label="Display name" requirement="required">
             <input
@@ -1221,7 +1220,7 @@ function ModelForm({
               required
               aria-invalid={clientErr === "Display name is required."}
               aria-describedby={errId}
-            />
+             aria-label="Display name"/>
           </FormModalField>
         </FormModalGrid>
         <fieldset className="llm-registry-form__fieldset">
@@ -1247,7 +1246,7 @@ function ModelForm({
               onChange={(e) => setContextWindow(e.target.value)}
               aria-invalid={clientErr === "Context window must be a positive whole number."}
               aria-describedby={errId}
-            />
+             aria-label="Context window"/>
           </FormModalField>
           {supportsGeneration ? (
             <FormModalField label="Max output tokens" requirement="optional">
@@ -1260,7 +1259,7 @@ function ModelForm({
                   clientErr === "Max output tokens must be a positive whole number."
                 }
                 aria-describedby={errId}
-              />
+               aria-label="Max output tokens"/>
             </FormModalField>
           ) : null}
         </FormModalGrid>
@@ -1278,7 +1277,7 @@ function ModelForm({
                     "Embedding dimensions must be a positive whole number."
                   }
                   aria-describedby={errId}
-                />
+                 aria-label="Embedding dimensions"/>
               </FormModalField>
             ) : null}
             {supportsGeneration ? (
@@ -1292,7 +1291,7 @@ function ModelForm({
                   onChange={(e) => setTemperature(e.target.value)}
                   aria-invalid={clientErr === "Temperature must be between 0 and 2."}
                   aria-describedby={errId}
-                />
+                 aria-label="Temperature"/>
               </FormModalField>
             ) : null}
           </FormModalGrid>
@@ -1306,7 +1305,7 @@ function ModelForm({
                   if (isThinkingStrategy(e.target.value)) {
                     setThinkingStrategy(e.target.value);
                   }
-                }}
+                }} aria-label="Thinking strategy"
               >
                 {THINKING_STRATEGY_OPTIONS.map((strategy) => (
                   <option key={strategy} value={strategy}>
@@ -1322,7 +1321,7 @@ function ModelForm({
                   if (isThinkingLevel(e.target.value)) {
                     setThinkingLevel(e.target.value);
                   }
-                }}
+                }} aria-label="Thinking level"
               >
                 {THINKING_LEVEL_OPTIONS.map((level) => (
                   <option key={level} value={level}>
@@ -1337,7 +1336,7 @@ function ModelForm({
           <FormModalField label="Price source" requirement="required">
             <select
               value={priceSource}
-              onChange={(e) => setPriceSource(e.target.value as LlmPriceSource)}
+              onChange={(e) => setPriceSource(e.target.value as LlmPriceSource)} aria-label="Price source"
             >
               <option value="">None</option>
               <option value="openrouter">OpenRouter</option>
@@ -1348,7 +1347,7 @@ function ModelForm({
             <input
               value={priceSourceModel}
               onChange={(e) => setPriceSourceModel(e.target.value)}
-            />
+             aria-label="Price source model id"/>
           </FormModalField>
         </FormModalGrid>
         <FormModalField label="Active" requirement="optional">
@@ -1356,7 +1355,7 @@ function ModelForm({
             type="checkbox"
             checked={active}
             onChange={(e) => setActive(e.target.checked)}
-          />
+           aria-label="Active"/>
         </FormModalField>
         <FormModalField label="Notes" requirement="optional">
           <AutoGrowTextarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={3} />
@@ -1845,7 +1844,7 @@ function ProviderModelForm(props: ProviderModelFormProps) {
             required
             aria-invalid={clientErr === "API model id is required."}
             aria-describedby={errId}
-          />
+           aria-label="API model id"/>
         </FormModalField>
         {supportsGeneration || supportsReasoning ? (
           <FormModalGrid className="llm-provider-model-costs">
@@ -1861,7 +1860,7 @@ function ProviderModelForm(props: ProviderModelFormProps) {
                     "Max tokens override must be a positive whole number."
                   }
                   aria-describedby={errId}
-                />
+                 aria-label="Max tokens override"/>
               </FormModalField>
             ) : null}
             {supportsReasoning ? (
@@ -1879,7 +1878,7 @@ function ProviderModelForm(props: ProviderModelFormProps) {
                     if (next === "inherit" || isThinkingStrategy(next)) {
                       setThinkingStrategyOverride(next);
                     }
-                  }}
+                  }} aria-label="Thinking strategy"
                 >
                   <option value="inherit">Model default</option>
                   {THINKING_STRATEGY_OPTIONS.map((strategy) => (
@@ -1902,7 +1901,7 @@ function ProviderModelForm(props: ProviderModelFormProps) {
               onChange={(e) => setInputCost(e.target.value)}
               aria-invalid={clientErr === "Input cost must be zero or more."}
               aria-describedby={errId}
-            />
+             aria-label="Input cost per 1M"/>
           </FormModalField>
           <FormModalField label="Output cost per 1M" requirement="optional">
             <input
@@ -1913,7 +1912,7 @@ function ProviderModelForm(props: ProviderModelFormProps) {
               onChange={(e) => setOutputCost(e.target.value)}
               aria-invalid={clientErr === "Output cost must be zero or more."}
               aria-describedby={errId}
-            />
+             aria-label="Output cost per 1M"/>
           </FormModalField>
         </FormModalGrid>
         <FormModalGrid className="llm-provider-model-costs">
@@ -1926,7 +1925,7 @@ function ProviderModelForm(props: ProviderModelFormProps) {
               onChange={(e) => setFixedCost(e.target.value)}
               aria-invalid={clientErr === "Fixed cost must be zero or more."}
               aria-describedby={errId}
-            />
+             aria-label="Fixed cost per call"/>
           </FormModalField>
           {supportsAudioInput ? (
             <FormModalField label="Audio cost per hour" requirement="optional">
@@ -1938,7 +1937,7 @@ function ProviderModelForm(props: ProviderModelFormProps) {
                 onChange={(e) => setAudioCost(e.target.value)}
                 aria-invalid={clientErr === "Audio cost must be zero or more."}
                 aria-describedby={errId}
-              />
+               aria-label="Audio cost per hour"/>
             </FormModalField>
           ) : null}
         </FormModalGrid>
@@ -1949,7 +1948,7 @@ function ProviderModelForm(props: ProviderModelFormProps) {
               onChange={(e) => {
                 setSyncErr(null);
                 setPriceSourceOverride(e.target.value as LlmPriceSourceOverride);
-              }}
+              }} aria-label="Price source override"
             >
               <option value="">Use model default</option>
               <option value="openrouter">OpenRouter</option>
@@ -1978,7 +1977,7 @@ function ProviderModelForm(props: ProviderModelFormProps) {
                 }}
                 aria-invalid={syncErr ? true : undefined}
                 aria-describedby={priceSourceModelOverrideDescribedBy}
-              />
+               aria-label="Price source model override"/>
               {canSyncPricing ? (
                 <button
                   type="button"
@@ -2007,7 +2006,7 @@ function ProviderModelForm(props: ProviderModelFormProps) {
             type="checkbox"
             checked={enabled}
             onChange={(e) => setEnabled(e.target.checked)}
-          />
+           aria-label="Active"/>
         </FormModalField>
         {supportsGeneration ? (
           <fieldset className="llm-registry-form__fieldset">
@@ -2039,7 +2038,7 @@ function ProviderModelForm(props: ProviderModelFormProps) {
                     if (isImageInputFormat(e.target.value)) {
                       setImageInputFormat(e.target.value);
                     }
-                  }}
+                  }} aria-label="Image input format"
                 >
                   {IMAGE_INPUT_FORMAT_OPTIONS.map((option) => (
                     <option key={option.value} value={option.value}>
@@ -2059,7 +2058,7 @@ function ProviderModelForm(props: ProviderModelFormProps) {
                     clientErr === "Image max edge must be a positive whole number."
                   }
                   aria-describedby={errId}
-                />
+                 aria-label="Image max edge"/>
               </FormModalField>
             </FormModalGrid>
           </fieldset>
@@ -2074,7 +2073,7 @@ function ProviderModelForm(props: ProviderModelFormProps) {
                   if (isAudioInputTransform(e.target.value)) {
                     setAudioInputTransform(e.target.value);
                   }
-                }}
+                }} aria-label="Audio input transform"
               >
                 {AUDIO_INPUT_TRANSFORM_OPTIONS.map((option) => (
                   <option key={option.value} value={option.value}>

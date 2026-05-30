@@ -101,7 +101,7 @@ export default function EmployeeAssetPage() {
                   onClick={() => markDone.mutate(a.id)}
                   disabled={markDone.isPending}
                 >
-                  Done
+            Done with asset
                 </button>
               </div>
             );

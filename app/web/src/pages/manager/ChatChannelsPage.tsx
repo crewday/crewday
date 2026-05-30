@@ -148,7 +148,7 @@ export default function ChatChannelsPage() {
               <th>State</th>
               <th>Verified</th>
               <th>Last message</th>
-              <th></th>
+              <th aria-label="Actions"></th>
             </tr>
           </thead>
           <tbody>
@@ -201,7 +201,7 @@ export default function ChatChannelsPage() {
               placeholder="+33 6 00 00 00 00"
               value={linkAddress}
               onChange={(e) => setLinkAddress(e.target.value)}
-            />
+             aria-label="chat-channels-link-form__field E.164 phone number tel +33 6 00 00 00 00"/>
           </label>
           <button className="btn btn--moss" type="submit">Send code</button>
         </form>

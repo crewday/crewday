@@ -106,7 +106,7 @@ export default function WorkspaceSwitcher() {
               </li>
             );
           })}
-          <li className="ws-switcher__separator" role="separator" aria-hidden="true" />
+          <li className="ws-switcher__separator" aria-hidden="true" />
           <li role="none">
             <button
               type="button"

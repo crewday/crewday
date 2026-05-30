@@ -47,7 +47,7 @@ export default function EmployeeLeavesPage() {
               <th>Category</th>
               <th>Note</th>
               <th>Status</th>
-              <th></th>
+              <th aria-label="Actions"></th>
             </tr>
           </thead>
           <tbody>
