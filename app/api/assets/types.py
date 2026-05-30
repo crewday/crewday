@@ -323,9 +323,62 @@ def _list_type_response(
     )
 
 
+def _create_type_response(
+    body: AssetTypeCreateRequest,
+    ctx: WorkspaceContext,
+    session: Session,
+) -> AssetTypeResponse:
+    try:
+        view = create_type(session, ctx, body=body.to_domain())
+    except AssetTypeKeyConflict as exc:
+        raise _http_for_type_error(exc) from exc
+    return AssetTypeResponse.from_view(view)
+
+
+def _get_type_response(
+    type_id: str,
+    ctx: WorkspaceContext,
+    session: Session,
+) -> AssetTypeResponse:
+    try:
+        view = get_type(session, ctx, type_id=type_id)
+    except AssetTypeNotFound as exc:
+        raise _http_for_type_error(exc) from exc
+    return AssetTypeResponse.from_view(view)
+
+
+def _patch_type_response(
+    type_id: str,
+    body: AssetTypeUpdateRequest,
+    ctx: WorkspaceContext,
+    session: Session,
+) -> AssetTypeResponse:
+    try:
+        view = update_type(session, ctx, type_id=type_id, body=body.to_domain())
+    except (AssetTypeKeyConflict, AssetTypeNotFound, AssetTypeReadOnly) as exc:
+        raise _http_for_type_error(exc) from exc
+    return AssetTypeResponse.from_view(view)
+
+
+def _delete_type_response(
+    type_id: str,
+    ctx: WorkspaceContext,
+    session: Session,
+) -> Response:
+    try:
+        delete_type(session, ctx, type_id=type_id)
+    except (AssetTypeNotFound, AssetTypeReadOnly) as exc:
+        raise _http_for_type_error(exc) from exc
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
 def build_asset_types_alias_router() -> APIRouter:
-    api = APIRouter(tags=["assets", "asset_types"], responses=PROBLEM_JSON_RESPONSES)
+    api = APIRouter(
+        tags=["assets", "asset_types"],
+        responses=_ASSET_TYPE_ERROR_RESPONSES,
+    )
     view_gate = Depends(Permission("scope.view", scope_kind="workspace"))
+    manage_gate = Depends(Permission("assets.manage_types", scope_kind="workspace"))
 
     @api.get(
         "/asset_types",
@@ -357,6 +410,60 @@ def build_asset_types_alias_router() -> APIRouter:
             cursor=cursor,
             limit=limit,
         )
+
+    @api.post(
+        "/asset_types",
+        response_model=AssetTypeResponse,
+        status_code=status.HTTP_201_CREATED,
+        operation_id="asset_types.create_flat",
+        summary="Create a workspace-custom asset type",
+        dependencies=[manage_gate],
+    )
+    def create_flat(
+        body: AssetTypeCreateRequest,
+        ctx: _Ctx,
+        session: _Db,
+    ) -> AssetTypeResponse:
+        return _create_type_response(body, ctx, session)
+
+    @api.get(
+        "/asset_types/{type_id}",
+        response_model=AssetTypeResponse,
+        operation_id="asset_types.get_flat",
+        summary="Get one asset type",
+        dependencies=[view_gate],
+    )
+    def get_flat(
+        type_id: str,
+        ctx: _Ctx,
+        session: _Db,
+    ) -> AssetTypeResponse:
+        return _get_type_response(type_id, ctx, session)
+
+    @api.patch(
+        "/asset_types/{type_id}",
+        response_model=AssetTypeResponse,
+        operation_id="asset_types.update_flat",
+        summary="Update a workspace-custom asset type",
+        dependencies=[manage_gate],
+    )
+    def patch_flat(
+        type_id: str,
+        body: AssetTypeUpdateRequest,
+        ctx: _Ctx,
+        session: _Db,
+    ) -> AssetTypeResponse:
+        return _patch_type_response(type_id, body, ctx, session)
+
+    @api.delete(
+        "/asset_types/{type_id}",
+        status_code=status.HTTP_204_NO_CONTENT,
+        operation_id="asset_types.delete_flat",
+        summary="Delete or archive a workspace-custom asset type",
+        dependencies=[manage_gate],
+    )
+    def delete_flat(type_id: str, ctx: _Ctx, session: _Db) -> Response:
+        return _delete_type_response(type_id, ctx, session)
 
     return api
 
@@ -410,11 +517,7 @@ def build_asset_types_router() -> APIRouter:
         ctx: _Ctx,
         session: _Db,
     ) -> AssetTypeResponse:
-        try:
-            view = create_type(session, ctx, body=body.to_domain())
-        except AssetTypeKeyConflict as exc:
-            raise _http_for_type_error(exc) from exc
-        return AssetTypeResponse.from_view(view)
+        return _create_type_response(body, ctx, session)
 
     @api.get(
         "/{type_id}",
@@ -428,11 +531,7 @@ def build_asset_types_router() -> APIRouter:
         ctx: _Ctx,
         session: _Db,
     ) -> AssetTypeResponse:
-        try:
-            view = get_type(session, ctx, type_id=type_id)
-        except AssetTypeNotFound as exc:
-            raise _http_for_type_error(exc) from exc
-        return AssetTypeResponse.from_view(view)
+        return _get_type_response(type_id, ctx, session)
 
     @api.patch(
         "/{type_id}",
@@ -447,11 +546,7 @@ def build_asset_types_router() -> APIRouter:
         ctx: _Ctx,
         session: _Db,
     ) -> AssetTypeResponse:
-        try:
-            view = update_type(session, ctx, type_id=type_id, body=body.to_domain())
-        except (AssetTypeKeyConflict, AssetTypeNotFound, AssetTypeReadOnly) as exc:
-            raise _http_for_type_error(exc) from exc
-        return AssetTypeResponse.from_view(view)
+        return _patch_type_response(type_id, body, ctx, session)
 
     @api.delete(
         "/{type_id}",
@@ -461,10 +556,6 @@ def build_asset_types_router() -> APIRouter:
         dependencies=[manage_gate],
     )
     def delete_(type_id: str, ctx: _Ctx, session: _Db) -> Response:
-        try:
-            delete_type(session, ctx, type_id=type_id)
-        except (AssetTypeNotFound, AssetTypeReadOnly) as exc:
-            raise _http_for_type_error(exc) from exc
-        return Response(status_code=status.HTTP_204_NO_CONTENT)
+        return _delete_type_response(type_id, ctx, session)
 
     return api

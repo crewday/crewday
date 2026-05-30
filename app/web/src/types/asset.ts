@@ -10,19 +10,29 @@ export type AssetStatus = "active" | "in_repair" | "decommissioned" | "disposed"
 export type AssetCategory = "climate" | "appliance" | "plumbing" | "pool" | "heating" | "outdoor" | "safety" | "security" | "vehicle" | "other";
 export type DocumentKind = "manual" | "warranty" | "invoice" | "receipt" | "photo" | "certificate" | "contract" | "permit" | "insurance" | "other";
 
+export interface DefaultAssetAction {
+  kind: "service" | "repair" | "replace" | "inspect" | "read";
+  label: string;
+  interval_days: number;
+  warn_before_days: number;
+}
+
 export interface AssetType {
   id: string;
+  workspace_id: string | null;
   key: string;
   name: string;
   category: AssetCategory;
-  icon_name: string;
-  default_actions: {
-    kind: "service" | "repair" | "replace" | "inspect" | "read";
-    label: string;
-    interval_days: number;
-    warn_before_days: number;
-  }[];
+  icon_name: string | null;
+  description_md: string | null;
   default_lifespan_years: number | null;
+  default_actions: DefaultAssetAction[];
+  default_actions_json: DefaultAssetAction[];
+  created_at: string;
+  updated_at: string;
+  deleted_at: string | null;
+  archived_at: string | null;
+  is_system: boolean;
 }
 
 export interface Asset {

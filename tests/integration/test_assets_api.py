@@ -12,7 +12,7 @@ from pytest import MonkeyPatch
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.adapters.db.assets.models import AssetDocument, AssetType
+from app.adapters.db.assets.models import Asset, AssetDocument, AssetType
 from app.adapters.db.audit.models import AuditLog
 from app.adapters.db.places.models import Area, Property, PropertyWorkspace
 from app.api.assets import assets as assets_api
@@ -371,6 +371,190 @@ def test_flat_asset_types_alias_lists_types(db_session: Session) -> None:
 
     assert response.status_code == 200
     assert isinstance(response.json()["data"], list)
+
+
+def test_flat_asset_types_alias_crud_matches_nested_surface(
+    db_session: Session,
+) -> None:
+    ctx, _client, _property_id, _area_id = _seed_workspace(db_session)
+    client = _workspace_prefixed_client(db_session, ctx)
+
+    created = client.post(
+        f"/w/{ctx.workspace_slug}/api/v1/asset_types",
+        json={
+            "key": "deck_heater",
+            "name": "Deck heater",
+            "category": "heating",
+            "icon_name": "Flame",
+            "description_md": "Outdoor radiant heater.",
+            "default_actions": [
+                {
+                    "kind": "inspect",
+                    "label": "Inspect burner",
+                    "interval_days": 180,
+                    "warn_before_days": 14,
+                }
+            ],
+        },
+    )
+    assert created.status_code == 201
+    body = created.json()
+    assert body["key"] == "deck_heater"
+    assert body["workspace_id"] == ctx.workspace_id
+    assert body["icon_name"] == "Flame"
+    assert body["is_system"] is False
+
+    fetched = client.get(f"/w/{ctx.workspace_slug}/api/v1/asset_types/{body['id']}")
+    assert fetched.status_code == 200
+    assert fetched.json()["id"] == body["id"]
+
+    patched = client.patch(
+        f"/w/{ctx.workspace_slug}/api/v1/asset_types/{body['id']}",
+        json={"name": "Patio heater", "default_lifespan_years": 8},
+    )
+    assert patched.status_code == 200
+    assert patched.json()["name"] == "Patio heater"
+    assert patched.json()["default_lifespan_years"] == 8
+
+    deleted = client.delete(f"/w/{ctx.workspace_slug}/api/v1/asset_types/{body['id']}")
+    assert deleted.status_code == 204
+    assert db_session.get(AssetType, body["id"]) is None
+
+
+def test_flat_asset_types_alias_archives_referenced_rows(
+    db_session: Session,
+) -> None:
+    ctx, _client, property_id, area_id = _seed_workspace(db_session)
+    client = _workspace_prefixed_client(db_session, ctx)
+
+    created = client.post(
+        f"/w/{ctx.workspace_slug}/api/v1/asset_types",
+        json={
+            "key": "pool_robot",
+            "name": "Pool robot",
+            "category": "pool",
+            "default_actions": [],
+        },
+    )
+    assert created.status_code == 201
+    type_id = created.json()["id"]
+    db_session.add(
+        Asset(
+            id="flat_asset_type_referenced_asset",
+            workspace_id=ctx.workspace_id,
+            property_id=property_id,
+            area_id=area_id,
+            asset_type_id=type_id,
+            name="Pool robot 1",
+            condition="good",
+            status="active",
+            qr_token="POOLROBOT001"[:12],
+            created_at=_NOW,
+            updated_at=_NOW,
+        )
+    )
+    db_session.flush()
+
+    deleted = client.delete(f"/w/{ctx.workspace_slug}/api/v1/asset_types/{type_id}")
+    assert deleted.status_code == 204
+
+    hidden = client.get(f"/w/{ctx.workspace_slug}/api/v1/asset_types/{type_id}")
+    assert hidden.status_code == 404
+    _assert_problem_error(hidden, error="asset_type_not_found")
+
+    archived = client.get(
+        f"/w/{ctx.workspace_slug}/api/v1/asset_types",
+        params={"include_archived": True, "workspace_only": True},
+    )
+    assert archived.status_code == 200
+    archived_row = next(row for row in archived.json()["data"] if row["id"] == type_id)
+    assert archived_row["deleted_at"] is not None
+    assert archived_row["archived_at"] == archived_row["deleted_at"]
+
+
+def test_flat_asset_types_alias_write_permissions_and_read_only_errors(
+    db_session: Session,
+) -> None:
+    owner = bootstrap_user(
+        db_session,
+        email="flat-asset-types-denied@example.com",
+        display_name="Denied Flat Asset Type",
+    )
+    workspace = bootstrap_workspace(
+        db_session,
+        slug="flat-asset-types-denied",
+        name="Flat Asset Types Denied",
+        owner_user_id=owner.id,
+    )
+    denied_ctx = _ctx(workspace.id, "not_a_manager", slug=workspace.slug)
+    client = _workspace_prefixed_client(db_session, denied_ctx)
+
+    denied = client.post(
+        f"/w/{denied_ctx.workspace_slug}/api/v1/asset_types",
+        json={
+            "key": "shed",
+            "name": "Shed",
+            "category": "outdoor",
+            "default_actions": [],
+        },
+    )
+    assert denied.status_code == 403
+    assert (
+        _assert_problem_error(denied, error="permission_denied")["action_key"]
+        == "assets.manage_types"
+    )
+    denied_patch = client.patch(
+        f"/w/{denied_ctx.workspace_slug}/api/v1/asset_types/any_type",
+        json={"name": "Denied"},
+    )
+    assert denied_patch.status_code == 403
+    assert (
+        _assert_problem_error(denied_patch, error="permission_denied")["action_key"]
+        == "assets.manage_types"
+    )
+
+    denied_delete = client.delete(
+        f"/w/{denied_ctx.workspace_slug}/api/v1/asset_types/any_type"
+    )
+    assert denied_delete.status_code == 403
+    assert (
+        _assert_problem_error(denied_delete, error="permission_denied")["action_key"]
+        == "assets.manage_types"
+    )
+
+    system_type = AssetType(
+        id="flat_asset_type_system_read_only",
+        workspace_id=None,
+        key="system_flat_type",
+        name="System flat type",
+        category="other",
+        icon_name=None,
+        description_md=None,
+        default_lifespan_years=None,
+        default_actions_json=[],
+        created_at=_NOW,
+        updated_at=_NOW,
+        deleted_at=None,
+    )
+    db_session.add(system_type)
+    db_session.flush()
+    owner_client = _workspace_prefixed_client(
+        db_session,
+        _ctx(workspace.id, owner.id, slug=workspace.slug),
+    )
+
+    rejected = owner_client.patch(
+        f"/w/{workspace.slug}/api/v1/asset_types/{system_type.id}",
+        json={"name": "Customised system type"},
+    )
+    assert rejected.status_code == 403
+    _assert_problem_error(rejected, error="asset_type_read_only")
+
+    delete_rejected = owner_client.delete(
+        f"/w/{workspace.slug}/api/v1/asset_types/{system_type.id}"
+    )
+    assert delete_rejected.status_code == 403
+    _assert_problem_error(delete_rejected, error="asset_type_read_only")
 
 
 def test_flat_assets_alias_lists_assets(db_session: Session) -> None:

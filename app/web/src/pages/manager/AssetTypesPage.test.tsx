@@ -14,10 +14,12 @@ import { jsonResponse } from "@/test/helpers";
 const ASSET_TYPES: AssetType[] = [
   {
     id: "type_lock",
+    workspace_id: "workspace_1",
     key: "lock",
     name: "Smart lock",
     category: "security",
     icon_name: "lock",
+    description_md: null,
     default_actions: [
       {
         kind: "inspect",
@@ -32,16 +34,43 @@ const ASSET_TYPES: AssetType[] = [
         warn_before_days: 7,
       },
     ],
+    default_actions_json: [
+      {
+        kind: "inspect",
+        label: "Battery check",
+        interval_days: 30,
+        warn_before_days: 7,
+      },
+      {
+        kind: "inspect",
+        label: "Battery check",
+        interval_days: 30,
+        warn_before_days: 7,
+      },
+    ],
     default_lifespan_years: 5,
+    created_at: "2026-04-29T12:00:00Z",
+    updated_at: "2026-04-29T12:00:00Z",
+    deleted_at: null,
+    archived_at: null,
+    is_system: false,
   },
   {
     id: "type_pump",
+    workspace_id: "workspace_1",
     key: "pump",
     name: "Pool pump",
     category: "pool",
     icon_name: "waves",
+    description_md: null,
     default_actions: [],
+    default_actions_json: [],
     default_lifespan_years: null,
+    created_at: "2026-04-29T12:00:00Z",
+    updated_at: "2026-04-29T12:00:00Z",
+    deleted_at: null,
+    archived_at: null,
+    is_system: false,
   },
 ];
 
