@@ -1,6 +1,6 @@
 import { type FormEvent } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Link, useLocation, useSearchParams } from "react-router-dom";
+import { Link, useLocation, useParams, useSearchParams } from "react-router-dom";
 import { PackageSearch, SearchX } from "lucide-react";
 import { ApiError, fetchJson, resolveApiPath } from "@/lib/api";
 import { formatDecimal } from "@/lib/numberFormat";
@@ -25,6 +25,7 @@ import type {
   DocumentKind,
   Property,
 } from "@/types/api";
+import PropertyTabs from "./property/PropertyTabs";
 
 function unwrapList<T>(payload: T[] | ListEnvelope<T>): T[] {
   return Array.isArray(payload) ? payload : payload.data;
@@ -998,9 +999,11 @@ function assetFieldLabel(loc: readonly (string | number)[] | undefined): string 
 export default function AssetsPage() {
   // code-health: ignore[ccn nloc] Assets page is query plus filterable card/table composition with shared controls.
   const { pathname } = useLocation();
+  const { pid } = useParams<{ pid?: string }>();
+  const routePropertyId = pid ?? null;
   const [searchParams, setSearchParams] = useSearchParams();
   const activeCategory = searchParams.get("category") ?? "";
-  const activeProperty = searchParams.get("property_id") ?? "";
+  const activeProperty = routePropertyId ?? searchParams.get("property_id") ?? "";
 
   const assetsQ = useQuery({
     queryKey: qk.assets(),
@@ -1014,6 +1017,9 @@ export default function AssetsPage() {
     queryKey: qk.properties(),
     queryFn: () => fetchList<Property>("/api/v1/properties"),
   });
+  const scopedProperties = routePropertyId && propsQ.data
+    ? propsQ.data.filter((property) => property.id === routePropertyId)
+    : propsQ.data;
 
   const sub = "Tracked equipment and appliances across all properties.";
   const actions = (
@@ -1021,7 +1027,7 @@ export default function AssetsPage() {
       <QrSheetButton category={activeCategory} propertyId={activeProperty} />
       <NewAssetButton
         assetTypes={typesQ.data}
-        properties={propsQ.data}
+        properties={scopedProperties}
         activePropertyId={activeProperty}
       />
     </>
@@ -1036,6 +1042,7 @@ export default function AssetsPage() {
 
   const typesById = new Map(typesQ.data.map((t) => [t.id, t]));
   const propsById = new Map(propsQ.data.map((p) => [p.id, p]));
+  const pageProperties = scopedProperties ?? [];
 
   const categories = Array.from(new Set(typesQ.data.map((t) => t.category)));
 
@@ -1049,7 +1056,7 @@ export default function AssetsPage() {
   });
 
   const categoryOptions = categories.map((cat) => ({ value: cat, label: cat }));
-  const propertyOptions = propsQ.data.map((p) => ({
+  const propertyOptions = pageProperties.map((p) => ({
     value: p.id,
     label: p.name,
     tone: p.color,
@@ -1059,6 +1066,13 @@ export default function AssetsPage() {
 
   return (
     <DeskPage title="Assets" sub={sub} actions={actions}>
+      {routePropertyId ? (
+        <PropertyTabs
+          pathname={pathname}
+          propertyId={routePropertyId}
+          activeRelatedPage="assets"
+        />
+      ) : null}
       <section className="panel">
         <FilterChipGroup
           value={activeCategory}
@@ -1067,14 +1081,16 @@ export default function AssetsPage() {
           }
           options={categoryOptions}
         />
-        <FilterChipGroup
-          value={activeProperty}
-          onChange={(value) =>
-            setSearchParams(setSearchParam(searchParams, "property_id", value))
-          }
-          allLabel="All properties"
-          options={propertyOptions}
-        />
+        {routePropertyId ? null : (
+          <FilterChipGroup
+            value={activeProperty}
+            onChange={(value) =>
+              setSearchParams(setSearchParam(searchParams, "property_id", value))
+            }
+            allLabel="All properties"
+            options={propertyOptions}
+          />
+        )}
 
         {noAssets ? (
           <EmptyState

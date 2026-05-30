@@ -475,6 +475,7 @@ function Harness({ initial = "/w/acme/property/prop_1" }: { initial?: string }) 
         <WorkspaceProvider>
           <Routes>
             <Route path="/w/:slug/property/:pid" element={<PropertyDetailPage />} />
+            <Route path="/w/:slug/property/:pid/assets" element={<RelatedRoute label="Assets route reached" activeRelatedPage="assets" />} />
             <Route path="/w/:slug/property/:pid/stays" element={<RelatedRoute label="Stays route reached" activeRelatedPage="stays" />} />
             <Route path="/w/:slug/property/:pid/instructions" element={<RelatedRoute label="Instructions route reached" activeRelatedPage="instructions" />} />
             <Route path="/w/:slug/property/:pid/closures" element={<RelatedRoute label="Closures route reached" activeRelatedPage="closures" />} />
@@ -877,10 +878,7 @@ describe("<PropertyDetailPage>", () => {
 
       const tablist = screen.getByRole("tablist", { name: "Property sections" });
       expect(tablist).toHaveClass("page-tabs");
-      fireEvent.click(screen.getByRole("tab", { name: "Assets" }));
-      expect(window.location.hash).toBe("#assets");
-      expect(await screen.findByText("No assets tracked for this property.")).toBeInTheDocument();
-      expect(document.getElementById("property-assets-panel")).toHaveAttribute("role", "tabpanel");
+      expect(within(tablist).queryByRole("tab", { name: "Assets" })).not.toBeInTheDocument();
       fireEvent.click(screen.getByRole("tab", { name: "Sharing & client" }));
       expect(window.location.hash).toBe("#sharing");
       expect(await screen.findByText("Billing client")).toBeInTheDocument();
@@ -888,11 +886,24 @@ describe("<PropertyDetailPage>", () => {
       expect(window.location.hash).toBe("#settings");
       expect(await screen.findByText("Settings overrides")).toBeInTheDocument();
 
+      expect(screen.getByRole("link", { name: "Assets" })).toHaveAttribute("href", "/w/acme/property/prop_1/assets");
       expect(screen.getByRole("link", { name: "Stays" })).toHaveAttribute("href", "/w/acme/property/prop_1/stays");
       expect(screen.getByRole("link", { name: "Instructions" })).toHaveAttribute("href", "/w/acme/property/prop_1/instructions");
       expect(screen.getByRole("link", { name: "Closures" })).toHaveAttribute("href", "/w/acme/property/prop_1/closures");
       expect(screen.getByRole("link", { name: "Inventory" })).toHaveAttribute("href", "/w/acme/property/prop_1/inventory");
 
+      fireEvent.click(screen.getByRole("link", { name: "Assets" }));
+      await waitFor(() => {
+        expect(screen.getByText("Assets route reached")).toBeInTheDocument();
+      });
+      const assetsRelatedPages = screen.getByRole("navigation", { name: "Related property pages" });
+      expect(within(assetsRelatedPages).getByRole("link", { name: "Assets" })).toHaveAttribute("aria-current", "page");
+      expect(within(assetsRelatedPages).getByRole("link", { name: "Assets" })).toHaveClass("page-tabs__tab--active");
+
+      cleanup();
+      window.history.replaceState(null, "", "/");
+      render(<Harness />);
+      expect(await screen.findByText("Tasks for this property")).toBeInTheDocument();
       fireEvent.click(screen.getByRole("link", { name: "Stays" }));
       await waitFor(() => {
         expect(screen.getByText("Stays route reached")).toBeInTheDocument();
@@ -938,15 +949,16 @@ describe("<PropertyDetailPage>", () => {
     }
   });
 
-  it("loads hash-backed property tabs directly and follows browser hash history", async () => {
+  it("loads hash-backed property tabs directly and treats legacy assets hash as overview", async () => {
     const fake = installFetch();
     try {
       window.history.replaceState(null, "", "/w/acme/property/prop_1#assets");
       render(<Harness initial="/w/acme/property/prop_1#assets" />);
 
       expect(await screen.findByRole("heading", { name: "Villa Rosa" })).toBeInTheDocument();
-      expect(screen.getByRole("tab", { name: "Assets" })).toHaveAttribute("aria-selected", "true");
-      expect(await screen.findByText("No assets tracked for this property.")).toBeInTheDocument();
+      expect(screen.getByRole("tab", { name: "Overview" })).toHaveAttribute("aria-selected", "true");
+      expect(screen.queryByRole("tab", { name: "Assets" })).not.toBeInTheDocument();
+      expect(screen.getByText("Tasks for this property")).toBeInTheDocument();
 
       fireEvent.click(screen.getByRole("tab", { name: "Sharing & client" }));
       expect(window.location.hash).toBe("#sharing");
@@ -962,7 +974,7 @@ describe("<PropertyDetailPage>", () => {
 
       window.history.back();
       await waitFor(() => expect(window.location.hash).toBe("#assets"));
-      expect(screen.getByRole("tab", { name: "Assets" })).toHaveAttribute("aria-selected", "true");
+      expect(screen.getByRole("tab", { name: "Overview" })).toHaveAttribute("aria-selected", "true");
 
       window.history.forward();
       await waitFor(() => expect(window.location.hash).toBe("#sharing"));

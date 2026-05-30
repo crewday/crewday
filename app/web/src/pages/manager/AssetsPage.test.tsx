@@ -1,7 +1,7 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { MemoryRouter } from "react-router-dom";
+import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { WorkspaceProvider } from "@/context/WorkspaceContext";
 import { __resetApiProvidersForTests } from "@/lib/api";
 import { __resetQueryKeyGetterForTests } from "@/lib/queryKeys";
@@ -314,7 +314,10 @@ function Harness({ initial = "/w/acme/assets" }: { initial?: string }) {
     <QueryClientProvider client={qc}>
       <WorkspaceProvider>
         <MemoryRouter initialEntries={[initial]}>
-          <AssetsPage />
+          <Routes>
+            <Route path="/w/:slug/assets" element={<AssetsPage />} />
+            <Route path="/w/:slug/property/:pid/assets" element={<AssetsPage />} />
+          </Routes>
         </MemoryRouter>
       </WorkspaceProvider>
     </QueryClientProvider>
@@ -347,6 +350,9 @@ describe("<AssetsPage>", () => {
   it("gates the assets routes before asset content can render", () => {
     expect(appSource).toMatch(
       /<Route element={<RequirePermission actionKey="scope\.view" \/>}>\s*(?:(?!<\/Route>)[\s\S])*?<Route path="assets" element={<AssetsPage \/>} \/>/,
+    );
+    expect(appSource).toMatch(
+      /<Route element={<RequirePermission actionKey="properties\.read" \/>}>[\s\S]*?<Route element={<RequirePermission actionKey="scope\.view" \/>}>\s*<Route path="property\/:pid\/assets" element={<AssetsPage \/>} \/>/,
     );
   });
 
@@ -465,6 +471,38 @@ describe("<AssetsPage>", () => {
       const table = screen.getByRole("table");
       await within(table).findByRole("link", { name: /Pool pump/ });
       expect(within(table).queryByRole("link", { name: /Front door lock/ })).not.toBeInTheDocument();
+    } finally {
+      restore();
+    }
+  });
+
+  it("renders the property-scoped assets route with related tabs and fixed property scope", async () => {
+    const { restore } = installFetch();
+    try {
+      render(<Harness initial="/w/acme/property/prop_1/assets" />);
+
+      expect(await screen.findByText("Front door lock")).toBeInTheDocument();
+      expect(screen.queryByRole("link", { name: /Pool pump/ })).not.toBeInTheDocument();
+
+      const relatedPages = screen.getByRole("navigation", { name: "Related property pages" });
+      expect(within(relatedPages).getByRole("link", { name: "Assets" })).toHaveAttribute(
+        "href",
+        "/w/acme/property/prop_1/assets",
+      );
+      expect(within(relatedPages).getByRole("link", { name: "Assets" })).toHaveAttribute(
+        "aria-current",
+        "page",
+      );
+      expect(within(relatedPages).getByRole("link", { name: "Inventory" })).toHaveAttribute(
+        "href",
+        "/w/acme/property/prop_1/inventory",
+      );
+      expect(screen.queryByText("All properties")).not.toBeInTheDocument();
+
+      fireEvent.click(screen.getByRole("button", { name: "+ New asset" }));
+      const dialog = screen.getByRole("dialog", { name: "New asset" });
+      expect(within(dialog).getByRole("combobox", { name: /^Property\b/ })).toHaveValue("Villa Rosa");
+      expect(within(dialog).queryByText("Casa Azul")).not.toBeInTheDocument();
     } finally {
       restore();
     }

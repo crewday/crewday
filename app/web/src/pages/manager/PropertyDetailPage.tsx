@@ -15,7 +15,6 @@ import type {
   WorkspaceSettings,
 } from "@/types/api";
 import AreasPanel from "./property/AreasPanel";
-import AssetsPanel from "./property/AssetsPanel";
 import OverviewPanel from "./property/OverviewPanel";
 import PropertyEditDialog from "./property/PropertyEditDialog";
 import {
@@ -172,12 +171,6 @@ export default function PropertyDetailPage() {
           ) : (
             <p>Failed to load settings.</p>
           )}
-        </div>
-      )}
-
-      {activeTab === "assets" && (
-        <div id={panelIdFor("assets")} role="tabpanel">
-          <AssetsPanel detail={detail} />
         </div>
       )}
 

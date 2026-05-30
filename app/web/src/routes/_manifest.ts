@@ -414,6 +414,12 @@ export const FRONTEND_ROUTES = [
     params: ["pid"],
   }),
   route({
+    name: "property.assets",
+    scope: "workspace",
+    template: "/property/:pid/assets",
+    params: ["pid"],
+  }),
+  route({
     name: "property.inventory",
     scope: "workspace",
     template: "/property/:pid/inventory",

@@ -49,6 +49,14 @@ describe("frontend route manifest", () => {
       query: [],
       agentLinkable: true,
     });
+    expect(route("property.assets")).toEqual({
+      name: "property.assets",
+      scope: "workspace",
+      template: "/property/:pid/assets",
+      params: [{ name: "pid", required: true, source: "path" }],
+      query: [],
+      agentLinkable: true,
+    });
     expect(route("property.inventory")).toEqual({
       name: "property.inventory",
       scope: "workspace",

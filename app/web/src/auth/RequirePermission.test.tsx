@@ -65,7 +65,7 @@ function expectNestedOutletPermissionPage(
   expect(appSource).toMatch(
     new RegExp(
       `<Route element={<RequirePermission actionKey="${escaped(outerActionKey)}" />}>[\\s\\S]*?` +
-        `<Route element={<RequirePermission actionKey="${escaped(innerActionKey)}" />}>\\s*` +
+        `<Route element={<RequirePermission actionKey="${escaped(innerActionKey)}" />}>[\\s\\S]*?` +
         `<Route path="${escaped(path)}" element={<${pageName} />} />`,
     ),
   );
@@ -185,6 +185,7 @@ describe("<RequirePermission>", () => {
   it("gates property related tab routes before related content can render", () => {
     expectNestedOutletPermissionPage("property/:pid/stays", "properties.read", "stays.read", "StaysPage");
     expectNestedOutletPermissionPage("property/:pid/instructions", "properties.read", "instructions.edit", "InstructionsPage");
+    expectNestedOutletPermissionPage("property/:pid/assets", "properties.read", "scope.view", "AssetsPage");
     expectNestedOutletPermissionPage("property/:pid/inventory", "properties.read", "scope.view", "InventoryPage");
   });
 

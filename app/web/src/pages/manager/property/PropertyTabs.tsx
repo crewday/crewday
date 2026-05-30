@@ -24,6 +24,11 @@ export default function PropertyTabs({
 }: PropertyTabsProps) {
   const relatedTabs = [
     {
+      key: "assets",
+      label: "Assets",
+      to: workspaceRouteForPathname(pathname, "/property/" + propertyId + "/assets"),
+    },
+    {
       key: "stays",
       label: "Stays",
       to: workspaceRouteForPathname(pathname, "/property/" + propertyId + "/stays"),
