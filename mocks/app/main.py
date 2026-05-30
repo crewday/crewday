@@ -1,4 +1,4 @@
-"""crewday — UI preview mocks (JSON API + SPA fallback).
+"""crewday — legacy mock JSON API.
 
 Presentational only. Mutations are in-memory. A `role` cookie picks
 employee vs manager; `/switch/<role>` toggles. `theme` cookie picks
@@ -7,18 +7,15 @@ light / dark / system; `/theme/set/<value>` stores it and
 
 This module exposes:
 
-- `/api/v1/*` — read/write JSON endpoints used by the Vite/React SPA
-  under `mocks/web/`. Bodies are JSON, responses are JSON-serialised
-  dataclasses. No Jinja templates anywhere.
+- `/api/v1/*` — read/write JSON endpoints. Bodies are JSON, responses
+  are JSON-serialised dataclasses. No Jinja templates anywhere.
 - `/events` — Server-Sent Events stream emitting deterministic mock
   events so the SPA can prove its SSE + invalidation wiring.
 - `/switch/<role>`, `/theme/toggle`, `/theme/set/<value>`,
   `/agent/sidebar/<state>`, `/nav/sidebar/<state>` —
   cookie-setting endpoints preserved for atomicity (the server is
   authoritative for the preference cookie).
-- SPA catch-all — any other GET falls through to
-  `mocks/web/dist/index.html`, so deep-linking (/today, /dashboard, …)
-  works in production.
+- SPA catch-all — retired with the legacy mock frontend.
 - `/healthz`, `/readyz`, `/metrics` — unchanged.
 """
 
@@ -4918,10 +4915,7 @@ def spa_fallback(full_path: str) -> Response:
     index = WEB_DIST / "index.html"
     if index.is_file():
         return FileResponse(index)
-    # Until the SPA has been built (e.g. in dev without a build), return
-    # a stub so curl/healthcheck can distinguish.
     return PlainTextResponse(
-        "SPA bundle not built. Run `npm --prefix mocks/web run build` or "
-        "use the `dev` compose profile with Vite on :5173.",
+        "Legacy mock SPA retired. Use the app/web frontend and /styleguide routes.",
         status_code=503,
     )

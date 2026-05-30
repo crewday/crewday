@@ -6,13 +6,13 @@ on:
     paths:
       - "site/**"
       - "docs/specs-site/**"
-      - "mocks/web/src/styles/tokens.css"
+      - "app/web/src/styles/tokens.css"
       - ".github/workflows/site-ci.yml"
   pull_request:
     paths:
       - "site/**"
       - "docs/specs-site/**"
-      - "mocks/web/src/styles/tokens.css"
+      - "app/web/src/styles/tokens.css"
       - ".github/workflows/site-ci.yml"
 
 concurrency:

@@ -731,7 +731,7 @@ class TestSseEvents:
     The §05 Permissions page in a sibling tab refreshes its group
     catalogue (owners-derived membership) + resolver verdict via the
     SSE events emitted here; the SPA dispatcher round-trip is covered
-    by ``mocks/web/src/lib/sse.ts`` + ``app/web/src/lib/sse.ts``.
+    by ``app/web/src/lib/sse.ts``.
     """
 
     def test_create_and_revoke_publish_grant_events(
@@ -783,9 +783,8 @@ class TestSseEvents:
         Without the publish a sibling tab on /permissions would keep
         a stale resolver verdict after a manager grant was narrowed
         to a single property. The SPA dispatcher reuses the ``created``
-        handler — see the ``RoleGrantCreated`` docstring + the
-        ``role_grant.created`` cases in ``mocks/web/src/lib/sse.ts``
-        and ``app/web/src/lib/sse.ts``.
+        handler — see the ``RoleGrantCreated`` docstring and the
+        ``role_grant.created`` cases in ``app/web/src/lib/sse.ts``.
         """
         ctx, factory, ws_id = owner_ctx
         prop_id = _seed_property_in_workspace(factory, workspace_id=ws_id)

@@ -14,7 +14,7 @@
 //      role-appropriate landing page instead.
 //
 // What this does NOT cover (and why):
-//   - The Playwright pixel-diff against `.playwright-mcp/mocks-public/
+//   - The Playwright pixel-diff against `.playwright-mcp/public-site/
 //     LoginPage.tsx.png` — that's cd-4z54's e2e acceptance, run by the
 //     Director. A component-level snapshot here would duplicate the
 //     check in jsdom where CSS is only minimally applied.

@@ -17,7 +17,7 @@ site/
 
 `site/web` has its own `package.json` and lockfile. Its Docker build
 context is the repo root only so the build-time design drift check can
-read `mocks/web/src/styles/tokens.css`; the runtime image receives only
+read `app/web/src/styles/tokens.css`; the runtime image receives only
 the built site files. `site/api` has its own `pyproject.toml`. Neither
 runtime package imports from or shares build configuration with `app/`.
 

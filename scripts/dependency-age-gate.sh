@@ -40,7 +40,6 @@ python_projects=(
 
 npm_projects=(
   "$repo_root/app/web"
-  "$repo_root/mocks/web"
   "$repo_root/site/web"
 )
 

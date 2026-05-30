@@ -729,16 +729,14 @@ Gateway-specific hardening:
 
 ## Implementation Gaps
 
-- A legacy mock stub `ChatChannelsPage` is present at
-  `mocks/web/src/pages/manager/ChatChannelsPage.tsx`; the
-  per-user `/me` Chat-channels section is an inline card on
-  `MePage.tsx`. Treat it as retirement context, not as the UI
-  contract. The link-ceremony modal is a non-interactive placeholder.
+- A retired legacy mock stub previously covered `ChatChannelsPage`; the
+  per-user `/me` Chat-channels section is an inline card on `MePage.tsx`.
+  Treat the old stub as historical context, not as the UI contract. The
+  link-ceremony modal is a non-interactive placeholder.
 - A legacy deployment-default provider stub lives on `/admin/chat-gateway`
-  (`mocks/web/src/pages/admin/ChatGatewayPage.tsx`). The workspace
-  `/settings → Chat gateway` panel points at it and offers the
-  (stubbed) "Use a dedicated Meta account for this workspace"
-  action.
+  in the retired mock SPA. The workspace `/settings → Chat gateway`
+  panel points at it and offers the (stubbed) "Use a dedicated Meta
+  account for this workspace" action.
 - The legacy mock `chat_channel_binding` seed carries one active
   WhatsApp binding for the default worker and one pending
   binding for the default owner-manager.

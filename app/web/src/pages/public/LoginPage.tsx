@@ -7,16 +7,13 @@
 // recover via `/recover` (§03 "Self-service lost-device recovery");
 // magic links never issue a session on their own.
 //
-// Visual contract mirrors `mocks/web/src/pages/public/LoginPage.tsx`
-// verbatim — every semantic class (`login__card`, `login__brand`,
-// `login__primary`, …) is preserved so the mock's CSS applies without
-// a second stylesheet. The only addition is the `login__notice`
-// element (`.login__notice[--danger]` in globals.css): a small inline
-// slot that surfaces passkey-ceremony errors. Absent from the mock
-// (which has no interactive state) but required by §14 "Error
-// handling". The button copy is wrapped in a `<span>` so pending
-// copy can swap in without disturbing the icon slot — the span has
-// no styling of its own, it's just a DOM seam.
+// Every semantic class (`login__card`, `login__brand`,
+// `login__primary`, …) is part of the production CSS contract. The
+// `login__notice` element (`.login__notice[--danger]` in globals.css)
+// surfaces passkey-ceremony errors required by §14 "Error handling".
+// The button copy is wrapped in a `<span>` so pending copy can swap in
+// without disturbing the icon slot — the span has no styling of its own,
+// it's just a DOM seam.
 //
 // Auth plumbing lands in `@/auth` (cd-kc7u): `useAuth()` exposes the
 // store + `loginWithPasskey()`, which itself calls

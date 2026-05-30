@@ -5,9 +5,7 @@
 # Used by the ``app-api`` service in ``docker-compose.dev.yml`` to
 # run ``app.main:create_app --factory`` against the repo-root ``app/``
 # package (bind-mounted at runtime) so ``https://dev-app.crew.day`` serves
-# the real product end-to-end. The mocks backend keeps living in its
-# own ``mocks/Dockerfile`` image (now the ``mocks-api`` service) for
-# visual comparison at ``/mocks/``.
+# the real product end-to-end.
 #
 # Source layout inside the container:
 #   /app/app            (bind-mount of repo ../app    — read-only)

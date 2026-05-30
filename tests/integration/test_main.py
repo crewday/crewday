@@ -156,7 +156,7 @@ class TestSpaProdMountAgainstRealDist:
     ) -> None:
         """Dev deployments can keep anonymous bare-root visitors on-host."""
         settings = pinned_settings.model_copy(
-            update={"public_site_url": "/mocks/landing/"}
+            update={"public_site_url": "/public/landing/"}
         )
         app = create_app(settings=settings)
         client = TestClient(app, raise_server_exceptions=False)
@@ -171,7 +171,7 @@ class TestSpaProdMountAgainstRealDist:
         nonce = match.group("nonce")
         assert (
             f'<script id="crewday-bootstrap" nonce="{nonce}">'
-            f'window.__CREWDAY__={{"cspNonce":"{nonce}","publicSiteUrl":"/mocks/landing/"}};</script>'
+            f'window.__CREWDAY__={{"cspNonce":"{nonce}","publicSiteUrl":"/public/landing/"}};</script>'
             in resp.text
         )
         assert "https://crew.day" not in resp.text

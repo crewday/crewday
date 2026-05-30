@@ -45,9 +45,8 @@ close the loop in this session.
 Triggered by `/specs` in AGENTS.md. Good fits:
 
 - Adding or changing a rule in `docs/specs/*.md`.
-- Introducing a new entity, role, or flow and wiring it into the
-  React mock under `mocks/web/src/` plus the mock API in
-  `mocks/app/`.
+- Introducing a new entity, role, or flow and wiring it into `app/web/`
+  plus the relevant FastAPI routes or legacy mock API fixtures.
 - Reconciling two specs that disagree (e.g., §12 REST says X, §14 Web
   says Y).
 - Pinning down an edge case the current spec leaves ambiguous.
@@ -188,7 +187,7 @@ Example shape:
   spec.
 - **API**: update `mocks/app/main.py` routes / response shapes so
   the mock server returns what the spec now promises.
-- **UI**: update the React code under `mocks/web/src/`.
+- **UI**: update the React code under `app/web/src/`.
   - Pages under `pages/`, shared parts under `components/`,
     types under `types/`, styling under `styles/`.
   - Follow the project's **semantic CSS** rule — class names like
@@ -197,10 +196,8 @@ Example shape:
   - Cross-client coherence goes through the SSE → TanStack Query
     invalidation path (§14). If you add a new resource, invalidate
     its query key on the matching `/events` message.
-- **Build check**: after a non-trivial change, from `mocks/web/`
-  run the type-check + build that the package script exposes
-  (check `package.json` scripts — typically `npm run build` or
-  `npm run typecheck`). A red build is a blocker.
+- **Build check**: after a non-trivial change, run the relevant
+  `app/web` build or test command. A red build is a blocker.
 
 ### Keeping specs and mocks in lockstep
 
@@ -278,9 +275,9 @@ contractor, or only the owner-manager?"
   /work-orders/{id}/reassign` handler scoped to owner-manager.
 - Edit `mocks/app/mock_data.py` — seed one reassigned order so the
   UI has something to render.
-- Edit `mocks/web/src/pages/WorkOrders/` — add the reassign action
+- Edit `app/web/src/pages/WorkOrders/` — add the reassign action
   (owner-manager only), the status pill, the audit-trail row.
-- Run the mock build; fix any type errors.
+- Run the app/web build; fix any type errors.
 - Summarise in a short paragraph; offer the next loop.
 
 ## Tone and output

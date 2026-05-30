@@ -20,7 +20,7 @@ i18n-extract:
 
 i18n-check:
 	uv run python scripts/i18n_extract.py
-	git diff --exit-code -- app/i18n/locales app/web/src/i18n/bundles mocks/web/src/i18n/bundles
+	git diff --exit-code -- app/i18n/locales app/web/src/i18n/bundles
 
 # Regenerate the committed ``docs/api/openapi.json`` from the live
 # FastAPI app. ``openapi-check`` is the CI gate: fails when the

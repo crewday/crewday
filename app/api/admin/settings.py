@@ -100,8 +100,7 @@ _ERROR_VALUE_TYPE: Final[str] = "invalid_setting_value"
 class _SettingDef:
     """Static description of one writable deployment_setting key.
 
-    Mirrors the spec's :interface:`AdminDeploymentSetting` shape
-    (``mocks/web/src/types/api.ts``):
+    Mirrors the spec's :interface:`AdminDeploymentSetting` shape:
 
     * ``key`` — the row PK; matches the corresponding field on
       :class:`DeploymentSettings`.
@@ -400,13 +399,11 @@ _SETTING_KEY_ENUM: Final[list[str]] = [entry.key for entry in _REGISTRY]
 class DeploymentSettingResponse(BaseModel):
     """One row of ``GET /admin/api/v1/settings``.
 
-    Mirrors :interface:`AdminDeploymentSetting` in
-    ``mocks/web/src/types/api.ts``: the resolved value, its kind,
-    operator-facing description, root-only flag, and the
-    last-write metadata. ``updated_at`` / ``updated_by`` are
-    ``""`` for keys that never had a row (still on factory
-    default) so the SPA's table cell can render without a
-    nullish-coalesce.
+    Mirrors :interface:`AdminDeploymentSetting`: the resolved value,
+    its kind, operator-facing description, root-only flag, and the
+    last-write metadata. ``updated_at`` / ``updated_by`` are ``""`` for
+    keys that never had a row (still on factory default) so the SPA's
+    table cell can render without a nullish-coalesce.
     """
 
     key: str

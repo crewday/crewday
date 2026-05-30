@@ -345,11 +345,10 @@ jobs:
         # external network (the dev box's shared Traefik lives there).
         # GHA runners don't have it, so compose would refuse to bring
         # the stack up with ``network … declared as external, but could
-        # not be found``. The web-dev / mocks-web-dev containers join it
-        # for hostname routing; in CI we just need the network to
-        # exist — Traefik itself isn't running. ``|| true`` lets the
-        # step idempotent on re-runs (``network create`` errors if the
-        # name already exists).
+        # not be found``. app-api joins it for hostname routing; in CI
+        # we just need the network to exist — Traefik itself isn't
+        # running. ``|| true`` lets the step idempotent on re-runs
+        # (``network create`` errors if the name already exists).
         run: docker network create traefik-proxy || true
       - name: Bring up dev stack
         run: docker compose -f docker-compose.dev.yml -f mocks/docker-compose.e2e.yml up -d --build
@@ -361,9 +360,9 @@ jobs:
         # slow phases:
         #   * Docker image build for app-api (pip install ~30 deps)
         #   * alembic upgrade head against a fresh SQLite file
-        #   * ``npm install`` inside both web-dev *and* mocks-web-dev
-        #     (no node_modules cache; ``--no-package-lock`` forces
-        #     a full resolve), then Vite startup
+        #   * ``npm install`` inside web-dev (no node_modules cache;
+        #     ``--no-package-lock`` forces a full resolve), then Vite
+        #     startup
         #   * proxy /healthz round-trip
         # 240s gives that path comfortable headroom — empirically the
         # cold path is ~2-3 min on ubuntu-latest. If the dev stack

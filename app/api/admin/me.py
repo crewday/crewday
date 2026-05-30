@@ -20,9 +20,8 @@ own existence to tenants").
 
 The response shapes match :interface:`AdminMe` and
 :interface:`AdminTeamMember` in ``app/web/src/types/admin.ts`` —
-those are the live SPA contract carried into ``mocks/web/`` and
-``app/web/`` simultaneously, so the wire shape stays one source of
-truth across the mock + production frontends.
+those are the live SPA contract, so the wire shape stays one source of
+truth across frontend and OpenAPI consumers.
 
 See ``docs/specs/12-rest-api.md`` §"Admin surface" and
 ``docs/specs/14-web-frontend.md`` §"Admin shell".

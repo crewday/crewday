@@ -8135,7 +8135,7 @@
         "type": "object"
       },
       "DeploymentSettingResponse": {
-        "description": "One row of ``GET /admin/api/v1/settings``.\n\nMirrors :interface:`AdminDeploymentSetting` in\n``mocks/web/src/types/api.ts``: the resolved value, its kind,\noperator-facing description, root-only flag, and the\nlast-write metadata. ``updated_at`` / ``updated_by`` are\n``\"\"`` for keys that never had a row (still on factory\ndefault) so the SPA's table cell can render without a\nnullish-coalesce.",
+        "description": "One row of ``GET /admin/api/v1/settings``.\n\nMirrors :interface:`AdminDeploymentSetting`: the resolved value,\nits kind, operator-facing description, root-only flag, and the\nlast-write metadata. ``updated_at`` / ``updated_by`` are ``\"\"`` for\nkeys that never had a row (still on factory default) so the SPA's\ntable cell can render without a nullish-coalesce.",
         "properties": {
           "description": {
             "title": "Description",
@@ -13628,7 +13628,7 @@
         "type": "object"
       },
       "LlmCallResponse": {
-        "description": "One row of the /admin/usage call feed.\n\n``model_id`` and ``provider_model_id`` are intentionally distinct\nfields and **not** redundant \u2014 do not collapse them:\n\n* ``model_id`` is the **wire-name string** that flowed across the\n  network on this call (sourced from ``llm_usage.provider_model_id``,\n  which stores the free-form provider wire name \u2014 see\n  :class:`~app.adapters.db.llm.models.LlmUsage`). Always present;\n  survives a registry row's retirement so historical calls still\n  render.\n* ``provider_model_id`` is the **resolved registry id** (a\n  ``LlmProviderModel.id``), looked up at read time from the wire\n  string via :func:`_llm_usage_provider_model_id`. ``None`` when\n  the registry row has been retired since the call was made.\n\nThe DB column was renamed in cd-v6dj from ``model_id`` to\n``provider_model_id`` to match the \u00a702 spec, but the JSON wire\ncontract here keeps both fields under their pre-existing names \u2014\na frontend (``mocks/web/src/types/api.ts::LLMCall``) and OpenAPI\nconsumers depend on the shape.",
+        "description": "One row of the /admin/usage call feed.\n\n``model_id`` and ``provider_model_id`` are intentionally distinct\nfields and **not** redundant \u2014 do not collapse them:\n\n* ``model_id`` is the **wire-name string** that flowed across the\n  network on this call (sourced from ``llm_usage.provider_model_id``,\n  which stores the free-form provider wire name \u2014 see\n  :class:`~app.adapters.db.llm.models.LlmUsage`). Always present;\n  survives a registry row's retirement so historical calls still\n  render.\n* ``provider_model_id`` is the **resolved registry id** (a\n  ``LlmProviderModel.id``), looked up at read time from the wire\n  string via :func:`_llm_usage_provider_model_id`. ``None`` when\n  the registry row has been retired since the call was made.\n\nThe DB column was renamed in cd-v6dj from ``model_id`` to\n``provider_model_id`` to match the \u00a702 spec, but the JSON wire\ncontract here keeps both fields under their pre-existing names\nbecause the SPA and OpenAPI consumers depend on the shape.",
         "properties": {
           "assignment_id": {
             "anyOf": [
@@ -23190,7 +23190,7 @@
         "type": "object"
       },
       "SignupSettingsResponse": {
-        "description": "Body of ``GET /admin/api/v1/signup/settings``.\n\nMirrors the SPA's :interface:`AdminSignupSettings` shape from\n``mocks/web/src/types/api.ts``. Today's response collapses\nevery optional throttle key into the\n``signup_throttle_overrides`` map \u2014 the SPA's signup page\nrenders the map verbatim. The wire shape stays narrow (one\nfield per setting) so the cd-jlms slice does not commit to\na richer typed throttle envelope before \u00a715's pre-verified\nupload caps land their own routes.",
+        "description": "Body of ``GET /admin/api/v1/signup/settings``.\n\nMirrors the SPA's :interface:`AdminSignupSettings` shape. Today's\nresponse collapses every optional throttle key into the\n``signup_throttle_overrides`` map \u2014 the SPA's signup page renders\nthe map verbatim. The wire shape stays narrow (one field per\nsetting) so the cd-jlms slice does not commit to a richer typed\nthrottle envelope before \u00a715's pre-verified upload caps land their\nown routes.",
         "properties": {
           "signup_disposable_domains_path": {
             "title": "Signup Disposable Domains Path",
@@ -25373,7 +25373,7 @@
         "type": "object"
       },
       "UsageSummaryResponse": {
-        "description": "Body of ``GET /admin/api/v1/usage/summary``.\n\nMirrors the SPA's :interface:`AdminUsageSummary`\n(``mocks/web/src/types/api.ts``) with a few field renames\nso the wire shape carries cents, not dollars (the SPA\nconverts on render \u2014 keeping cents on the wire dodges the\nrounding ambiguity of partial-cent payloads).",
+        "description": "Body of ``GET /admin/api/v1/usage/summary``.\n\nMirrors the SPA's :interface:`AdminUsageSummary` with a few field\nrenames so the wire shape carries cents, not dollars (the SPA\nconverts on render \u2014 keeping cents on the wire dodges the rounding\nambiguity of partial-cent payloads).",
         "properties": {
           "deployment_calls_30d": {
             "title": "Deployment Calls 30D",
@@ -28676,7 +28676,7 @@
         "type": "string"
       },
       "app__api__admin__audit__AuditEntryResponse": {
-        "description": "Wire shape for one ``audit_log`` row in the deployment feed.\n\nMirrors :class:`AuditLog` columns 1-for-1 except for the\ntransport-shaped ``created_at`` (ISO-8601 UTC string). The\nSPA's :interface:`AuditEntry` (``mocks/web/src/types/api.ts``)\nconsumes a richer projection with display labels (``actor``,\n``target``); we surface the raw IDs here so the SPA is free\nto look up display names lazily \u2014 denormalising on the hot\naudit path would balloon the payload.",
+        "description": "Wire shape for one ``audit_log`` row in the deployment feed.\n\nMirrors :class:`AuditLog` columns 1-for-1 except for the\ntransport-shaped ``created_at`` (ISO-8601 UTC string). The SPA's\n:interface:`AuditEntry` consumes a richer projection with display\nlabels (``actor``, ``target``); we surface the raw IDs here so the\nSPA is free to look up display names lazily \u2014 denormalising on the\nhot audit path would balloon the payload.",
         "properties": {
           "action": {
             "title": "Action",

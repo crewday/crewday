@@ -66,12 +66,11 @@ class AuditEntryResponse(BaseModel):
     """Wire shape for one ``audit_log`` row in the deployment feed.
 
     Mirrors :class:`AuditLog` columns 1-for-1 except for the
-    transport-shaped ``created_at`` (ISO-8601 UTC string). The
-    SPA's :interface:`AuditEntry` (``mocks/web/src/types/api.ts``)
-    consumes a richer projection with display labels (``actor``,
-    ``target``); we surface the raw IDs here so the SPA is free
-    to look up display names lazily — denormalising on the hot
-    audit path would balloon the payload.
+    transport-shaped ``created_at`` (ISO-8601 UTC string). The SPA's
+    :interface:`AuditEntry` consumes a richer projection with display
+    labels (``actor``, ``target``); we surface the raw IDs here so the
+    SPA is free to look up display names lazily — denormalising on the
+    hot audit path would balloon the payload.
     """
 
     id: str

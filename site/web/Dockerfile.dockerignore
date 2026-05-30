@@ -8,8 +8,8 @@ site/web/dist/
 site/web/node_modules/
 site/web/*.tsbuildinfo
 
-!mocks/
-!mocks/web/
-!mocks/web/src/
-!mocks/web/src/styles/
-!mocks/web/src/styles/tokens.css
+!app/
+!app/web/
+!app/web/src/
+!app/web/src/styles/
+!app/web/src/styles/tokens.css

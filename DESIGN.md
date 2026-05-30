@@ -170,9 +170,8 @@ components:
 
 # crew.day — DESIGN.md
 
-Style guide for agents writing code under `app/web/`, `site/web/`, and
-retiring mock fixtures under `mocks/web/`. Tokens above are normative;
-the prose below explains *why* and *when*.
+Style guide for agents writing code under `app/web/` and `site/web/`.
+Tokens above are normative; the prose below explains *why* and *when*.
 
 The living CSS source tree for production UI is
 [`app/web/src/styles/`](app/web/src/styles/). Ownership, `/styleguide`,

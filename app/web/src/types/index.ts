@@ -1,15 +1,12 @@
 // crewday — JSON API types barrel.
 //
-// Shapes mirror the dataclasses in mocks/app/mock_data.py (and, once
-// the production API is wired up, the FastAPI dataclasses). The
-// FastAPI layer serializes via dataclasses.asdict, so dates arrive as
-// ISO-8601 strings and enums as their literal string values.
+// Shapes mirror the FastAPI JSON API. Dates arrive as ISO-8601 strings
+// and enums as their literal string values.
 //
 // One file per bounded context; this barrel preserves every symbol
-// the legacy `mocks/web/src/types/api.ts` exported. Prefer importing
-// directly from the specific sub-module in new code; the `api.ts`
-// shim re-exports this barrel so existing `from "@/types/api"`
-// imports keep resolving.
+// the old all-in-one API type module exported. Prefer importing directly
+// from the specific sub-module in new code; the `api.ts` shim re-exports
+// this barrel so existing `from "@/types/api"` imports keep resolving.
 
 export * from "./core";
 export * from "./property";

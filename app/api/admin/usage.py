@@ -109,11 +109,10 @@ class UsageSummaryEntry(BaseModel):
 class UsageSummaryResponse(BaseModel):
     """Body of ``GET /admin/api/v1/usage/summary``.
 
-    Mirrors the SPA's :interface:`AdminUsageSummary`
-    (``mocks/web/src/types/api.ts``) with a few field renames
-    so the wire shape carries cents, not dollars (the SPA
-    converts on render — keeping cents on the wire dodges the
-    rounding ambiguity of partial-cent payloads).
+    Mirrors the SPA's :interface:`AdminUsageSummary` with a few field
+    renames so the wire shape carries cents, not dollars (the SPA
+    converts on render — keeping cents on the wire dodges the rounding
+    ambiguity of partial-cent payloads).
     """
 
     window_label: str

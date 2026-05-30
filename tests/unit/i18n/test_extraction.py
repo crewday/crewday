@@ -14,7 +14,7 @@ def test_regenerate_writes_catalogs_and_spa_bundles(tmp_path: Path) -> None:
     i18n_extract.regenerate(tmp_path)
 
     en_bundle = _read_json(tmp_path / "app/web/src/i18n/bundles/en-US.json")
-    fr_bundle = _read_json(tmp_path / "mocks/web/src/i18n/bundles/fr.json")
+    fr_bundle = _read_json(tmp_path / "app/web/src/i18n/bundles/fr.json")
     es_bundle = _read_json(tmp_path / "app/web/src/i18n/bundles/es.json")
     pseudo_bundle = _read_json(tmp_path / "app/web/src/i18n/bundles/qps-ploc.json")
 
@@ -56,7 +56,6 @@ def test_ts_extractor_yields_t_call_keys() -> None:
 
 def _seed_minimal_tree(root: Path) -> None:
     (root / "app/web/src/i18n/catalogs").mkdir(parents=True)
-    (root / "mocks/web/src/i18n/catalogs").mkdir(parents=True)
     catalog = dedent(
         """
         export const enUSMessages = {
@@ -66,9 +65,6 @@ def _seed_minimal_tree(root: Path) -> None:
         """
     )
     (root / "app/web/src/i18n/catalogs/en-US.ts").write_text(catalog, encoding="utf-8")
-    (root / "mocks/web/src/i18n/catalogs/en-US.ts").write_text(
-        catalog, encoding="utf-8"
-    )
     (root / "app/web/src/pages").mkdir(parents=True)
     (root / "app/web/src/pages/LoginPage.tsx").write_text(
         'const title = t("login.title");\nconst added = t("demo.added");\n',
@@ -101,7 +97,6 @@ def _snapshot_outputs(root: Path) -> dict[str, str]:
     paths = [
         *sorted((root / "app/i18n/locales").rglob("*")),
         *sorted((root / "app/web/src/i18n/bundles").rglob("*")),
-        *sorted((root / "mocks/web/src/i18n/bundles").rglob("*")),
     ]
     return {
         str(path.relative_to(root)): path.read_text(encoding="utf-8")

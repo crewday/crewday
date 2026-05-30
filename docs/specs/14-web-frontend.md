@@ -32,12 +32,9 @@ state coverage, accessibility review, or screenshot baselines. They are
 not a parallel mock application and are not a prerequisite for every UI
 change.
 
-`mocks/web/` is in retirement. Remaining mock references describe
-historical previews, deletion work, or fixtures that have not yet been
-migrated. Deleting mock code must preserve only fixtures that are
-actively used for component coverage or visual regression, and those
-fixtures should move into `app/web` styleguide routes before the mock
-owner code is removed.
+`mocks/web/` has been retired. Remaining mock references are historical
+or migration notes; active component coverage and visual regression
+fixtures live in `app/web` styleguide routes.
 
 ## Principles
 
@@ -1189,15 +1186,13 @@ frontend gaps against `app/web/` via `bd create`, and migrate any useful
 mock-only variation into `/styleguide` before deleting the mock fixture
 that exposed it.
 
-- **Styleguide inventory (cd-x4p6c).** The retiring mock SPA exposes
+- **Styleguide inventory (cd-x4p6c).** The retired mock SPA exposed
   only one styleguide route, `/styleguide`; its component coverage is
-  already mirrored by `app/web/src/pages/StyleguidePage.tsx`. The mock
-  `pages/`, `components/`, and `styles/` filenames all have `app/web`
-  counterparts, so there are no mock-only component-demo routes to keep
-  alive. The app-owned `/styleguide/inline-table-forms` route is the
-  retained component-variation surface for dense inline editing; the
-  remaining mock app routes are discarded as historical application
-  previews, not as standalone styleguide fixtures.
+  mirrored by `app/web/src/pages/StyleguidePage.tsx`. The app-owned
+  `/styleguide/inline-table-forms` route is the retained component-
+  variation surface for dense inline editing; the discarded mock app
+  routes were historical application previews, not standalone
+  styleguide fixtures.
 - **User / manager terminology.** Legacy mock routes still include
   `/employees`, `/employee/:eid`, `/employee/:eid/leaves`; the spec
   (§05) canonicalises these to `/users`, `/user/<id>`,

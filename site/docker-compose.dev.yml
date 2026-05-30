@@ -12,7 +12,7 @@ services:
     volumes:
       - ./web:/src
       - site-web-dev-node-modules:/src/node_modules
-      - ../mocks/web/src/styles/tokens.css:/mocks/web/src/styles/tokens.css:ro
+      - ../app/web/src/styles/tokens.css:/app/web/src/styles/tokens.css:ro
 
 volumes:
   site-web-dev-node-modules:

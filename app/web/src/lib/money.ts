@@ -1,6 +1,5 @@
 /**
- * Locale-aware money formatting. Replaces all hardcoded currency symbols
- * across the mock SPA.
+ * Locale-aware money formatting for API minor-unit values.
  *
  * Minor-unit counts come from the ISO-4217 static table below; the
  * formatter never hardcodes "divide by 100".

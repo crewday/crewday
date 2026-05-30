@@ -819,8 +819,8 @@ class TestDevProfileViteProxy:
         assert resp.content == b"api tokens spa"
         assert captured["path"] == "/api-tokens"
 
-    def test_dev_profile_proxies_mutating_mocks_paths(self) -> None:
-        """Loopback `/mocks/api` writes must reach the mocks Vite proxy."""
+    def test_dev_profile_proxies_mutating_spa_paths(self) -> None:
+        """Mutating non-API SPA paths can still reach the Vite proxy."""
         captured: dict[str, str] = {}
 
         def handler(request: httpx.Request) -> httpx.Response:
@@ -836,7 +836,7 @@ class TestDevProfileViteProxy:
         client.cookies.set(CSRF_COOKIE_NAME, csrf)
 
         resp = client.post(
-            "/mocks/api/v1/properties/p-villa-lac/units",
+            "/styleguide/inline-table-forms",
             headers={CSRF_HEADER_NAME: csrf},
             json={"name": "Guest cottage"},
         )
@@ -844,7 +844,7 @@ class TestDevProfileViteProxy:
         assert resp.status_code == 201
         assert resp.json() == {"ok": True}
         assert captured["method"] == "POST"
-        assert captured["path"] == "/mocks/api/v1/properties/p-villa-lac/units"
+        assert captured["path"] == "/styleguide/inline-table-forms"
         assert json.loads(captured["body"]) == {"name": "Guest cottage"}
 
     def test_dev_profile_api_paths_not_proxied(self) -> None:

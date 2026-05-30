@@ -66,14 +66,13 @@ _DEFAULT_DISPOSABLE_DOMAINS_PATH: Final[str] = "app/abuse/data/disposable_domain
 class SignupSettingsResponse(BaseModel):
     """Body of ``GET /admin/api/v1/signup/settings``.
 
-    Mirrors the SPA's :interface:`AdminSignupSettings` shape from
-    ``mocks/web/src/types/api.ts``. Today's response collapses
-    every optional throttle key into the
-    ``signup_throttle_overrides`` map — the SPA's signup page
-    renders the map verbatim. The wire shape stays narrow (one
-    field per setting) so the cd-jlms slice does not commit to
-    a richer typed throttle envelope before §15's pre-verified
-    upload caps land their own routes.
+    Mirrors the SPA's :interface:`AdminSignupSettings` shape. Today's
+    response collapses every optional throttle key into the
+    ``signup_throttle_overrides`` map — the SPA's signup page renders
+    the map verbatim. The wire shape stays narrow (one field per
+    setting) so the cd-jlms slice does not commit to a richer typed
+    throttle envelope before §15's pre-verified upload caps land their
+    own routes.
     """
 
     signup_enabled: bool

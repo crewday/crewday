@@ -185,5 +185,5 @@ versa.
 
 These replace the ambiguous "frontend" and "landing page" in any
 site spec. On the app side, "frontend" still means the app's
-React SPA under `app/web/`; legacy `mocks/web/` routes are
-retirement-only preview surfaces.
+React SPA under `app/web/`; legacy `mocks/web/` routes are retired
+historical preview surfaces.

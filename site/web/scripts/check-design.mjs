@@ -7,7 +7,7 @@ const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const siteRoot = path.resolve(scriptDir, "..");
 const repoRoot = path.resolve(siteRoot, "../..");
 
-const sourceTokensPath = path.join(repoRoot, "mocks/web/src/styles/tokens.css");
+const sourceTokensPath = path.join(repoRoot, "app/web/src/styles/tokens.css");
 const siteTokensPath = path.join(siteRoot, "src/styles/tokens.css");
 const siteGlobalsPath = path.join(siteRoot, "src/styles/globals.css");
 const siteIconsPath = path.join(siteRoot, "src/icons/index.ts");
@@ -50,7 +50,7 @@ async function checkTokenDrift() {
 
   if (sourceTokens !== siteTokens) {
     failures.push(
-      "site/web/src/styles/tokens.css differs from mocks/web/src/styles/tokens.css. Run `npm run sync:design` in site/web.",
+      "site/web/src/styles/tokens.css differs from app/web/src/styles/tokens.css. Run `npm run sync:design` in site/web.",
     );
   }
 }

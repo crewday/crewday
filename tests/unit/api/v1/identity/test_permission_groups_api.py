@@ -659,7 +659,7 @@ class TestSseEvents:
     The §02 / §05 Permissions page in a sibling tab refreshes its
     group list / per-group roster / resolver verdict via the SSE
     events emitted here; the SPA dispatcher round-trip is covered by
-    ``mocks/web/src/lib/sse.ts`` + ``app/web/src/lib/sse.ts``.
+    ``app/web/src/lib/sse.ts``.
     """
 
     def test_create_update_delete_publish_group_events(

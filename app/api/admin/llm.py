@@ -451,9 +451,8 @@ class LlmCallResponse(BaseModel):
 
     The DB column was renamed in cd-v6dj from ``model_id`` to
     ``provider_model_id`` to match the §02 spec, but the JSON wire
-    contract here keeps both fields under their pre-existing names —
-    a frontend (``mocks/web/src/types/api.ts::LLMCall``) and OpenAPI
-    consumers depend on the shape.
+    contract here keeps both fields under their pre-existing names
+    because the SPA and OpenAPI consumers depend on the shape.
     """
 
     at: str

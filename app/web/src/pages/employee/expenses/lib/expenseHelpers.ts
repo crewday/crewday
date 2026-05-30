@@ -1,18 +1,15 @@
 // Shared helpers for the worker's expense surface (§09).
 //
-// Mock parity: these constants and the `confidenceClass` helper come
-// straight from `mocks/web/src/pages/employee/MyExpensesPage.tsx` —
-// keeping them in one place lets `SubmitExpenseForm`, `RecentExpenses`,
-// and `ReceiptScanPanel` share the same chip tone and warn-class
-// spelling without drift.
+// Keeping these constants and the `confidenceClass` helper in one
+// place lets `SubmitExpenseForm`, `RecentExpenses`, and
+// `ReceiptScanPanel` share the same chip tone and warn-class spelling
+// without drift.
 
 import type { ChipTone } from "@/components/common";
 import type { ExpenseCategory, ExpenseStatus } from "@/types/api";
 
 /**
- * Status → chip tone for the recent-expenses list. Mirrors the mock
- * verbatim so a Playwright diff against `MyExpensesPage.tsx.png` shows
- * zero pixel delta.
+ * Status → chip tone for the recent-expenses list.
  */
 export const STATUS_TONE: Record<ExpenseStatus, ChipTone> = {
   draft: "ghost",
@@ -23,8 +20,8 @@ export const STATUS_TONE: Record<ExpenseStatus, ChipTone> = {
 };
 
 /**
- * Category radio options in the mock's display order. Worker picks one
- * per claim; the value lands in `expenses.category` server-side.
+ * Category radio options. Worker picks one per claim; the value lands
+ * in `expenses.category` server-side.
  */
 export const CATEGORIES: ReadonlyArray<{ value: ExpenseCategory; label: string }> = [
   { value: "supplies", label: "Supplies" },

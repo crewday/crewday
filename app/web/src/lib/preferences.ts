@@ -4,10 +4,8 @@
 // `app/api/preferences.py` (which re-set the cookie) and we update our
 // local mirror optimistically so layout doesn't flash.
 //
-// Ported from `mocks/web/src/lib/preferences.ts`. The mocks SPA wraps
-// every backend path with `withBase()` so it can mount under `/mocks/`;
-// the production app always serves at the origin root, so paths stay
-// bare here. The five cookie-setter endpoints are mounted at
+// The production app serves at the origin root, so cookie-setter paths
+// stay bare. The five endpoints are mounted at
 // `/switch/{role}`, `/theme/set/{value}`, `/workspaces/switch/{wsid}`,
 // `/agent/sidebar/{state}`, and `/nav/sidebar/{state}` — see
 // `app/tenancy/middleware.py` SKIP_PATHS for the tenancy + CSRF

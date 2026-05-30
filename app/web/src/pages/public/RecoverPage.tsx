@@ -7,14 +7,11 @@
 // members additionally enter an unused break-glass code — the
 // step-up branch (§03 "Entry point").
 //
-// Visual contract mirrors `mocks/web/src/pages/public/RecoverPage.tsx`
-// verbatim: every semantic class (`login__card`, `field`,
-// `field--inline`, `recovery-code`, `login__recover`, …) is preserved
-// so the mock's CSS applies unchanged. The only additions beyond the
-// mock are (a) a confirmation view that replaces the form after a
-// successful submit, (b) a `login__notice` for rate-limit / unexpected
-// errors, and (c) a `pending` state on the submit button. The mock
-// has none of these because it is visual-only.
+// Every semantic class (`login__card`, `field`, `field--inline`,
+// `recovery-code`, `login__recover`, …) is part of the production CSS
+// contract. The confirmation view replaces the form after a successful
+// submit; `login__notice` covers rate-limit / unexpected errors, and
+// the submit button carries the pending state.
 //
 // Server contract (`POST /api/v1/recover/passkey/request`):
 //   - 202 { status: "accepted" } on both hit and miss — the

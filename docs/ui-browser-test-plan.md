@@ -3,9 +3,7 @@
 This is the durable TODO list for proving crew.day's browser-visible
 features in a real browser. It is intentionally broader than the current
 implementation: specs remain the source of truth, while `app/web/`
-shows the production UI that exists today. Legacy `mocks/web/` coverage
-is retirement-only unless a fixture is actively used for styleguide or
-visual-regression work.
+shows the production UI that exists today.
 
 Do not treat unchecked items as failures by default. Treat them as work
 to automate, smoke manually, or explicitly mark out of scope for the
@@ -16,10 +14,6 @@ current release phase.
 - App specs: `docs/specs/00-overview.md` through `docs/specs/25-marketplace.md`.
 - Site specs: `docs/specs-site/README.md` through `docs/specs-site/05-roadmap.md`.
 - Production frontend: `app/web/src/App.tsx`, `app/web/src/pages/`, `app/web/src/components/`, `app/web/src/auth/`, `app/web/src/context/`, `app/web/src/lib/`.
-- Retiring mock frontend: `mocks/web/src/App.tsx`,
-  `mocks/web/src/pages/`, `mocks/web/src/components/`; migrate useful
-  variation coverage into `app/web` `/styleguide` routes before
-  deleting it.
 - Site frontend code: not present in this worktree at the time this plan was written; site checks are derived from `docs/specs-site/`.
 
 ## How Agents Should Use This Plan

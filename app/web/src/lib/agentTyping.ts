@@ -1,10 +1,6 @@
 // PLACEHOLDER — real impl lands in cd-qdsl. DO NOT USE FOR PRODUCTION
 // DECISIONS.
 //
-// Copied verbatim from `mocks/web/src/lib/agentTyping.ts` so the
-// AgentSidebar component port compiles. The hook is already final-shape;
-// cd-qdsl's lib port just lifts it into the production module tree.
-//
 // §14 "Agent turn indicator" — subscribe to the typing cache flag
 // written by the SSE dispatcher (see `lib/sse.ts`). Returns `true`
 // while an agent turn is in flight for the given scope. The cache

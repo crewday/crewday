@@ -18,10 +18,7 @@ DOMAIN = "messages"
 
 LOCALE_ROOT = Path("app/i18n/locales")
 TS_CATALOG = Path("app/web/src/i18n/catalogs/en-US.ts")
-BUNDLE_DIRS = (
-    Path("app/web/src/i18n/bundles"),
-    Path("mocks/web/src/i18n/bundles"),
-)
+BUNDLE_DIRS = (Path("app/web/src/i18n/bundles"),)
 
 _TS_CATALOG_ENTRY_RE = re.compile(
     r'^\s*(?P<key>"(?:\\.|[^"\\])+?")\s*:\s*(?P<value>"(?:\\.|[^"\\])*")\s*,?\s*$'
@@ -200,7 +197,7 @@ def _extract_keys(root: Path) -> set[str]:
 
 
 def _iter_source_files(root: Path) -> Iterator[Path]:
-    scan_roots = (root / "app", root / "app/web/src", root / "mocks/web/src")
+    scan_roots = (root / "app", root / "app/web/src")
     suffixes = {".py", ".j2", ".ts", ".tsx"}
     for scan_root in scan_roots:
         if not scan_root.exists():

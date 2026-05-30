@@ -281,8 +281,7 @@ clearly matches the work. Do not turn every small task into a workflow.
 - `/oracle`: hard decisions; no edits.
 - `/beads`: create atomic follow-up tasks.
 - `/frontend-design:frontend-design`: mandatory before creative frontend
-  work under `app/web/`; also use it before editing retained
-  `mocks/web/` fixtures for visual migration or retirement.
+  work under `app/web/`.
 - `/ai-slop`: remove overcomplication, noisy comments, speculative code,
   and bloated prose before shipping.
 

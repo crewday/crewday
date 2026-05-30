@@ -91,7 +91,7 @@ describe("<RequireAuth>", () => {
 
   it("keeps same-origin public-site routes off the login fallback", async () => {
     setUnauthenticated();
-    window.__CREWDAY__ = { publicSiteUrl: "/mocks/landing/" };
+    window.__CREWDAY__ = { publicSiteUrl: "/public/landing/" };
     const redirectExternal = vi.fn();
     const qc = new QueryClient();
 
@@ -112,7 +112,7 @@ describe("<RequireAuth>", () => {
       await new Promise((r) => setTimeout(r, 0));
     });
     expect(redirectExternal).toHaveBeenCalledWith(
-      `${window.location.origin}/mocks/landing/`,
+      `${window.location.origin}/public/landing/`,
     );
     expect(redirectExternal).not.toHaveBeenCalledWith("https://crew.day/");
     expect(screen.queryByText("login page")).toBeNull();
@@ -121,7 +121,7 @@ describe("<RequireAuth>", () => {
 
   it("uses same-origin public-site routes from Vite env when the server bootstrap is absent", async () => {
     setUnauthenticated();
-    vi.stubEnv("VITE_CREWDAY_PUBLIC_SITE_URL", "/mocks/landing/");
+    vi.stubEnv("VITE_CREWDAY_PUBLIC_SITE_URL", "/public/landing/");
     const redirectExternal = vi.fn();
     const qc = new QueryClient();
 
@@ -142,7 +142,7 @@ describe("<RequireAuth>", () => {
       await new Promise((r) => setTimeout(r, 0));
     });
     expect(redirectExternal).toHaveBeenCalledWith(
-      `${window.location.origin}/mocks/landing/`,
+      `${window.location.origin}/public/landing/`,
     );
     expect(redirectExternal).not.toHaveBeenCalledWith("https://crew.day/");
     expect(screen.queryByText("login page")).toBeNull();
@@ -190,7 +190,7 @@ describe("<RequireAuth>", () => {
 
   it("keeps protected app routes on the login fallback when a public site is configured", () => {
     setUnauthenticated();
-    window.__CREWDAY__ = { publicSiteUrl: "/mocks/landing/" };
+    window.__CREWDAY__ = { publicSiteUrl: "/public/landing/" };
     const redirectExternal = vi.fn();
     function LoginProbe() {
       const loc = useLocation();

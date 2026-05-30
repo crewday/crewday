@@ -307,18 +307,18 @@ context.
 ### Creative frontend work — load `/frontend-design:frontend-design`
 
 Whenever a Coder task makes creative frontend decisions under
-`mocks/web/` or `app/web/` (new UI, redesign, component styling,
-visual polish), **explicitly instruct the Coder to load the
+`app/web/` (new UI, redesign, component styling, visual polish),
+**explicitly instruct the Coder to load the
 `/frontend-design:frontend-design` skill** before writing code. Exact
-mock promotions do not need it unless the Coder must make design
-choices. Include the directive in the prompt:
+promotions do not need it unless the Coder must make design choices.
+Include the directive in the prompt:
 
 ```
-Area: mocks/web/src/pages/admin
+Area: app/web/src/pages/admin
 Skill to load: /frontend-design:frontend-design  (mandatory for creative
   component / page / styling decisions — load it before writing code)
 Beads task: bd-071
-Test path: mocks/web (pnpm -C mocks/web typecheck && pnpm -C mocks/web build)
+Test path: app/web (npm --prefix app/web run build)
 Task: Redesign the LLM admin page per spec 11 §4
 ```
 

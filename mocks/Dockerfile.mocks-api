@@ -1,13 +1,5 @@
-# crewday mocks — API-only runtime image (dev-stack ``mocks-api`` service).
-#
-# The main ``mocks/Dockerfile`` is a two-stage build that bakes
-# ``mocks/web/dist`` into the image for prod-style runs. The dev stack
-# under ``docker-compose.dev.yml`` serves the SPA via a separate
-# ``mocks-web-dev`` Vite container instead, so baking the dist is
-# wasted work AND couples the dev build to every transient mocks/web
-# TypeScript / npm peer-dep hiccup. This slimmer image skips the
-# web-build stage entirely — the runtime Python layer is what
-# ``mocks-api`` actually uses.
+# crewday mocks — API-only runtime image for ad hoc legacy mock backend
+# smoke checks outside the primary dev stack.
 #
 # No Node, no TypeScript, no ``npm install`` — just the minimal FastAPI
 # runtime the bind-mounted ``mocks/app/main.py`` needs.

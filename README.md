@@ -44,8 +44,7 @@ owner, a REST API for the agent.
 - **FastAPI + React SPA + SQLite/Postgres.** FastAPI on the server, a
   Vite + React + TypeScript strict SPA on the client (served by the
   same FastAPI process from `dist/`), with SQLite by default and
-  Postgres for larger deployments. The mocks app is split as
-  `mocks/app/` (JSON API + SPA fallback) and `mocks/web/` (SPA).
+  Postgres for larger deployments.
 - **LLM-native.** Receipt OCR, natural-language task intake, daily digests,
   and a staff chat assistant all ship in v1. Default model is
   `google/gemma-4-31b-it` via OpenRouter, with a per-capability model
@@ -71,7 +70,7 @@ application now includes:
   detection, audit/event plumbing, and deployment/admin commands.
 - Automated coverage across unit, integration, contract, frontend, and
   Playwright end-to-end tests under [`tests/`](tests/) and `app/web/src/**/*.test.*`.
-- A disposable dev/demo topology under [`mocks/`](mocks/) and an independently
+- Legacy mock backend context under [`mocks/`](mocks/) and an independently
   deployable marketing/suggestion-box surface under [`site/`](site/).
 
 The remaining work is product hardening rather than blank-slate scaffolding:
