@@ -16,7 +16,7 @@ phases are empty.
   `uv`/`ruff`/`mypy --strict`/`pytest` toolchain as the app.
 - `site/docker-compose.yml` + `site/Caddyfile` per §04.
 - Shared design: `tokens.css` and the Lucide icon registry
-  copied from `mocks/web/` by a build step; CI check fails if
+  copied from `app/web/` by a build step; CI check fails if
   either drifts.
 - `/healthz`, `/readyz`, `/version` live on `site-api`.
 - Static empty-state pages (`/`, `/404.astro`) with placeholder

@@ -24,7 +24,7 @@ demo/…                       # the app image with CREWDAY_DEMO_MODE=1
 
 `site/docker-compose.yml` keeps the public-site runtime isolated from
 `app/`. Its web image build context may read the shared design-token
-source under `mocks/web/src/styles/tokens.css` so the existing drift
+source under `app/web/src/styles/tokens.css` so the existing drift
 check can run inside Docker; the built image still contains only the
 site output. `app/`'s compose files never reference anything inside
 `site/`.

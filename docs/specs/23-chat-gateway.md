@@ -727,18 +727,18 @@ Gateway-specific hardening:
 - Multiple active bindings per `(user, channel_kind)` (deferred;
   the schema allows historical revoked rows already).
 
-## Gaps vs. mocks
+## Implementation Gaps
 
-- A stub `ChatChannelsPage` is present at
+- A legacy mock stub `ChatChannelsPage` is present at
   `mocks/web/src/pages/manager/ChatChannelsPage.tsx`; the
   per-user `/me` Chat-channels section is an inline card on
-  `MePage.tsx`. The link-ceremony modal is a non-interactive
-  placeholder in v1 mocks.
-- Deployment-default provider stub lives on `/admin/chat-gateway`
+  `MePage.tsx`. Treat it as retirement context, not as the UI
+  contract. The link-ceremony modal is a non-interactive placeholder.
+- A legacy deployment-default provider stub lives on `/admin/chat-gateway`
   (`mocks/web/src/pages/admin/ChatGatewayPage.tsx`). The workspace
   `/settings → Chat gateway` panel points at it and offers the
   (stubbed) "Use a dedicated Meta account for this workspace"
   action.
-- The mock `chat_channel_binding` seed carries one active
+- The legacy mock `chat_channel_binding` seed carries one active
   WhatsApp binding for the default worker and one pending
   binding for the default owner-manager.

@@ -281,7 +281,8 @@ clearly matches the work. Do not turn every small task into a workflow.
 - `/oracle`: hard decisions; no edits.
 - `/beads`: create atomic follow-up tasks.
 - `/frontend-design:frontend-design`: mandatory before creative frontend
-  work under `mocks/web/` or `app/web/`; not needed for exact mock copying.
+  work under `app/web/`; also use it before editing retained
+  `mocks/web/` fixtures for visual migration or retirement.
 - `/ai-slop`: remove overcomplication, noisy comments, speculative code,
   and bloated prose before shipping.
 
@@ -348,9 +349,9 @@ Plain text to the user; CLI handles styling.
   if you see it in the codebase, leave it alone.
 - **SQLite default; Postgres 15+ supported** — CI runs both. Use
   portable SQL or SQLAlchemy idioms.
-- **React frontend.** Mocks (and the upcoming production frontend)
-  are a Vite + React + TypeScript strict SPA served by FastAPI from
-  `mocks/web/dist`. TanStack Query with optimistic mutations;
+- **React frontend.** `app/web/` is the production Vite + React +
+  TypeScript strict SPA served by FastAPI from `app/web/dist`.
+  TanStack Query with optimistic mutations;
   cross-client coherence is SSE-driven (one
   `EventSource('/events')` feeds `queryClient.invalidateQueries`).
   No Alpine, Vue, Tailwind, or HTMX. See `docs/specs/14`.
@@ -376,10 +377,10 @@ Plain text to the user; CLI handles styling.
   root — palette, type scale, radii, elevation, component shapes,
   do's and don'ts. It carries normative tokens in YAML frontmatter
   and prose rationale below. Read it before any visual change.
-  The living CSS source tree is `mocks/web/src/styles/`
+  The living CSS source tree is `app/web/src/styles/`
   (`tokens.css`, `globals.css`, `fonts.css`, `reset.css`);
-  `app/web/src/styles/` is the reviewed mirror for promoted production
-  UI, per
+  `/styleguide` and `/styleguide/*` in `app/web` are the dev/staging
+  component-variation and visual-regression surfaces, per
   `docs/specs/14-web-frontend.md` "App / Mock Ownership". **If
   `DESIGN.md` and the CSS disagree on any value, stop and ask the user
   which side is correct, then fix the wrong side in the same turn. Never

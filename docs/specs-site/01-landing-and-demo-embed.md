@@ -263,7 +263,7 @@ requirement is simpler:
 ## Design system adoption
 
 - `site/web/src/styles/tokens.css` is a symlink or copy of
-  `mocks/web/src/styles/tokens.css`. The build fails if it
+  `app/web/src/styles/tokens.css`. The build fails if it
   drifts — a CI check diffs the two.
 - `globals.css` covers layout primitives (`.container`,
   `.section`, `.prose`) that are specific to long-form marketing

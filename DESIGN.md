@@ -170,14 +170,14 @@ components:
 
 # crew.day — DESIGN.md
 
-Style guide for agents writing code under `mocks/web/`, `app/web/`,
-and `site/web/`. Tokens above are normative; the prose below explains
-*why* and *when*.
+Style guide for agents writing code under `app/web/`, `site/web/`, and
+retiring mock fixtures under `mocks/web/`. Tokens above are normative;
+the prose below explains *why* and *when*.
 
-The living CSS source tree is [`mocks/web/src/styles/`](mocks/web/src/styles/).
-Its matching files under [`app/web/src/styles/`](app/web/src/styles/) are
-reviewed mirrors for promoted production UI; ownership and drift rules
-live in `docs/specs/14-web-frontend.md` "App / Mock Ownership".
+The living CSS source tree for production UI is
+[`app/web/src/styles/`](app/web/src/styles/). Ownership, `/styleguide`,
+and mock-retirement rules live in `docs/specs/14-web-frontend.md`
+"App / Mock Ownership".
 
 **On divergence between this file and the CSS, neither side wins
 silently.** An agent who notices a token, type level, radius,
@@ -359,7 +359,7 @@ button inside a `.phone__dock` that fills the bar).
 
 ## Components
 
-Every component below has a class in `mocks/web/src/styles/globals.css`.
+Every component below has a class in `app/web/src/styles/globals.css`.
 Reuse before inventing; promote variants via BEM modifiers
 (`task-card--overdue`), not by adding new classes.
 
@@ -524,5 +524,5 @@ inherit `currentColor`.
 **Cross-references.** Frontend invariants: `docs/specs/14-web-frontend.md`.
 Marketing-site design: `docs/specs-site/00-overview.md` (tokens flow
 one-way app → site). Agent operating rules: `AGENTS.md`. Component
-ownership and app/mock drift policy:
+ownership and mock-retirement policy:
 `docs/specs/14-web-frontend.md` "App / Mock Ownership".

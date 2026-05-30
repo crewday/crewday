@@ -4,51 +4,40 @@ Two audiences, one codebase, same patterns: a React SPA that ships a
 mobile-first PWA for workers and a desktop shell for owners and
 managers.
 
-**The mocks under `mocks/web/` are the living spec.** Page anatomy,
-component composition, interaction copy, and visual detail live in
-the React code — go there first. This file captures only the
-**enduring constraints** every future implementation must satisfy:
+`app/web/` is the production UI source of truth for promoted UI. Page
+anatomy, component composition, interaction copy, visual detail, CSS,
+and production runtime behavior live there first. This file captures
+the **enduring constraints** every future implementation must satisfy:
 principles, the route contract, the design language, and the
 accessibility / performance / PWA gates.
 
 ## App / Mock Ownership
 
-`mocks/web/` remains the visual and interaction source of truth until a
-surface is promoted into `app/web/`. `app/web/` is the production
-implementation: it may add real API wiring, offline queues, tests, and
-deployment-specific code, but it must preserve the promoted route,
-component anatomy, copy, and visual behavior unless this spec changes
-first.
+`app/web/` owns the production UI contract for every promoted surface:
+routes, component anatomy, copy, visual behavior, CSS, real API wiring,
+offline queues, tests, and deployment-specific code. New production UI
+work starts in `app/web/` unless the task is explicitly about deleting
+or auditing legacy mock-only code.
 
-CSS has one source tree: `mocks/web/src/styles/`. `tokens.css`,
-`globals.css`, `fonts.css`, and `reset.css` are edited there first, and
-the matching files under `app/web/src/styles/` are reviewed mirrors for
-promoted surfaces. A CSS change that affects promoted UI must land in
-both trees in the same change unless the `app/web` copy is intentionally
-behind the mock because the surface has not been promoted yet; that
-intentional lag is called out in the task or PR. The style splitting
-work in `cd-x5fb` starts from `mocks/web/src/styles/`, then mirrors the
-same file layout into `app/web/src/styles/` for promoted selectors.
+CSS has one production source tree: `app/web/src/styles/`. Change
+`tokens.css`, `globals.css`, `fonts.css`, and `reset.css` in that tree.
+The design-token contract in `DESIGN.md` and the CSS must remain
+aligned; when they diverge, stop and resolve the mismatch before
+continuing.
 
-Production-ready shared components and small pure helpers are owned by
-the promoted pair, not by a hidden third copy: when a file is copied
-from `mocks/web/src/{components,context,lib}/` into the same path under
-`app/web/src/`, the two files should stay byte-identical or differ only
-where production runtime concerns require it. Intentional divergence
-must be documented either in this section or in the file header with the
-reason and the owning tree. Runtime helpers that touch network behavior,
-SSE, cache invalidation, auth, offline persistence, or generated API
-types are allowed to diverge: `app/web` owns the production behavior,
-while `mocks/web` owns the mock contract.
+`/styleguide` and `/styleguide/*` are dev/staging-only component
+variation and visual-regression surfaces inside `app/web/`. Styleguide
+demos should live in `app/web` when useful for component coverage,
+state coverage, accessibility review, or screenshot baselines. They are
+not a parallel mock application and are not a prerequisite for every UI
+change.
 
-The page-header navigation family is intentionally unified:
-`components/PageHeader.tsx` and `lib/routeParents.ts` are production-ready
-shared files and must stay identical across `app/web` and `mocks/web`.
-Route-parent rule changes are made in both trees in the same change and
-validated by both frontend builds. Until this policy grows a dedicated
-import-boundary or mirror-check target, review catches accidental
-one-sided edits with `git diff --no-index` or `cmp -s` on each unified
-file pair, starting with `PageHeader.tsx` and `routeParents.ts`.
+`mocks/web/` is in retirement. Remaining mock references describe
+historical previews, deletion work, or fixtures that have not yet been
+migrated. Deleting mock code must preserve only fixtures that are
+actively used for component coverage or visual regression, and those
+fixtures should move into `app/web` styleguide routes before the mock
+owner code is removed.
 
 ## Principles
 
@@ -56,11 +45,11 @@ file pair, starting with `PageHeader.tsx` and `routeParents.ts`.
   React Router owns client-side navigation. Production static serving
   and the dev-profile Vite HTTP/WebSocket proxy are specified in §16
   "FastAPI static mount and dev-profile Vite proxy". See §01 for the
-  `mocks/app/` + `mocks/web/` split.
+  app frontend and retiring mock-preview topology.
 - **Mobile-first** for the worker surface; breakpoints stack up.
 - **Hand-rolled semantic CSS design system** (BEM globals + optional
   per-component CSS modules). No Tailwind, no utility classes, no
-  Alpine, no Vue. Tokens live in `mocks/web/src/styles/tokens.css`;
+  Alpine, no Vue. Tokens live in `app/web/src/styles/tokens.css`;
   global rules in `globals.css`; semantic class names only (see
   AGENTS.md).
 - **Light / dark / system theme.** Preference is one of `light`,
@@ -85,7 +74,7 @@ outlive any screen, so they're pinned here rather than in the mocks:
   green reads as "go"; rare in dashboards, so the product feels
   distinct); **Rust** destructive; **Sand** warnings; **Sky**
   informational. Full token map (light + dark) is the authoritative
-  `mocks/web/src/styles/tokens.css` — reference it, don't re-declare
+  `app/web/src/styles/tokens.css` — reference it, don't re-declare
   values in spec prose.
 - **Typography.** Display/headings: *Fraunces* variable serif. Body:
   *Inter Tight* variable. Monospace: *JetBrains Mono* (dev-facing
@@ -100,7 +89,7 @@ outlive any screen, so they're pinned here rather than in the mocks:
 ## Route contract
 
 Canonical navigation. The authoritative tree is
-`mocks/web/src/App.tsx`; this list exists so an agent can answer
+`app/web/src/App.tsx`; this list exists so an agent can answer
 "what routes should exist" without loading React code.
 
 ### URL shape
@@ -550,8 +539,7 @@ buttons: **Request leave** and **Request override**.
   `scheduled_start–scheduled_end`, a status pill, a duration
   badge, and the property name. The inline actions are:
   - **Amend** (future or past) — opens the `POST
-    /bookings/{id}/amend` dialog (§09 "Amend"). The mock ships
-    a stub "+15 min" quick-amend that posts a fixed reason; the
+    /bookings/{id}/amend` dialog (§09 "Amend"). The
     production shell is a proper time-and-reason form. Pending
     self-amends above the threshold render a `pending manager`
     chip instead of a number until the manager decides.
@@ -578,13 +566,13 @@ buttons: **Request leave** and **Request override**.
   owner/manager via `/leaves` and the daily digest.
 - **Inline override on desktop.** A worker may also edit the
   day directly from the week grid — clicking a rota band opens
-  the same override form pre-filled. The mock ships click-to-edit;
-  the production shell may upgrade to a draggable edge gesture
-  ("Outlook-like") provided the underlying write is the same
+  the same override form pre-filled. The production shell may
+  upgrade to a draggable edge gesture ("Outlook-like") provided the
+  underlying write is the same
   `POST /api/v1/me/availability-overrides` call and the
-  approval-required rule is evaluated server-side. The UI MUST
-  NOT render a drag as committed until the server confirms the
-  approval state.
+  approval-required rule is evaluated server-side. The UI MUST NOT
+  render a drag as committed until the server confirms the approval
+  state.
 - **Public holidays and property closures** are read-only on
   this surface (managers edit them under `/holidays` and
   `/property/<id>/closures` respectively); they render as
@@ -726,7 +714,7 @@ three-region grid:
 The sidebar mounts **once** as a sibling of `<Outlet />` in each
 layout (`EmployeeLayout`, `ManagerLayout`) so chat state, composer
 draft, and `EventSource` subscription survive client-side navigation.
-The component is shared (`mocks/web/src/components/AgentSidebar.tsx`);
+The component lives in `app/web/src/components/AgentSidebar.tsx`;
 a `role` prop selects the per-role agent log/message endpoints
 (`/api/v1/agent/{employee|manager}/{log,message}`) and gates the
 manager-only "Pending approvals" block. It is load-bearing for the
@@ -789,8 +777,8 @@ a different product. What differs:
 
 ## Implementation contracts
 
-The mocks decide *how* screens look; these constraints decide *what
-the platform must guarantee*.
+`app/web/` decides how production screens look; these constraints
+define what the platform must guarantee.
 
 - **Data layer.** TanStack Query (`@tanstack/react-query`) manages
   all server state through a typed `fetchJson<T>` wrapper that
@@ -917,10 +905,10 @@ the platform must guarantee*.
   the history modal backed by `/agent_preferences/revisions/…`
   (§12). Full rules in §11 "Agent preferences".
 - **Deferred external chat seam.** Off-app adapters are prepared in
-  the architecture but not enabled in shipped v1. The mocks must not
+  the architecture but not enabled in shipped v1. Product UI must not
   expose binding-management pages, phone-number linking, or provider
-  configuration as active product surfaces. When those adapters are
-  revisited, §23 remains the reference design.
+  configuration as active product surfaces until those adapters ship.
+  When they are revisited, §23 remains the reference design.
 - **Avatar editor on `/me`.** Clicking the large avatar on `/me`
   opens an in-modal editor (native `<dialog>`, same pattern as the
   new-task modal). The modal accepts an image from a file picker
@@ -976,8 +964,7 @@ the platform must guarantee*.
 
 Every authenticated route — worker, manager, client, admin — renders
 its chrome through a single `PageHeader` component
-(`mocks/web/src/components/PageHeader.tsx`, mirrored byte-for-byte to
-`app/web/src/components/PageHeader.tsx` for promoted production UI).
+(`app/web/src/components/PageHeader.tsx`).
 Consistency here is what makes the PWA feel like a native app: the
 same bar, in the same place, with the same three slots, regardless of
 surface.
@@ -1004,8 +991,7 @@ surface.
   non-sticky and keeps the large Fraunces title.
 - **Back button from a route map.** `PageHeader` accepts a `back`
   prop, but sub-pages normally omit it — the component resolves the
-  parent through `mocks/web/src/lib/routeParents.ts` and the matching
-  `app/web/src/lib/routeParents.ts` mirror (`/w/<slug>/task/:id →
+  parent through `app/web/src/lib/routeParents.ts` (`/w/<slug>/task/:id →
   /w/<slug>/today`, `/w/<slug>/asset/:id → /w/<slug>/assets`,
   `/w/<slug>/instructions/:id → /w/<slug>/instructions`,
   `/w/<slug>/property/:id → /w/<slug>/properties`,
@@ -1018,7 +1004,7 @@ surface.
   `.desk__mobile-bar` strip that showed a hamburger + "crew.day"
   wordmark above the page header on manager/admin phone is gone.
   The page header reads a `ShellNavContext`
-  (`mocks/web/src/context/ShellNavContext.tsx`) provided by
+  (`app/web/src/context/ShellNavContext.tsx`) provided by
   `ManagerLayout` / `AdminLayout`; when that context reports a
   drawer is available, the leading slot renders a `Menu` icon-button
   whose `onClick` toggles the drawer. Sub-pages still win the slot
@@ -1081,7 +1067,7 @@ WCAG 2.2 AA. Concretely:
 ## PWA constraints
 
 - Generated by **Vite PWA plugin** (Workbox) in
-  `mocks/web/vite.config.ts`.
+  `app/web/vite.config.ts`.
 - **One service worker per workspace.** The worker is registered
   with `scope: '/w/<slug>/'`, so its fetch interception and cache
   do not span workspaces. A user with access to multiple
@@ -1196,35 +1182,36 @@ What this repo deliberately does **not** provide:
 All user-facing strings go through an i18n helper backed by a JSON
 message catalog, even though v1 ships English only. See §18.
 
-## Gaps vs. mocks
+## Mock Retirement Notes
 
-The mocks are the living spec, but several contracts named above
-are not yet implemented there. Track new gaps via `bd create` rather
-than adding to this list:
+The legacy mocks are no longer the UI contract. Track production
+frontend gaps against `app/web/` via `bd create`, and migrate any useful
+mock-only variation into `/styleguide` before deleting the mock fixture
+that exposed it.
 
-- **User / manager terminology.** `mocks/web/src/App.tsx` still
-  routes `/employees`, `/employee/:eid`, `/employee/:eid/leaves`;
-  the spec (§05) canonicalises these to `/users`, `/user/<id>`,
-  `/user/<id>/leaves`. Mocks will rename during the
-  `user_work_roles` / `work_engagement` migration.
-- **Availability & holidays.** No mock pages yet for
+- **User / manager terminology.** Legacy mock routes still include
+  `/employees`, `/employee/:eid`, `/employee/:eid/leaves`; the spec
+  (§05) canonicalises these to `/users`, `/user/<id>`,
+  `/user/<id>/leaves`. Do not preserve the mock names when moving
+  coverage into `app/web`.
+- **Availability & holidays.** Legacy mock pages do not cover
   `/availability-overrides`, `/user/<id>/availability`, or
   `/holidays` (the manager CRUD surfaces). The worker-facing
   self-service flows (request leave, request override) live on
-  `/schedule` and ship with the mocks — see §06 "Schedule ruleset
+  `/schedule` in the current app — see §06 "Schedule ruleset
   (per-property rota)" for the model and this section for the
   worker surface. `/scheduler` inline per-date edits are specified
-  here but not yet fully implemented in the mocks; the day-drawer
+  here but not yet fully implemented; the day-drawer
   click-to-reassign / click-to-override paths are the first
   increment.
 - **Agent sidebar (`.desk__agent`).** The shared component
-  `mocks/web/src/components/AgentSidebar.tsx` mounts in both
+  `app/web/src/components/AgentSidebar.tsx` mounts in both
   `EmployeeLayout` and `ManagerLayout` (role-scoped via a `role`
   prop). Full wiring — SSE `agent.action.pending`, inline confirmation
   cards (currently manager-only), voice input, compaction-aware lazy
   load — is still to come.
 - **PWA service worker.** Vite PWA plugin is not yet wired in
-  `mocks/web/vite.config.ts`; offline outbox and background sync
+  `app/web/vite.config.ts`; offline outbox and background sync
   are specified but unimplemented. Once wired, the SW registration
   must use `scope: '/w/<slug>/'` (see "PWA constraints" above).
 - **Workspace path prefix.** The spec canonicalises every
@@ -1237,10 +1224,10 @@ than adding to this list:
   and `fetchJson<T>` URL building derive the active workspace slug
   from the current `/w/<slug>/...` route.
 - **Self-serve signup.** `/signup`, `/signup/verify`, and
-  `/select-workspace` are specified (§03) but not yet in the
-  mocks. Same timing as the path-prefix migration above.
+  `/select-workspace` are specified (§03); track any missing
+  production implementation against `app/web`.
 
-### Workspace switcher (mocks parity)
+### Workspace Switcher
 
 The shared `<SideNav />` renders a chip immediately under the brand
 row that lists every workspace the current user has an active
@@ -1251,8 +1238,9 @@ display name and the user's grant role on it (`Manager`,
 
 - **Cookie-backed.** The selected workspace lives in
   `crewday_workspace`; the server is authoritative. `POST
-  /workspaces/switch/{wsid}` sets the cookie. The mock honours the
-  same cookie everywhere `current_workspace_id(request)` is read.
+  /workspaces/switch/{wsid}` sets the cookie. Server-side reads of
+  `current_workspace_id(request)` and client-side workspace context
+  must resolve the same active workspace.
 - **Hidden when single-workspace.** The chip does not render when
   the user has only one workspace, so the default tenant case
   stays uncluttered.
@@ -1260,10 +1248,9 @@ display name and the user's grant role on it (`Manager`,
   TanStack Query entry — every query is potentially scoped to the
   previous tenant.
 
-This is the mock-side stand-in for the future `/w/<slug>/...`
-addressing scheme (§01); the URL path itself remains
-single-workspace and unprefixed in the mocks until the real
-routing middleware lands (§19 Phase 1).
+Do not add an unprefixed mock-only switcher as a parallel contract;
+workspace navigation and fetches derive from `/w/<slug>/...` in
+production.
 
 ### Property "Sharing & client" tab
 
@@ -1322,10 +1309,10 @@ role only** per §15 cross-workspace visibility — no last names, no
 contact, no tasks the client has no business seeing), Billable hours
 (read-only `booking_billing` rollup), Quotes (with accept / reject
 controls — acceptance still routes through the unconditionally
-approval-gated set in §22 in production; the mock applies it
-in-memory), Invoices (read-only `vendor_invoice` list, no mark-paid
-control, **Upload proof** control on any invoice in `status =
-approved` that drops files into `proof_of_payment_file_ids`).
+approval-gated set in §22), Invoices (read-only `vendor_invoice`
+list, no mark-paid control, **Upload proof** control on any invoice
+in `status = approved` that drops files into
+`proof_of_payment_file_ids`).
 Reminders (§22) follow the usual agent-message delivery chain;
 clients silence them by unbinding WhatsApp (§23) or toggling the
 per-workspace `invoice_reminders.enabled` setting if they are

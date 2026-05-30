@@ -1,14 +1,17 @@
 # crew.day — UI preview mocks
 
-Disposable, hard-coded preview of the manager and employee UIs, mounted under
+Retiring, hard-coded preview of the manager and employee UIs, mounted under
 `/mocks` in the primary dev app stack. No DB, no auth, no real business logic.
 The container runs as a non-root user (`crewday:10001`, per `docs/specs/16`).
 Every mutation (tick a checklist item, approve an expense, etc.) is an
 in-memory toggle that lives until restart.
 
-The goal is to make `docs/specs/14-web-frontend.md` tangible — every
-spec-listed route renders something, the design tokens match, the
-vocabulary matches.
+The production UI source of truth is now `app/web/` (see
+`docs/specs/14-web-frontend.md`). This directory remains only for
+legacy preview context until mock retirement is complete. Before
+deleting mock code, preserve any actively useful component variation or
+visual-regression fixture by moving it into `app/web` `/styleguide`
+routes.
 
 ## Running
 
@@ -108,10 +111,11 @@ If editing a `.tsx` no longer triggers `[vite] hot updated`:
 
 ## Audience toggle
 
-Top banner has **Employee · Manager** pills (sets a cookie and
+Legacy top banner has **Employee · Manager** pills (sets a cookie and
 redirects to that audience's home) and a **☾ / ☀** theme toggle
 (light is primary, dark is manual per §14). There's also a link to
-`/styleguide` for the component gallery.
+`/styleguide` for the old component gallery. New styleguide demos live
+under `app/web` `/styleguide` and `/styleguide/*`.
 
 ## Route map (matches §14)
 

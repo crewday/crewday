@@ -47,11 +47,11 @@ clients** to `api.v1.*` using a long-lived API token (§03). The CLI
 
 ### `web.*` (React SPA + FastAPI backend)
 
-- `mocks/app/` — FastAPI JSON API (`/api/v1/*`), SSE endpoint
+- `app/` — FastAPI JSON API (`/api/v1/*`), SSE endpoint
   (`/events`), and an SPA catch-all (`GET *`) that serves the compiled
   `index.html` for any non-API path. No Jinja templates. See §14.
-- `mocks/web/` — React SPA (Vite + TypeScript strict). Built into
-  `mocks/web/dist/` at compile time; FastAPI serves the `dist/`
+- `app/web/` — React SPA (Vite + TypeScript strict). Built into
+  `app/web/dist/` at compile time; FastAPI serves the `dist/`
   tree as static files in production. In development, a `web-dev`
   service runs Vite HMR on `127.0.0.1:5173` and proxies API calls to
   the FastAPI container.
@@ -566,7 +566,7 @@ capabilities are live (see "Capability registry" above) but do
 - Dev: `pytest`, `pytest-asyncio`, `schemathesis`, `playwright`,
   `ruff`, `mypy`, `locust`.
 
-The frontend (`app/web/` and `mocks/web/`) is built with Node 24 (Vite) in a
+The production frontend (`app/web/`) is built with Node 24 (Vite) in a
 multi-stage Docker build. The runtime image (`python:3.14-slim`) has
 no Node; only the compiled `dist/` artefacts are copied into it.
 The `docker-compose` `dev` profile adds a `web-dev` service that

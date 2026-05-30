@@ -84,7 +84,7 @@ behind the shared Traefik / Pangolin badger front door on the dev box.
 - Strict TypeScript (`strict: true`), matching the app's posture
   (AGENTS.md "Type safety").
 - **Design tokens and icons flow one-way from app to site.** The
-  `mocks/web/src/styles/tokens.css` palette, the Lucide icon
+  `app/web/src/styles/tokens.css` palette, the Lucide icon
   registry introduced in commit `e249f75`, and the BEM-style
   semantic-class rules from app §14 are copied or re-exported into
   `site/web/src/`. The site does not invent colour, shape, or icon
@@ -143,9 +143,9 @@ site/
 ```
 
 The `mocks/` and `app/` trees are untouched. `site/web/` shares no
-`package.json` with `mocks/web/`, and `site/api/` shares no
-`pyproject.toml` with `mocks/app/` or `app/`. Two build graphs,
-two deploy pipelines, zero cross-import.
+`package.json` with the app frontend or retiring mock frontend, and
+`site/api/` shares no `pyproject.toml` with `mocks/app/` or `app/`.
+Two build graphs, two deploy pipelines, zero cross-import.
 
 The site gets its own CI lane (lint, typecheck, build, unit
 tests); a broken site build does not block an app release and vice
@@ -185,4 +185,5 @@ versa.
 
 These replace the ambiguous "frontend" and "landing page" in any
 site spec. On the app side, "frontend" still means the app's
-React SPA under `mocks/web/` (and future `app/web/`).
+React SPA under `app/web/`; legacy `mocks/web/` routes are
+retirement-only preview surfaces.

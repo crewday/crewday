@@ -16,8 +16,8 @@ sprints. A phase ships when its goals are met and its quality gates
 - `AGENTS.md`, `CLAUDE.md`, skill files, CI pipeline.
 - Empty FastAPI app with `/healthz`, `/readyz`, `/version`,
   `/signup/start`, `/signup/verify` stubs returning 501.
-- Vite + React + TS strict pipeline; styleguide page; all mock
-  routes prefixed under `/w/:slug/*`; SPA served by FastAPI at
+- Vite + React + TS strict pipeline; app-owned styleguide page;
+  workspace routes prefixed under `/w/:slug/*`; SPA served by FastAPI at
   `127.0.0.1:8100`.
 - **Capability registry** (§01) scaffolded: `app/capabilities.py`
   probes DB dialect, storage backend, mail provider, LLM client

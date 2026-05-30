@@ -21,7 +21,8 @@ workspace; those live in `docs/specs/11-llm-and-agents.md` and
   - Default source hot reload path: `http://127.0.0.1:18081`.
 - **Production**: not deployed yet.
   - Production app code lives under `app/`.
-  - High-fidelity mocks remain under `mocks/`.
+  - Legacy high-fidelity mocks remain under `mocks/` only until the
+    mock-retirement work removes or migrates them.
   - See `docs/specs/19-roadmap.md`.
 
 Never bind a new service to the public interface. Use `127.0.0.1` or
