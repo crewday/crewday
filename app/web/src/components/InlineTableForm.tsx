@@ -457,12 +457,17 @@ export function InlineTableForm<TDraft>({
     target instanceof Node && Boolean(rootRef.current?.contains(target))
   );
 
+  const canAutoExitRow = (row: InlineTableRow<TDraft>) => (
+    saveMode !== "batch"
+    && row.id !== activeTrailingCreateRow?.id
+  );
+
   const exitAutosaveRowsBeforeEdit = (targetRowId: string) => {
-    if (saveMode !== "autosave") return;
+    if (saveMode === "batch") return;
     for (const candidate of renderedRows) {
       if (
         candidate.id === targetRowId
-        || candidate.id === activeTrailingCreateRow?.id
+        || !canAutoExitRow(candidate)
         || !isRowEditing(candidate)
         || candidate.saving
         || candidate.disabled
@@ -815,7 +820,7 @@ export function InlineTableForm<TDraft>({
                 onDrop={reorderItemProps?.onDrop}
                 onDragEnd={reorderItemProps?.onDragEnd}
                 onBlur={(event) => {
-                  if (saveMode !== "autosave" || row.saving || row.disabled) return;
+                  if (!canAutoExitRow(row) || row.saving || row.disabled) return;
                   if (focusStayedInside(event)) return;
                   if (consumeSuppressedAutosaveBlur(row.id)) {
                     return;

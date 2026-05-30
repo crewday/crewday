@@ -842,4 +842,21 @@ describe("<PropertyClosuresPage>", () => {
       fake.restore();
     }
   });
+
+  it("does not create a closure when a date-only create row loses focus", async () => {
+    const fake = installFetch();
+    try {
+      render(<Harness />);
+
+      const createRow = await screen.findByLabelText("New closure");
+      const endDate = within(createRow).getByLabelText("End date");
+      fireEvent.change(endDate, { target: { value: "2026-04-17" } });
+      fireEvent.blur(endDate, { relatedTarget: document.body });
+
+      expect(fake.requests.some((request) => request.url === "/w/acme/api/v1/property_closures" && request.init?.method === "POST")).toBe(false);
+      expect(within(createRow).queryByText("Reason is required.")).toBeNull();
+    } finally {
+      fake.restore();
+    }
+  });
 });

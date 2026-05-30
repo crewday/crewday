@@ -550,6 +550,23 @@ describe("<StaysPage>", () => {
     }
   });
 
+  it("does not create a stay when a date-only create row loses focus", async () => {
+    const fake = installFetch();
+    try {
+      render(<Harness />);
+
+      const createRow = await screen.findByLabelText("New stay");
+      const checkIn = within(createRow).getByLabelText(/^Check-in\b/);
+      fireEvent.change(checkIn, { target: { value: "2026-04-21" } });
+      fireEvent.blur(checkIn, { relatedTarget: document.body });
+
+      expect(fake.requests.some((request) => request.method === "POST" && request.path === "/w/acme/api/v1/stays")).toBe(false);
+      expect(within(createRow).queryByText("Enter check-in and check-out dates.")).toBeNull();
+    } finally {
+      fake.restore();
+    }
+  });
+
   it("renders the agenda when cached stay payload is missing leaves", async () => {
     const fake = installFetch({ reservations: [existingReservation] });
     const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });

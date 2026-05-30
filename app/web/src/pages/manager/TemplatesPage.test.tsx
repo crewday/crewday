@@ -468,6 +468,77 @@ describe("<TemplatesPage> checklist reorder", () => {
     }
   });
 
+  it("saves and exits a dirty checklist row when focus leaves the row", async () => {
+    const harness = installFetch();
+    const client = makeClient();
+    try {
+      render(<Harness client={client} />);
+      await screen.findByText("First step");
+
+      const row = checklistRow("First step");
+      fireEvent.click(within(row).getByText("First step"));
+      const text = await within(row).findByLabelText("Checklist item text");
+      fireEvent.change(text, { target: { value: "Inspect kitchen" } });
+      fireEvent.blur(text, { relatedTarget: document.body });
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(500);
+      });
+      await waitFor(() => {
+        expect(patchCalls(harness.calls)).toHaveLength(1);
+      });
+      expect(patchedChecklist(patchCalls(harness.calls)[0]!)[0]).toMatchObject({
+        key: "first",
+        text: "Inspect kitchen",
+      });
+      await waitFor(() => {
+        expect(checklistRow("Inspect kitchen")).toHaveClass("is-reading");
+      });
+    } finally {
+      harness.restore();
+    }
+  });
+
+  it("saves the current checklist row before switching to another row", async () => {
+    const harness = installFetch();
+    const client = makeClient();
+    try {
+      render(<Harness client={client} />);
+      await screen.findByText("First step");
+
+      const firstRow = checklistRow("First step");
+      const secondRow = checklistRow("Second step");
+      fireEvent.click(within(firstRow).getByText("First step"));
+      const firstText = await within(firstRow).findByLabelText("Checklist item text");
+      fireEvent.change(firstText, { target: { value: "Inspect kitchen" } });
+
+      const secondReadCell = within(secondRow).getByText("Second step");
+      fireEvent.pointerDown(secondReadCell);
+      fireEvent.blur(firstText, { relatedTarget: null });
+      fireEvent.click(secondReadCell);
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(500);
+      });
+      await waitFor(() => {
+        expect(patchCalls(harness.calls)).toHaveLength(1);
+      });
+      expect(patchedChecklist(patchCalls(harness.calls)[0]!)[0]).toMatchObject({
+        key: "first",
+        text: "Inspect kitchen",
+      });
+      await waitFor(() => {
+        expect(checklistRow("Inspect kitchen")).toHaveClass("is-reading");
+      });
+      const secondText = screen.getByDisplayValue("Second step");
+      const editingSecondRow = secondText.closest("[data-inline-table-row-group]");
+      expect(editingSecondRow).toHaveClass("is-editing");
+      expect(secondText).toHaveFocus();
+    } finally {
+      harness.restore();
+    }
+  });
+
   it("creates and deletes checklist items through the replacement payload", async () => {
     const harness = installFetch();
     const client = makeClient();
@@ -514,7 +585,7 @@ describe("<TemplatesPage> checklist reorder", () => {
     }
   });
 
-  it("does not persist another row's unsaved draft in replacement payloads", async () => {
+  it("serializes a dirty row before creating another checklist item", async () => {
     const harness = installFetch();
     const client = makeClient();
     try {
@@ -538,12 +609,12 @@ describe("<TemplatesPage> checklist reorder", () => {
         expect(patchCalls(harness.calls)).toHaveLength(1);
       });
       const sent = patchedChecklist(patchCalls(harness.calls)[0]!);
-      expect(sent[0]).toMatchObject({ key: "first", text: "First step" });
+      expect(sent[0]).toMatchObject({ key: "first", text: "Draft first step" });
       expect(sent.at(-1)).toMatchObject({
         key: "restock_coffee",
         text: "Restock coffee",
       });
-      expect(firstText).toHaveValue("Draft first step");
+      expect(checklistRow("Draft first step")).toHaveClass("is-reading");
     } finally {
       harness.restore();
     }

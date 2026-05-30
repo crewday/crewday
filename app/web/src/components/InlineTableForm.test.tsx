@@ -1202,6 +1202,17 @@ describe("InlineTableForm", () => {
     expect(onSave).toHaveBeenCalledWith("r-1");
   });
 
+  it("saves dirty explicit rows when focus leaves the row", () => {
+    const { onSave } = renderInlineTable({
+      saveMode: "explicit",
+      rows: [{ ...editableRow(), dirty: true }],
+    });
+
+    fireEvent.blur(screen.getByLabelText("Title"), { relatedTarget: document.body });
+
+    expect(onSave).toHaveBeenCalledWith("r-1");
+  });
+
   it("defaults to autosave when saveMode is omitted", () => {
     const onSave = vi.fn();
     render(
@@ -1369,6 +1380,56 @@ describe("InlineTableForm", () => {
     await waitFor(() => expect(screen.getByLabelText("Owner")).toHaveFocus());
   });
 
+  it("saves a dirty explicit row once before switching rows and focuses the target field", async () => {
+    const onSave = vi.fn();
+    const onEdit = vi.fn();
+
+    function Harness() {
+      const [rows, setRows] = useState<InlineTableRow<Draft>[]>([
+        { ...rowWithTitle("r-1", "Confirm linen"), editing: true, dirty: true },
+        { ...rowWithTitle("r-2", "Restock towels"), draft: { title: "Restock towels", owner: "enzo", note: "" } },
+      ]);
+
+      return (
+        <InlineTableForm
+          ariaLabel="Explicit focus switch rows"
+          columns={columns}
+          rows={rows}
+          saveMode="explicit"
+          onDraftChange={vi.fn()}
+          onSave={(rowId) => {
+            onSave(rowId);
+            setRows((current) => current.map((row) => (
+              row.id === rowId ? { ...row, editing: false, dirty: false } : row
+            )));
+          }}
+          onCancel={vi.fn()}
+          onEdit={(rowId) => {
+            onEdit(rowId);
+            setRows((current) => current.map((row) => (
+              row.id === rowId ? { ...row, editing: true } : row
+            )));
+          }}
+        />
+      );
+    }
+
+    render(<Harness />);
+
+    const title = screen.getByLabelText("Title");
+    const targetCell = screen.getByText("enzo");
+    title.focus();
+    fireEvent.pointerDown(targetCell);
+    fireEvent.blur(title, { relatedTarget: null });
+    fireEvent.click(targetCell);
+
+    expect(onSave).toHaveBeenCalledWith("r-1");
+    expect(onSave).toHaveBeenCalledTimes(1);
+    expect(onEdit).toHaveBeenCalledWith("r-2");
+    expect(onSave.mock.invocationCallOrder[0]).toBeLessThan(onEdit.mock.invocationCallOrder[0]!);
+    await waitFor(() => expect(screen.getByLabelText("Owner")).toHaveFocus());
+  });
+
   it("cancels an unchanged autosave row once before activating a different cell", async () => {
     const onCancel = vi.fn();
     const onEdit = vi.fn();
@@ -1496,6 +1557,70 @@ describe("InlineTableForm", () => {
     fireEvent.click(cancelButton);
 
     expect(onCancel).toHaveBeenCalledWith("r-1");
+    expect(onSave).not.toHaveBeenCalled();
+  });
+
+  it("does not save explicit rows after Escape cancel", () => {
+    const onCancel = vi.fn();
+    const onSave = vi.fn();
+    renderInlineTable({
+      saveMode: "explicit",
+      rows: [{ ...editableRow(), dirty: true }],
+      onCancel,
+      onSave,
+    });
+
+    const rowGroup = screen.getByLabelText("Confirm linen");
+    fireEvent.keyDown(screen.getByLabelText("Title"), { key: "Escape" });
+    fireEvent.blur(rowGroup, { relatedTarget: document.body });
+
+    expect(onCancel).toHaveBeenCalledWith("r-1");
+    expect(onSave).not.toHaveBeenCalled();
+  });
+
+  it("does not save explicit rows after clicking Cancel", () => {
+    const onCancel = vi.fn();
+    const onSave = vi.fn();
+    renderInlineTable({
+      saveMode: "explicit",
+      rows: [{ ...editableRow(), dirty: true }],
+      onCancel,
+      onSave,
+    });
+
+    const cancelButton = screen.getByRole("button", { name: "Cancel" });
+    fireEvent.pointerDown(cancelButton);
+    fireEvent.blur(screen.getByLabelText("Title"), { relatedTarget: cancelButton });
+    fireEvent.click(cancelButton);
+
+    expect(onCancel).toHaveBeenCalledWith("r-1");
+    expect(onSave).not.toHaveBeenCalled();
+  });
+
+  it("does not autosave dirty trailing create rows on blur", () => {
+    const onSave = vi.fn();
+    render(
+      <InlineTableForm
+        ariaLabel="Create row blur guard"
+        columns={columns}
+        rows={[]}
+        saveMode="explicit"
+        trailingCreateRow={{
+          id: "create",
+          label: "New row",
+          isNew: true,
+          editing: true,
+          dirty: true,
+          draft: { title: "Date-only default", owner: "maria", note: "" },
+        }}
+        onDraftChange={vi.fn()}
+        onSave={onSave}
+        onCancel={vi.fn()}
+      />,
+    );
+
+    fireEvent.blur(screen.getByLabelText("Title"), { relatedTarget: document.body });
+
     expect(onSave).not.toHaveBeenCalled();
   });
 
