@@ -6,7 +6,7 @@ import { qk } from "@/lib/queryKeys";
 import PageHeader from "@/components/PageHeader";
 import DeskPage from "@/components/DeskPage";
 import { EmptyState, Loading } from "@/components/common";
-import { useActiveAppRole } from "@/auth";
+import { useActiveAppRole, useAuth } from "@/auth";
 import type {
   SchedulerCalendarPayload,
   ScheduleAssignment,
@@ -115,6 +115,7 @@ function SchedulerCell({
 
 export default function SchedulerPage() {
   const role = useActiveAppRole();
+  const auth = useAuth();
   const scope: "manager" | "employee" | "client" =
     role === "client" ? "client" : role === "employee" ? "employee" : "manager";
 
@@ -182,7 +183,20 @@ export default function SchedulerPage() {
       tasks.set(key, arr);
     });
 
-    const users = calQ.data.users;
+    const users =
+      calQ.data.users.length === 0
+      && calQ.data.assignments.length === 0
+      && calQ.data.tasks.length === 0
+      && scope !== "client"
+      && auth.user
+        ? [
+            {
+              id: auth.user.user_id,
+              first_name: auth.user.display_name.trim().split(/\s+/)[0] ?? "",
+              display_name: auth.user.display_name,
+            },
+          ]
+        : calQ.data.users;
 
     return {
       propertyColor: color,
@@ -190,7 +204,7 @@ export default function SchedulerPage() {
       rotasByCell: rotas,
       tasksByCell: tasks,
     };
-  }, [calQ.data]);
+  }, [auth.user, calQ.data, scope]);
 
   const sub =
     scope === "client"

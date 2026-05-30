@@ -51,6 +51,16 @@ const CALENDAR: SchedulerCalendarPayload = {
   properties: [{ id: "prop_villa", name: "Villa Rosa", timezone: "Europe/Lisbon" }],
 };
 
+const EMPTY_CALENDAR: SchedulerCalendarPayload = {
+  window: { from: "2026-05-04", to: "2026-05-10" },
+  rulesets: [],
+  slots: [],
+  assignments: [],
+  tasks: [],
+  users: [],
+  properties: [],
+};
+
 function authenticate(grantRole: GrantRole): void {
   setAuthenticated({
     user_id: "usr_test",
@@ -157,6 +167,32 @@ describe("<SchedulerPage>", () => {
       expect(screen.queryByText("Alex Rivera")).toBeNull();
       expect(screen.getByText("08:00–12:00")).toBeInTheDocument();
       expect(screen.queryByText("gap")).toBeNull();
+    } finally {
+      fake.restore();
+    }
+  });
+
+  it("renders the current actor row when an employee or manager week is empty", async () => {
+    const fake = installFetch(EMPTY_CALENDAR);
+    try {
+      render(<Harness />);
+
+      expect(await screen.findByText("Test User")).toBeInTheDocument();
+      expect(screen.queryByText("No rota data yet")).toBeNull();
+    } finally {
+      fake.restore();
+    }
+  });
+
+  it("does not add the authenticated client to an empty scheduler feed", async () => {
+    authenticate("client");
+    const fake = installFetch(EMPTY_CALENDAR);
+    try {
+      render(<Harness />);
+
+      expect(await screen.findByText("No rota data yet")).toBeInTheDocument();
+      expect(screen.queryByText("Test User")).toBeNull();
+      expect(screen.queryByText("test@example.com")).toBeNull();
     } finally {
       fake.restore();
     }

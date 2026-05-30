@@ -179,6 +179,18 @@ def _public_user_ids(*, ctx: WorkspaceContext, user_ids: set[str]) -> dict[str, 
     }
 
 
+def _should_include_actor_row(
+    *,
+    ctx: WorkspaceContext,
+    filters: _SchedulerFilters,
+) -> bool:
+    if ctx.actor_grant_role not in {"manager", "worker"}:
+        return False
+    if filters.property_id is not None or filters.role_id is not None:
+        return False
+    return filters.user_id is None or filters.user_id == ctx.actor_id
+
+
 def _load_scheduler_sources(
     session: Session,
     ctx: WorkspaceContext,
@@ -333,6 +345,8 @@ def _build_payload(
         for task in sources.tasks
         if task.assignee_user_id is not None
     }
+    if not user_ids and _should_include_actor_row(ctx=ctx, filters=filters):
+        user_ids.add(ctx.actor_id)
     weekly_by_user = weekly_rows_for_users(session, ctx, user_ids=user_ids)
     public_user_ids = _public_user_ids(ctx=ctx, user_ids=user_ids)
     public_assignment_id: dict[str, str] | None

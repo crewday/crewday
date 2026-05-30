@@ -353,6 +353,189 @@ def _seed_workspace(scheduler_factory: sessionmaker[Session]) -> tuple[str, str,
 
 
 class TestSchedulerCalendar:
+    def test_manager_empty_feed_includes_current_actor_user(
+        self, scheduler_factory: sessionmaker[Session]
+    ) -> None:
+        ws_id, slug, owner_id = _seed_workspace(scheduler_factory)
+        client = _client(
+            scheduler_factory,
+            _ctx(workspace_id=ws_id, workspace_slug=slug, actor_id=owner_id),
+        )
+
+        resp = client.get(
+            "/scheduler/calendar", params={"from": "2026-05-04", "to": "2026-05-10"}
+        )
+
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        assert body["assignments"] == []
+        assert body["tasks"] == []
+        assert body["users"] == [
+            {
+                "id": owner_id,
+                "first_name": "Owner",
+                "display_name": "Owner Manager",
+                "work_role": None,
+            }
+        ]
+
+    def test_worker_empty_feed_includes_current_actor_user(
+        self, scheduler_factory: sessionmaker[Session]
+    ) -> None:
+        ws_id, slug, _owner_id = _seed_workspace(scheduler_factory)
+        with scheduler_factory() as session:
+            worker = bootstrap_user(
+                session, email="empty-worker@example.com", display_name="Empty Worker"
+            )
+            _grant(session, workspace_id=ws_id, user_id=worker.id, role="worker")
+            session.commit()
+
+        client = _client(
+            scheduler_factory,
+            _ctx(
+                workspace_id=ws_id,
+                workspace_slug=slug,
+                actor_id=worker.id,
+                grant_role="worker",
+                actor_was_owner_member=False,
+            ),
+        )
+
+        resp = client.get(
+            "/scheduler/calendar", params={"from": "2026-05-04", "to": "2026-05-10"}
+        )
+
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["users"] == [
+            {
+                "id": worker.id,
+                "first_name": "Empty",
+                "display_name": "Empty Worker",
+                "work_role": None,
+            }
+        ]
+
+    def test_empty_feed_does_not_force_actor_when_filters_exclude_them(
+        self, scheduler_factory: sessionmaker[Session]
+    ) -> None:
+        ws_id, slug, owner_id = _seed_workspace(scheduler_factory)
+        with scheduler_factory() as session:
+            prop_id = _property(session, workspace_id=ws_id, name="Filtered Villa")
+            session.commit()
+
+        client = _client(
+            scheduler_factory,
+            _ctx(workspace_id=ws_id, workspace_slug=slug, actor_id=owner_id),
+        )
+
+        user_resp = client.get(
+            "/scheduler/calendar",
+            params={
+                "from": "2026-05-04",
+                "to": "2026-05-10",
+                "user": "usr_someone_else",
+            },
+        )
+        property_resp = client.get(
+            "/scheduler/calendar",
+            params={
+                "from": "2026-05-04",
+                "to": "2026-05-10",
+                "property": prop_id,
+            },
+        )
+        role_resp = client.get(
+            "/scheduler/calendar",
+            params={
+                "from": "2026-05-04",
+                "to": "2026-05-10",
+                "role": "role_someone_else",
+            },
+        )
+
+        assert user_resp.status_code == 200, user_resp.text
+        assert property_resp.status_code == 200, property_resp.text
+        assert role_resp.status_code == 200, role_resp.text
+        assert user_resp.json()["users"] == []
+        assert property_resp.json()["users"] == []
+        assert role_resp.json()["users"] == []
+
+    def test_current_actor_is_not_duplicated_when_already_scheduled(
+        self, scheduler_factory: sessionmaker[Session]
+    ) -> None:
+        ws_id, slug, _owner_id = _seed_workspace(scheduler_factory)
+        with scheduler_factory() as session:
+            worker = bootstrap_user(
+                session,
+                email="scheduled-worker@example.com",
+                display_name="Scheduled Worker",
+            )
+            _grant(session, workspace_id=ws_id, user_id=worker.id, role="worker")
+            prop_id = _property(session, workspace_id=ws_id, name="Scheduled Villa")
+            _role_assignment(
+                session, workspace_id=ws_id, user_id=worker.id, property_id=prop_id
+            )
+            _task(
+                session,
+                workspace_id=ws_id,
+                property_id=prop_id,
+                user_id=worker.id,
+                title="Scheduled task",
+            )
+            session.commit()
+
+        client = _client(
+            scheduler_factory,
+            _ctx(
+                workspace_id=ws_id,
+                workspace_slug=slug,
+                actor_id=worker.id,
+                grant_role="worker",
+                actor_was_owner_member=False,
+            ),
+        )
+
+        resp = client.get(
+            "/scheduler/calendar", params={"from": "2026-05-04", "to": "2026-05-10"}
+        )
+
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        assert [row["id"] for row in body["users"]] == [worker.id]
+        assert len(body["users"]) == 1
+
+    def test_client_empty_feed_does_not_include_current_actor_identity(
+        self, scheduler_factory: sessionmaker[Session]
+    ) -> None:
+        ws_id, slug, _owner_id = _seed_workspace(scheduler_factory)
+        with scheduler_factory() as session:
+            client_user = bootstrap_user(
+                session, email="empty-client@example.com", display_name="Empty Client"
+            )
+            _grant(session, workspace_id=ws_id, user_id=client_user.id, role="client")
+            session.commit()
+
+        client = _client(
+            scheduler_factory,
+            _ctx(
+                workspace_id=ws_id,
+                workspace_slug=slug,
+                actor_id=client_user.id,
+                grant_role="client",
+                actor_was_owner_member=False,
+            ),
+        )
+
+        resp = client.get(
+            "/scheduler/calendar", params={"from": "2026-05-04", "to": "2026-05-10"}
+        )
+
+        assert resp.status_code == 200, resp.text
+        encoded = json.dumps(resp.json())
+        assert resp.json()["users"] == []
+        assert client_user.id not in encoded
+        assert "Empty Client" not in encoded
+
     def test_manager_feed_returns_assignments_slots_tasks_properties_and_users(
         self, scheduler_factory: sessionmaker[Session]
     ) -> None:
