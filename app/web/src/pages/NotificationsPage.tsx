@@ -4,7 +4,7 @@ import { Mail, MailOpen } from "lucide-react";
 import ChatMessageBody from "@/components/chat/ChatMessageBody";
 import DateTime from "@/components/DateTime";
 import PageHeader from "@/components/PageHeader";
-import { Chip, EmptyState, Loading } from "@/components/common";
+import { EmptyState, Loading } from "@/components/common";
 import { fetchJson } from "@/lib/api";
 import { qk } from "@/lib/queryKeys";
 import type { NotificationListResponse, NotificationPayload } from "@/types/api";
@@ -136,15 +136,16 @@ function NotificationItem({
         (isUnread ? " notification-card--unread" : " notification-card--read")
       }
     >
-      <div className="notification-card__status" aria-hidden="true">
+      <div
+        className="notification-card__status"
+        aria-label={isUnread ? "Unread notification" : "Read notification"}
+        role="img"
+      >
         {isUnread ? <Mail size={18} strokeWidth={1.8} /> : <MailOpen size={18} strokeWidth={1.8} />}
       </div>
       <article className="notification-card__body" aria-label={notificationTitle(notification)}>
         <div className="notification-card__head">
           <div className="notification-card__meta">
-            <Chip tone={isUnread ? "moss" : "ghost"} size="sm">
-              {isUnread ? "Unread" : "Read"}
-            </Chip>
             <span>{notificationKindLabel(notification.kind)}</span>
             <DateTime value={notification.created_at} showTime className="mono" />
           </div>

@@ -97,7 +97,15 @@ describe("NotificationsPage", () => {
     render(<Harness queryClient={queryClient} />);
 
     const card = await screen.findByRole("article", { name: "crew.day - Storm watch" });
-    expect(within(card).getByText("Unread")).toBeInTheDocument();
+    const row = card.closest("li");
+    expect(row).not.toBeNull();
+    const unreadIcon = within(row as HTMLElement).getByRole("img", {
+      name: "Unread notification",
+    });
+    expect(unreadIcon).toBeInTheDocument();
+    expect(unreadIcon.querySelector(".lucide-mail")).not.toBeNull();
+    expect(screen.queryByText("Unread")).not.toBeInTheDocument();
+    expect(screen.queryByText("Read")).not.toBeInTheDocument();
     expect(within(card).getByText("agent message")).toBeInTheDocument();
     expect(within(card).getByText("Secure the terrace.", { exact: false })).toBeInTheDocument();
     expect(card.querySelector('time[datetime="2026-05-29T10:30:00.000Z"]')).not.toBeNull();
@@ -147,8 +155,10 @@ describe("NotificationsPage", () => {
     expect(await screen.findByRole("article", { name: "First broadcast" })).toBeInTheDocument();
     expect(screen.getByRole("article", { name: "Second broadcast" })).toBeInTheDocument();
     expect(screen.getByRole("article", { name: "Already read" })).toBeInTheDocument();
-    expect(screen.getAllByText("Unread")).toHaveLength(2);
-    expect(screen.getAllByText("Read")).toHaveLength(1);
+    expect(screen.getAllByRole("img", { name: "Unread notification" })).toHaveLength(2);
+    expect(screen.getAllByRole("img", { name: "Read notification" })).toHaveLength(1);
+    expect(screen.queryByText("Unread")).not.toBeInTheDocument();
+    expect(screen.queryByText("Read")).not.toBeInTheDocument();
 
     await waitFor(() => {
       expect(
@@ -166,16 +176,16 @@ describe("NotificationsPage", () => {
     );
     expect(post?.body).toEqual({ ids: ["notif_1", "notif_2"] });
 
-    expect(screen.getAllByText("Unread")).toHaveLength(2);
-    expect(screen.getAllByText("Read")).toHaveLength(1);
+    expect(screen.getAllByRole("img", { name: "Unread notification" })).toHaveLength(2);
+    expect(screen.getAllByRole("img", { name: "Read notification" })).toHaveLength(1);
 
     cleanup();
     render(<Harness queryClient={queryClient} />);
 
     await waitFor(() => {
-      expect(screen.getAllByText("Read")).toHaveLength(3);
+      expect(screen.getAllByRole("img", { name: "Read notification" })).toHaveLength(3);
     });
-    expect(screen.getAllByText("Read")).toHaveLength(3);
+    expect(screen.getAllByRole("img", { name: "Read notification" })).toHaveLength(3);
     expect(
       env.requests.filter(
         (request) =>
