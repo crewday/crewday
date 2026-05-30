@@ -283,12 +283,9 @@ function selectDocuments(dialog: HTMLElement, files: File[]): void {
 }
 
 function documentDropZone(dialog: HTMLElement): HTMLElement {
-  const input = within(dialog).getByLabelText(
-    /Upload or drop invoices, manuals, warranties/i,
-  );
-  const label = input.closest("label");
-  if (!label) throw new Error("document drop zone not found");
-  return label;
+  return within(dialog).getByRole("button", {
+    name: /Upload or drop invoices, manuals, warranties/i,
+  });
 }
 
 function dropDocuments(dialog: HTMLElement, files: File[]): void {

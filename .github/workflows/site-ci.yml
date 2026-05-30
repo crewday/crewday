@@ -7,12 +7,14 @@ on:
       - "site/**"
       - "docs/specs-site/**"
       - "app/web/src/styles/tokens.css"
+      - "scripts/react-doctor-gate.sh"
       - ".github/workflows/site-ci.yml"
   pull_request:
     paths:
       - "site/**"
       - "docs/specs-site/**"
       - "app/web/src/styles/tokens.css"
+      - "scripts/react-doctor-gate.sh"
       - ".github/workflows/site-ci.yml"
 
 concurrency:
@@ -32,7 +34,9 @@ jobs:
         with:
           node-version: "24"
           cache: npm
-          cache-dependency-path: site/web/package-lock.json
+          cache-dependency-path: |
+            app/web/package-lock.json
+            site/web/package-lock.json
       - uses: astral-sh/setup-uv@v3
         with:
           enable-cache: true
@@ -42,6 +46,10 @@ jobs:
           python-version: "3.14"
       - name: Site quality
         run: site/scripts/quality.sh
+      - name: Install app web deps
+        run: npm --prefix app/web ci
+      - name: React Doctor
+        run: ./scripts/react-doctor-gate.sh
 
   images:
     name: site images

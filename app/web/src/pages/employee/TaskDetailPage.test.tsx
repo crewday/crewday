@@ -104,11 +104,12 @@ function LocationProbe(): ReactElement {
 }
 
 function fileInput(): HTMLInputElement {
-  const label = screen.getByText("Take photo").closest("label");
-  if (!label) throw new Error("evidence picker not found");
-  expect(label).toHaveClass("upload-dropzone");
-  expect(label).toHaveClass("evidence__picker");
-  const input = label.querySelector("input[type=file]") as HTMLInputElement | null;
+  const picker = screen.getByRole("button", { name: /Take photo/i });
+  expect(picker).toHaveClass("upload-dropzone");
+  expect(picker).toHaveClass("evidence__picker");
+  const input = picker.parentElement?.querySelector(
+    "input[type=file]",
+  ) as HTMLInputElement | null;
   if (!input) throw new Error("file input not found");
   expect(input.accept).toBe("image/*");
   expect(input.getAttribute("capture")).toBe("environment");

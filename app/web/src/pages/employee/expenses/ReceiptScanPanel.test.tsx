@@ -97,11 +97,11 @@ function highConfidenceScanBody(): unknown {
 }
 
 function pickerInput(): HTMLInputElement {
-  // The picker label wraps a hidden <input type="file">. Querying by
-  // role would skip it (hidden), so we reach in via the label.
-  const label = screen.getByText("Scan a receipt or screenshot")
+  // The picker wraps a hidden <input type="file">. Querying by role would
+  // skip the input, so we reach in through the visible picker control.
+  const picker = screen.getByText("Scan a receipt or screenshot")
     .parentElement as HTMLElement;
-  const input = label.querySelector(
+  const input = picker.parentElement?.querySelector(
     "input[type=file]",
   ) as HTMLInputElement | null;
   if (!input) throw new Error("file input not found");
@@ -214,6 +214,7 @@ describe("FileDropZone", () => {
 
     const dropZone = screen.getByRole("button", { name: /Upload receipt/i });
     expect(dropZone).toHaveAttribute("aria-disabled", "true");
+    expect(dropZone).toBeDisabled();
     expect(
       fireEvent.dragOver(dropZone, {
         dataTransfer: {
@@ -234,13 +235,22 @@ describe("FileDropZone", () => {
     expect(onFiles).not.toHaveBeenCalled();
   });
 
-  it("opens the file input from keyboard activation", () => {
+  it("does not open the file input while disabled", () => {
+    const clickSpy = vi.spyOn(HTMLInputElement.prototype, "click");
+    render(<FileDropZone title="Upload receipt" disabled onFiles={vi.fn()} />);
+
+    const dropZone = screen.getByRole("button", { name: /Upload receipt/i });
+    fireEvent.click(dropZone);
+    expect(clickSpy).not.toHaveBeenCalled();
+  });
+
+  it("opens the file input from pointer activation", () => {
     const clickSpy = vi.spyOn(HTMLInputElement.prototype, "click");
     render(<FileDropZone title="Upload receipt" onFiles={vi.fn()} />);
 
     const dropZone = screen.getByRole("button", { name: /Upload receipt/i });
     expect(dropZone).toHaveAttribute("aria-disabled", "false");
-    expect(fireEvent.keyDown(dropZone, { key: " " })).toBe(false);
+    fireEvent.click(dropZone);
     expect(clickSpy).toHaveBeenCalledTimes(1);
   });
 });

@@ -4,11 +4,8 @@ import {
   useState,
   type ChangeEvent,
   type DragEvent as ReactDragEvent,
-  type KeyboardEvent as ReactKeyboardEvent,
   type MouseEvent as ReactMouseEvent,
 } from "react";
-
-const BUTTON_ROLE = "button";
 
 interface FileDropZoneProps {
   title: string;
@@ -60,11 +57,15 @@ export default function FileDropZone(props: FileDropZoneProps) {
     return Array.from(types).includes("Files");
   }
 
-  function preventDisabledPicker(event: ReactMouseEvent<HTMLLabelElement>): void {
-    if (disabled) event.preventDefault();
+  function openPicker(event: ReactMouseEvent<HTMLButtonElement>): void {
+    if (disabled) {
+      event.preventDefault();
+      return;
+    }
+    if (event.target !== inputRef.current) inputRef.current?.click();
   }
 
-  function handleDragOver(event: ReactDragEvent<HTMLLabelElement>): void {
+  function handleDragOver(event: ReactDragEvent<HTMLButtonElement>): void {
     if (!isFileDrag(event.dataTransfer.types)) return;
     event.preventDefault();
     if (disabled) {
@@ -80,7 +81,7 @@ export default function FileDropZone(props: FileDropZoneProps) {
     setDragActive(false);
   }
 
-  function handleDrop(event: ReactDragEvent<HTMLLabelElement>): void {
+  function handleDrop(event: ReactDragEvent<HTMLButtonElement>): void {
     if (!isFileDrag(event.dataTransfer.types)) return;
     event.preventDefault();
     setDragActive(false);
@@ -88,41 +89,35 @@ export default function FileDropZone(props: FileDropZoneProps) {
     emitFiles(event.dataTransfer.files);
   }
 
-  function handleKeyDown(event: ReactKeyboardEvent<HTMLLabelElement>): void {
-    if (disabled) return;
-    if (event.key !== "Enter" && event.key !== " ") return;
-    event.preventDefault();
-    inputRef.current?.click();
-  }
-
   return (
-    <label
-      className={classes}
-      htmlFor={inputId}
-      role={BUTTON_ROLE}
-      aria-disabled={disabled}
-      tabIndex={disabled ? -1 : 0}
-      onClick={preventDisabledPicker}
-      onDragOver={handleDragOver}
-      onDragLeave={handleDragLeave}
-      onDrop={handleDrop}
-      onKeyDown={handleKeyDown}
-    >
+    <>
+      <button
+        className={classes}
+        type="button"
+        aria-disabled={disabled}
+        disabled={disabled}
+        onClick={openPicker}
+        onDragOver={handleDragOver}
+        onDragLeave={handleDragLeave}
+        onDrop={handleDrop}
+      >
+        <span className="upload-dropzone__title">{title}</span>
+        {description ? (
+          <span className="upload-dropzone__description">{description}</span>
+        ) : null}
+      </button>
       <input
         ref={inputRef}
         id={inputId}
+        className="upload-dropzone__input"
         type="file"
         accept={accept}
-        aria-label={inputLabel}
+        aria-label={inputLabel ?? title}
         multiple={multiple}
         capture={capture}
         disabled={disabled}
         onChange={selectFiles}
       />
-      <span className="upload-dropzone__title">{title}</span>
-      {description ? (
-        <span className="upload-dropzone__description">{description}</span>
-      ) : null}
-    </label>
+    </>
   );
 }

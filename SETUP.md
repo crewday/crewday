@@ -339,7 +339,15 @@ Use the wrapper for normal quality gates:
 
 It runs `ruff format`, `ruff check --fix`, remaining lint/format checks,
 repairs container-readable permissions for bind-mounted source files,
-`mypy --strict app`, and pytest through `pytest-testmon`. Use:
+`mypy --strict app`, React Doctor for `app/web` and `site/web`, and
+pytest through `pytest-testmon`. The focused frontend static gate is:
+
+```bash
+./scripts/react-doctor-gate.sh
+```
+
+It intentionally excludes `mocks/web` and fails unless each active
+React surface has score 100 and zero diagnostics. Use:
 
 ```bash
 ./scripts/agent-quality.sh --full-tests

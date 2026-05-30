@@ -5,6 +5,7 @@
 | layer                | tool                      | runs on               | budget per run |
 |----------------------|---------------------------|-----------------------|----------------|
 | static (type/lint)   | `ruff`, `mypy --strict`   | every commit          | < 15s          |
+| frontend static      | `react-doctor`            | every PR touching active React surfaces | < 30s |
 | import boundaries    | `import-linter`           | every commit          | < 10s          |
 | tenant isolation     | `pytest tests/tenant/`    | every PR              | < 60s          |
 | unit                 | `pytest`                  | every PR              | < 60s          |
@@ -225,6 +226,20 @@ comment).
 
 ## Frontend
 
+### Static quality
+
+- `./scripts/react-doctor-gate.sh` is the single local and CI command
+  for React Doctor. It runs pinned React Doctor against `app/web` and
+  `site/web`, intentionally excludes `mocks/web`, and fails unless each
+  active surface reports score 100 and zero diagnostics.
+- `./scripts/agent-quality.sh` runs the same gate before pytest, so
+  coding agents cannot skip it with `--skip-tests`.
+- Agents must fix every React Doctor finding they encounter, even when
+  the diagnostic is outside their own diff. The only exception is a
+  diagnostic in a dirty file the agent did not edit; agents must not
+  overwrite that file and must leave a Beads comment with the blocked
+  diagnostic and path.
+
 ### Unit
 
 - **vitest** + **@testing-library/react** for component and hook tests.
@@ -303,6 +318,9 @@ comment).
   `make openapi-agent-links`, and CI runs the same target in an
   `openapi-agent-links` job alongside `cli-parity` so missing or unsafe
   agent handoff links fail before merge.
+- `react-doctor` — `./scripts/react-doctor-gate.sh` runs React Doctor
+  for `app/web` and `site/web` only, excluding `mocks/web`; CI fails
+  if either active React surface has score below 100 or any diagnostic.
 - Coverage threshold: 85% domain, 70% overall; tracked via codecov.
 
 ## Release gates
