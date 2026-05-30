@@ -22,9 +22,11 @@ from collections.abc import Sequence
 from html import escape
 
 from fastapi import APIRouter, Depends, Query, Request, Response, status
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 from weasyprint import HTML
 
+from app.adapters.db.places.models import Area
 from app.adapters.qr import render_qr
 from app.api.assets._shared import (
     ASSET_ERROR_RESPONSES,
@@ -76,7 +78,7 @@ from app.domain.assets.assets import (
     restore_asset,
     update_asset,
 )
-from app.tenancy import WorkspaceContext
+from app.tenancy import WorkspaceContext, tenant_agnostic
 
 __all__ = [
     "AssetCreateRequest",
@@ -120,11 +122,31 @@ def _asset_list_response(
         limit=limit + 1,
     )
     page = paginate(views, limit=limit, key_getter=lambda view: view.id)
+    area_labels = _area_labels_for(session, page.items)
     return AssetListResponse(
-        data=[AssetResponse.from_view(view) for view in page.items],
+        data=[
+            AssetResponse.from_view(view, area_label=area_labels.get(view.area_id))
+            for view in page.items
+        ],
         next_cursor=page.next_cursor,
         has_more=page.has_more,
     )
+
+
+def _area_labels_for(
+    session: Session, views: Sequence[AssetView]
+) -> dict[str | None, str]:
+    area_ids = {view.area_id for view in views if view.area_id is not None}
+    if not area_ids:
+        return {}
+    with tenant_agnostic():
+        rows = session.execute(
+            select(Area.id, Area.label).where(
+                Area.id.in_(area_ids),
+                Area.deleted_at.is_(None),
+            )
+        ).all()
+    return {area_id: label for area_id, label in rows}
 
 
 def _render_qr_sheet_pdf(

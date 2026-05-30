@@ -3927,6 +3927,17 @@
             ],
             "title": "Archived At"
           },
+          "area": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Area"
+          },
           "area_id": {
             "anyOf": [
               {
@@ -4220,6 +4231,7 @@
         },
         "required": [
           "archived_at",
+          "area",
           "area_id",
           "asset_type_id",
           "condition",

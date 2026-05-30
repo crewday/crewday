@@ -382,6 +382,7 @@ class AssetResponse(BaseModel):
     workspace_id: str
     property_id: str
     area_id: str | None
+    area: str | None
     asset_type_id: str | None
     name: str
     label: str
@@ -414,12 +415,15 @@ class AssetResponse(BaseModel):
     archived_at: datetime | None
 
     @classmethod
-    def from_view(cls, view: AssetView) -> AssetResponse:
+    def from_view(
+        cls, view: AssetView, *, area_label: str | None = None
+    ) -> AssetResponse:
         return cls(
             id=view.id,
             workspace_id=view.workspace_id,
             property_id=view.property_id,
             area_id=view.area_id,
+            area=area_label,
             asset_type_id=view.asset_type_id,
             name=view.name,
             label=view.name,

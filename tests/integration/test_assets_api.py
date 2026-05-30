@@ -190,6 +190,7 @@ def test_assets_crud_move_regenerate_scan_and_png(db_session: Session) -> None:
     listed = client.get("/assets", params={"property_id": property_id})
     assert listed.status_code == 200
     assert [row["id"] for row in listed.json()["data"]] == [asset["id"]]
+    assert listed.json()["data"][0]["area"] == "Kitchen"
 
     type_list = client.get("/assets/asset_types")
     assert type_list.status_code == 200

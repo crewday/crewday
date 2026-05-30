@@ -56,7 +56,8 @@ from __future__ import annotations
 import json
 import os
 import sys
-from datetime import datetime
+from dataclasses import dataclass
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Any, Final
 
@@ -64,6 +65,14 @@ import click
 from sqlalchemy import select
 from sqlalchemy.orm import Session as SqlaSession
 
+from app.adapters.db.assets.bootstrap import seed_asset_type_catalog
+from app.adapters.db.assets.models import (
+    Asset,
+    AssetAction,
+    AssetDocument,
+    AssetType,
+    FileExtraction,
+)
 from app.adapters.db.authz.bootstrap import (
     seed_owners_system_group,
     seed_system_permission_groups,
@@ -80,6 +89,7 @@ from app.adapters.db.identity.models import (
     User,
     canonicalise_email,
 )
+from app.adapters.db.places.models import Area, Property, PropertyWorkspace
 from app.adapters.db.session import make_uow
 from app.adapters.db.workspace.bootstrap import seed_starter_work_roles
 from app.adapters.db.workspace.models import UserWorkspace, Workspace
@@ -90,6 +100,7 @@ from app.domain.llm.budget import new_ledger_row
 from app.domain.plans import seed_free_tier_10pct, tight_cap_cents
 from app.tenancy import WorkspaceContext, tenant_agnostic
 from app.util.clock import SystemClock
+from app.util.tokens import short_token
 from app.util.ulid import new_ulid
 
 __all__ = [
@@ -106,6 +117,240 @@ _DEV_AUTH_ENV_VAR: Final[str] = "CREWDAY_DEV_AUTH"
 # file so a single ``git add scripts/dev_seed_personal.json`` covers
 # the whole story.
 SEED_FILE: Final[Path] = Path(__file__).resolve().parent / "dev_seed_personal.json"
+
+
+@dataclass(frozen=True, slots=True)
+class _SmokePropertySpec:
+    name: str
+    kind: str
+    city: str
+    country: str
+    locale: str
+    currency: str
+    timezone: str
+    areas: tuple[str, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class _SmokeAssetSpec:
+    name: str
+    property_name: str
+    area: str
+    type_key: str
+    make: str
+    model: str
+    serial: str
+    condition: str
+    status: str
+    installed_on: date
+    purchased_on: date
+    price_cents: int
+    currency: str
+    vendor: str
+    warranty: date
+    guest_visible: bool
+    notes: str
+    guest_instructions: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class _SmokeDocumentSpec:
+    title: str
+    filename: str
+    kind: str
+    asset_name: str
+    expires_on: date | None
+    amount_cents: int | None
+    amount_currency: str | None
+    extraction_status: str
+    extractor: str | None
+    body_text: str | None
+    notes: str | None = None
+
+
+_SMOKE_PROPERTY_SPECS: Final[tuple[_SmokePropertySpec, ...]] = (
+    _SmokePropertySpec(
+        name="Smoke Villa",
+        kind="str",
+        city="Nice",
+        country="FR",
+        locale="fr-FR",
+        currency="EUR",
+        timezone="Europe/Paris",
+        areas=("Kitchen", "Pool plant", "Utility closet", "Garden"),
+    ),
+    _SmokePropertySpec(
+        name="Smoke Apartment",
+        kind="vacation",
+        city="Dubai",
+        country="AE",
+        locale="en-AE",
+        currency="AED",
+        timezone="Asia/Dubai",
+        areas=("Kitchen", "Laundry", "Entry"),
+    ),
+)
+
+_SMOKE_ASSET_SPECS: Final[tuple[_SmokeAssetSpec, ...]] = (
+    _SmokeAssetSpec(
+        name="Pool pump #2",
+        property_name="Smoke Villa",
+        area="Pool plant",
+        type_key="pool_pump",
+        make="Pentair",
+        model="SuperFlo VS",
+        serial="PP2-SMOKE-001",
+        condition="fair",
+        status="active",
+        installed_on=date(2021, 4, 12),
+        purchased_on=date(2021, 3, 30),
+        price_cents=148900,
+        currency="EUR",
+        vendor="Azur Piscine",
+        warranty=date(2026, 6, 30),
+        guest_visible=False,
+        notes="Seed asset for filter, QR-sheet, and maintenance due smoke tests.",
+    ),
+    _SmokeAssetSpec(
+        name="Kitchen refrigerator",
+        property_name="Smoke Villa",
+        area="Kitchen",
+        type_key="refrigerator",
+        make="Liebherr",
+        model="CNsdc 5703",
+        serial="FRIDGE-SMOKE-014",
+        condition="good",
+        status="active",
+        installed_on=date(2023, 2, 18),
+        purchased_on=date(2023, 2, 10),
+        price_cents=219900,
+        currency="EUR",
+        vendor="Darty Pro",
+        warranty=date(2028, 2, 10),
+        guest_visible=True,
+        guest_instructions=(
+            "If the alarm sounds, close the door firmly and notify the host."
+        ),
+        notes="Guest-visible equipment card coverage.",
+    ),
+    _SmokeAssetSpec(
+        name="Entry smoke detector",
+        property_name="Smoke Apartment",
+        area="Entry",
+        type_key="smoke_detector",
+        make="Nest",
+        model="Protect 2nd Gen",
+        serial="SD-SMOKE-777",
+        condition="new",
+        status="active",
+        installed_on=date(2025, 11, 6),
+        purchased_on=date(2025, 10, 28),
+        price_cents=47900,
+        currency="AED",
+        vendor="ACE",
+        warranty=date(2027, 10, 28),
+        guest_visible=True,
+        guest_instructions="Press the center button only during a false alarm.",
+        notes="Safety-category filter coverage.",
+    ),
+    _SmokeAssetSpec(
+        name="Laundry washer",
+        property_name="Smoke Apartment",
+        area="Laundry",
+        type_key="washing_machine",
+        make="Bosch",
+        model="Series 6",
+        serial="WASH-SMOKE-302",
+        condition="needs_replacement",
+        status="in_repair",
+        installed_on=date(2016, 8, 9),
+        purchased_on=date(2016, 8, 1),
+        price_cents=259900,
+        currency="AED",
+        vendor="Jumbo",
+        warranty=date(2019, 8, 1),
+        guest_visible=False,
+        notes="Repair-state and replacement-state row coverage.",
+    ),
+    _SmokeAssetSpec(
+        name="Garden generator",
+        property_name="Smoke Villa",
+        area="Garden",
+        type_key="generator",
+        make="Honda",
+        model="EU70is",
+        serial="GEN-SMOKE-088",
+        condition="poor",
+        status="decommissioned",
+        installed_on=date(2014, 5, 20),
+        purchased_on=date(2014, 5, 5),
+        price_cents=399900,
+        currency="EUR",
+        vendor="Pro Tools Riviera",
+        warranty=date(2017, 5, 5),
+        guest_visible=False,
+        notes="Archived-ish status coverage without soft-deleting the row.",
+    ),
+)
+
+_SMOKE_DOCUMENT_SPECS: Final[tuple[_SmokeDocumentSpec, ...]] = (
+    _SmokeDocumentSpec(
+        title="Pool pump warranty",
+        filename="pool-pump-warranty-smoke.pdf",
+        kind="warranty",
+        asset_name="Pool pump #2",
+        expires_on=date(2026, 6, 30),
+        amount_cents=148900,
+        amount_currency="EUR",
+        extraction_status="succeeded",
+        extractor="pdf",
+        body_text=(
+            "Warranty certificate for Smoke Villa pool pump #2. Covers motor "
+            "and controller faults through 2026-06-30."
+        ),
+        notes="Shows an expiring warranty document.",
+    ),
+    _SmokeDocumentSpec(
+        title="Refrigerator manual",
+        filename="liebherr-refrigerator-manual.txt",
+        kind="manual",
+        asset_name="Kitchen refrigerator",
+        expires_on=None,
+        amount_cents=None,
+        amount_currency=None,
+        extraction_status="succeeded",
+        extractor="passthrough",
+        body_text=(
+            "Quick reference: hold alarm for three seconds, clean coils every "
+            "six months, and check door seals after each turnover."
+        ),
+    ),
+    _SmokeDocumentSpec(
+        title="Smoke detector certificate",
+        filename="entry-smoke-detector-certificate.pdf",
+        kind="certificate",
+        asset_name="Entry smoke detector",
+        expires_on=date(2027, 10, 28),
+        amount_cents=47900,
+        amount_currency="AED",
+        extraction_status="empty",
+        extractor="pdf",
+        body_text="",
+    ),
+    _SmokeDocumentSpec(
+        title="Washer repair invoice",
+        filename="washer-repair-invoice-smoke.pdf",
+        kind="invoice",
+        asset_name="Laundry washer",
+        expires_on=None,
+        amount_cents=62500,
+        amount_currency="AED",
+        extraction_status="failed",
+        extractor="pdf",
+        body_text=None,
+        notes="Failure-state document for retry UI coverage.",
+    ),
+)
 
 
 # ---------------------------------------------------------------------------
@@ -450,6 +695,421 @@ def _ensure_passkey(
     return True
 
 
+def _seed_smoke_workspace_content(
+    session: SqlaSession,
+    *,
+    workspace_id: str,
+    actor_id: str,
+    now: datetime,
+) -> dict[str, int]:
+    ctx = WorkspaceContext(
+        workspace_id=workspace_id,
+        workspace_slug="smoke",
+        actor_id=actor_id,
+        actor_kind="user",
+        actor_grant_role="manager",
+        actor_was_owner_member=True,
+        audit_correlation_id=new_ulid(),
+    )
+    seed_asset_type_catalog(session, ctx)
+    property_ids = _ensure_smoke_properties(session, workspace_id=workspace_id, now=now)
+    area_ids = _smoke_area_ids(session, property_ids)
+    type_ids = _smoke_asset_type_ids(session, workspace_id)
+    asset_ids = _ensure_smoke_assets(
+        session,
+        workspace_id=workspace_id,
+        property_ids=property_ids,
+        area_ids=area_ids,
+        type_ids=type_ids,
+        now=now,
+    )
+    action_count = _ensure_smoke_actions(
+        session,
+        workspace_id=workspace_id,
+        asset_ids=asset_ids,
+        actor_id=actor_id,
+        now=now,
+    )
+    document_count = _ensure_smoke_documents(
+        session,
+        workspace_id=workspace_id,
+        asset_ids=asset_ids,
+        now=now,
+    )
+    return {
+        "properties": len(property_ids),
+        "assets": len(asset_ids),
+        "actions": action_count,
+        "documents": document_count,
+    }
+
+
+def _ensure_smoke_properties(
+    session: SqlaSession,
+    *,
+    workspace_id: str,
+    now: datetime,
+) -> dict[str, str]:
+    out: dict[str, str] = {}
+    with tenant_agnostic():
+        for spec in _SMOKE_PROPERTY_SPECS:
+            existing = session.scalar(
+                select(Property)
+                .join(PropertyWorkspace, PropertyWorkspace.property_id == Property.id)
+                .where(PropertyWorkspace.workspace_id == workspace_id)
+                .where(Property.name == spec.name)
+                .where(Property.deleted_at.is_(None))
+                .limit(1)
+            )
+            if existing is None:
+                property_id = new_ulid()
+                existing = Property(
+                    id=property_id,
+                    name=spec.name,
+                    kind=spec.kind,
+                    address=f"{spec.name}, {spec.city}",
+                    address_json={"city": spec.city, "country": spec.country},
+                    country=spec.country,
+                    locale=spec.locale,
+                    default_currency=spec.currency,
+                    timezone=spec.timezone,
+                    tags_json=["smoke", "seed"],
+                    welcome_defaults_json={},
+                    settings_override_json={"assets.show_guest_assets": True},
+                    property_notes_md="Seeded by dev_seed_personal for smoke testing.",
+                    created_at=now,
+                    updated_at=now,
+                    deleted_at=None,
+                )
+                session.add(existing)
+                session.flush()
+                session.add(
+                    PropertyWorkspace(
+                        property_id=property_id,
+                        workspace_id=workspace_id,
+                        label=spec.name,
+                        membership_role="owner_workspace",
+                        share_guest_identity=True,
+                        auto_shift_from_occurrence=False,
+                        status="active",
+                        created_at=now,
+                    )
+                )
+            out[spec.name] = existing.id
+            _ensure_smoke_areas(
+                session, property_id=existing.id, labels=spec.areas, now=now
+            )
+        session.flush()
+    return out
+
+
+def _ensure_smoke_areas(
+    session: SqlaSession,
+    *,
+    property_id: str,
+    labels: tuple[str, ...],
+    now: datetime,
+) -> None:
+    existing = set(
+        session.scalars(
+            select(Area.label)
+            .where(Area.property_id == property_id)
+            .where(Area.deleted_at.is_(None))
+        ).all()
+    )
+    for ordering, label in enumerate(labels):
+        if label in existing:
+            continue
+        kind = "outdoor" if label in {"Garden", "Pool plant"} else "indoor_room"
+        session.add(
+            Area(
+                id=new_ulid(),
+                property_id=property_id,
+                unit_id=None,
+                name=label,
+                label=label,
+                kind=kind,
+                icon=None,
+                ordering=ordering,
+                parent_area_id=None,
+                notes_md="",
+                created_at=now,
+                updated_at=now,
+                deleted_at=None,
+            )
+        )
+
+
+def _smoke_area_ids(
+    session: SqlaSession,
+    property_ids: dict[str, str],
+) -> dict[tuple[str, str], str]:
+    out: dict[tuple[str, str], str] = {}
+    with tenant_agnostic():
+        for property_name, property_id in property_ids.items():
+            rows = session.execute(
+                select(Area.id, Area.label).where(
+                    Area.property_id == property_id,
+                    Area.deleted_at.is_(None),
+                )
+            ).all()
+            for area_id, label in rows:
+                out[(property_name, label)] = area_id
+    return out
+
+
+def _smoke_asset_type_ids(session: SqlaSession, workspace_id: str) -> dict[str, str]:
+    with tenant_agnostic():
+        rows = session.execute(
+            select(AssetType.key, AssetType.id).where(
+                AssetType.workspace_id == workspace_id,
+                AssetType.deleted_at.is_(None),
+            )
+        ).all()
+    return {key: asset_type_id for key, asset_type_id in rows}
+
+
+def _ensure_smoke_assets(
+    session: SqlaSession,
+    *,
+    workspace_id: str,
+    property_ids: dict[str, str],
+    area_ids: dict[tuple[str, str], str],
+    type_ids: dict[str, str],
+    now: datetime,
+) -> dict[str, str]:
+    out: dict[str, str] = {}
+    with tenant_agnostic():
+        for spec in _SMOKE_ASSET_SPECS:
+            existing = session.scalar(
+                select(Asset)
+                .where(Asset.workspace_id == workspace_id)
+                .where(Asset.name == spec.name)
+                .where(Asset.deleted_at.is_(None))
+                .limit(1)
+            )
+            if existing is None:
+                asset_id = new_ulid()
+                existing = Asset(
+                    id=asset_id,
+                    workspace_id=workspace_id,
+                    property_id=property_ids[spec.property_name],
+                    area_id=area_ids.get((spec.property_name, spec.area)),
+                    asset_type_id=type_ids.get(spec.type_key),
+                    name=spec.name,
+                    make=spec.make,
+                    model=spec.model,
+                    serial_number=spec.serial,
+                    condition=spec.condition,
+                    status=spec.status,
+                    installed_on=spec.installed_on,
+                    purchased_on=spec.purchased_on,
+                    purchase_price_cents=spec.price_cents,
+                    purchase_currency=spec.currency,
+                    purchase_vendor=spec.vendor,
+                    warranty_expires_on=spec.warranty,
+                    expected_lifespan_years=None,
+                    estimated_replacement_on=None,
+                    cover_photo_file_id=None,
+                    qr_token=short_token(workspace_id, asset_id),
+                    guest_visible=spec.guest_visible,
+                    guest_instructions_md=spec.guest_instructions,
+                    notes_md=spec.notes,
+                    settings_override_json=None,
+                    created_at=now,
+                    updated_at=now,
+                    deleted_at=None,
+                )
+                session.add(existing)
+                session.flush()
+            out[spec.name] = existing.id
+    return out
+
+
+def _ensure_smoke_actions(
+    session: SqlaSession,
+    *,
+    workspace_id: str,
+    asset_ids: dict[str, str],
+    actor_id: str,
+    now: datetime,
+) -> int:
+    specs = (
+        ("Pool pump #2", "inspect", "Inspect seal", 180, now - timedelta(days=210)),
+        (
+            "Kitchen refrigerator",
+            "service",
+            "Clean coils",
+            180,
+            now - timedelta(days=35),
+        ),
+        (
+            "Laundry washer",
+            "repair",
+            "Drain pump repair",
+            None,
+            now - timedelta(days=4),
+        ),
+    )
+    count = 0
+    with tenant_agnostic():
+        for asset_name, kind, label, interval_days, performed_at in specs:
+            asset_id = asset_ids[asset_name]
+            existing = session.scalar(
+                select(AssetAction.id)
+                .where(AssetAction.workspace_id == workspace_id)
+                .where(AssetAction.asset_id == asset_id)
+                .where(AssetAction.label == label)
+                .where(AssetAction.deleted_at.is_(None))
+                .limit(1)
+            )
+            if existing is None:
+                session.add(
+                    AssetAction(
+                        id=new_ulid(),
+                        workspace_id=workspace_id,
+                        asset_id=asset_id,
+                        key=f"smoke_{kind}_{asset_name.lower().replace(' ', '_')}",
+                        kind=kind,
+                        label=label,
+                        description_md=None,
+                        task_template_id=None,
+                        schedule_id=None,
+                        interval_days=interval_days,
+                        estimated_duration_minutes=30,
+                        inventory_effects_json=None,
+                        last_performed_at=performed_at,
+                        last_performed_task_id=None,
+                        performed_by=actor_id,
+                        notes_md="Seeded smoke maintenance record.",
+                        meter_reading=None,
+                        evidence_blob_hash=None,
+                        created_at=performed_at,
+                        updated_at=performed_at,
+                        deleted_at=None,
+                    )
+                )
+            count += 1
+    return count
+
+
+def _ensure_smoke_documents(
+    session: SqlaSession,
+    *,
+    workspace_id: str,
+    asset_ids: dict[str, str],
+    now: datetime,
+) -> int:
+    count = 0
+    with tenant_agnostic():
+        for spec in _SMOKE_DOCUMENT_SPECS:
+            asset_id = asset_ids[spec.asset_name]
+            existing = session.scalar(
+                select(AssetDocument)
+                .where(AssetDocument.workspace_id == workspace_id)
+                .where(AssetDocument.asset_id == asset_id)
+                .where(AssetDocument.title == spec.title)
+                .where(AssetDocument.deleted_at.is_(None))
+                .limit(1)
+            )
+            if existing is None:
+                existing = AssetDocument(
+                    id=new_ulid(),
+                    workspace_id=workspace_id,
+                    file_id=None,
+                    blob_hash=_smoke_blob_hash(spec.filename),
+                    filename=spec.filename,
+                    asset_id=asset_id,
+                    property_id=None,
+                    kind=spec.kind,
+                    title=spec.title,
+                    notes_md=spec.notes,
+                    expires_on=spec.expires_on,
+                    amount_cents=spec.amount_cents,
+                    amount_currency=spec.amount_currency,
+                    created_at=now,
+                    updated_at=now,
+                    deleted_at=None,
+                )
+                session.add(existing)
+                session.flush()
+            _ensure_smoke_extraction(
+                session,
+                workspace_id=workspace_id,
+                document=existing,
+                spec=spec,
+                now=now,
+            )
+            count += 1
+    return count
+
+
+def _ensure_smoke_extraction(
+    session: SqlaSession,
+    *,
+    workspace_id: str,
+    document: AssetDocument,
+    spec: _SmokeDocumentSpec,
+    now: datetime,
+) -> None:
+    row = session.get(FileExtraction, document.id)
+    body_text = spec.body_text
+    extracted_at = now if spec.extraction_status in {"empty", "succeeded"} else None
+    last_error = (
+        "Seeded smoke extraction failure: sample PDF text layer was unreadable."
+        if spec.extraction_status == "failed"
+        else None
+    )
+    if body_text:
+        pages_json: list[dict[str, int]] | None = [
+            {"page": 1, "char_start": 0, "char_end": len(body_text)}
+        ]
+        token_count = len(body_text.split())
+    elif spec.extraction_status == "empty":
+        pages_json = []
+        token_count = 0
+    else:
+        pages_json = None
+        token_count = None
+    attempts = 1 if spec.extraction_status in {"failed", "succeeded"} else 0
+    if row is None:
+        session.add(
+            FileExtraction(
+                id=document.id,
+                workspace_id=workspace_id,
+                extraction_status=spec.extraction_status,
+                extractor=spec.extractor,
+                body_text=body_text,
+                pages_json=pages_json,
+                token_count=token_count,
+                has_secret_marker=False,
+                attempts=attempts,
+                last_error=last_error,
+                extracted_at=extracted_at,
+                created_at=now,
+                updated_at=now,
+            )
+        )
+        return
+    row.workspace_id = workspace_id
+    row.extraction_status = spec.extraction_status
+    row.extractor = spec.extractor
+    row.body_text = body_text
+    row.pages_json = pages_json
+    row.token_count = token_count
+    row.has_secret_marker = False
+    row.attempts = attempts
+    row.last_error = last_error
+    row.extracted_at = extracted_at
+    row.updated_at = now
+
+
+def _smoke_blob_hash(filename: str) -> str:
+    import hashlib
+
+    return hashlib.sha256(f"crewday-smoke-document:{filename}".encode()).hexdigest()
+
+
 # ---------------------------------------------------------------------------
 # Apply — load JSON, seed rows.
 # ---------------------------------------------------------------------------
@@ -488,6 +1148,7 @@ def apply_seed(payload: dict[str, Any]) -> dict[str, Any]:
         "workspace_created": False,
         "passkeys_inserted": 0,
         "passkeys_skipped": 0,
+        "smoke_content": {},
         "deployment_admin": deployment_admin,
         "deployment_settings_applied": sorted(settings_overrides),
     }
@@ -546,6 +1207,14 @@ def apply_seed(payload: dict[str, Any]) -> dict[str, Any]:
 
         for key, value in settings_overrides.items():
             _upsert_deployment_setting(session, key=key, value=value, now=now)
+
+        if workspace_slug == "smoke":
+            summary["smoke_content"] = _seed_smoke_workspace_content(
+                session,
+                workspace_id=workspace_id,
+                actor_id=user_id,
+                now=now,
+            )
 
         for entry in owner.get("passkeys", ()):
             inserted = _ensure_passkey(
