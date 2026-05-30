@@ -164,7 +164,7 @@ both implicit (scope) and explicit (link) reachability.
 
 Order in the UI: more specific first (asset / stay / template /
 role > area > property > workspace), each with a badge showing why
-it applies ("House-wide", "Villa Sud", "Pool", "Pinned to this
+it applies ("Workspace", "Villa Sud", "Pool", "Pinned to this
 template", etc.).
 
 Duplicates (same instruction reached by two routes) are shown once with

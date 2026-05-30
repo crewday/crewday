@@ -34,6 +34,7 @@ function instructionEnvelope(body = "Use the silver key."): unknown {
       title: "Entry code",
       scope: "property",
       property_id: "prop_1",
+      property_ids: ["prop_1"],
       area_id: null,
       current_revision_id: "rev_1",
       tags: ["entry"],
@@ -259,13 +260,21 @@ describe("<InstructionDetailPage>", () => {
       fireEvent.click(screen.getByRole("button", { name: "Edit" }));
       fireEvent.change(screen.getByLabelText(/^Scope\b/), { target: { value: "area" } });
 
-      const area = await screen.findByLabelText(/^Area\b/);
+      const area = await screen.findByRole("combobox", { name: /^Area\b/ });
       await waitFor(() => expect(area).not.toBeDisabled());
-      fireEvent.change(area, { target: { value: "area_1" } });
+      fireEvent.change(area, { target: { value: "Entry" } });
+      await screen.findByRole("option", { name: "Entry" });
+      fireEvent.keyDown(area, { key: "Enter" });
       fireEvent.click(screen.getByRole("button", { name: "Save" }));
 
       await waitFor(() => {
-        expect(screen.getByText("Use the brass key.")).toBeInTheDocument();
+        expect(
+          fake.requests.some(
+            (request) =>
+              request.url === "/w/acme/api/v1/instructions/ins_1" &&
+              request.init?.method === "PATCH",
+          ),
+        ).toBe(true);
       });
       const patch = fake.requests.find(
         (request) =>

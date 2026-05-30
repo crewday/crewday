@@ -92,7 +92,10 @@ function buildVisibleCalendars(anchorIso: string) {
   return [0, 1, 2].map((offset) => buildMonthCalendar(anchorIso, offset));
 }
 
-function closureCoversDate(closure: PropertyClosure, iso: string): boolean {
+function closureCoversDate(
+  closure: Pick<PropertyClosure, "starts_on" | "ends_on">,
+  iso: string,
+): boolean {
   return closure.starts_on <= iso && iso <= closure.ends_on;
 }
 

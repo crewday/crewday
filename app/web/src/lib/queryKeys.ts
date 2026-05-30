@@ -122,6 +122,8 @@ export const qk = {
   // workspace-scoped cache (TanStack v5 prefix-match starts at index 0).
   schedulerCalendarPrefix: () => [...ws(), "scheduler-calendar"] as const,
   instructions: () => [...ws(), "instructions"] as const,
+  instructionsList: (propertyId?: string | null) =>
+    [...ws(), "instructions", propertyId ?? "all"] as const,
   instruction: (iid: string) => [...ws(), "instruction", iid] as const,
   instructionVersions: (iid: string) => [...ws(), "instruction", iid, "versions"] as const,
   inventory: () => [...ws(), "inventory"] as const,

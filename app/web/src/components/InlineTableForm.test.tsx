@@ -492,6 +492,42 @@ describe("InlineTableForm", () => {
     expect(onChange).not.toHaveBeenCalled();
   });
 
+  it("adds custom tag picker values and removes the last token with Backspace", async () => {
+    const onChange = vi.fn();
+    const { rerender } = render(
+      <InlineTagPickerField
+        value={[]}
+        options={roleOptions}
+        searchable
+        allowCustomValues
+        ariaLabel="Instruction tags"
+        inputLabel="Add tag"
+        onChange={onChange}
+      />,
+    );
+
+    const input = screen.getByLabelText("Add tag");
+    fireEvent.change(input, { target: { value: "legacy" } });
+    await screen.findByText('Press Enter to add "legacy"');
+    fireEvent.keyDown(screen.getByLabelText("Add tag"), { key: "Enter" });
+    expect(onChange).toHaveBeenLastCalledWith(["legacy"]);
+
+    rerender(
+      <InlineTagPickerField
+        value={["legacy"]}
+        options={roleOptions}
+        searchable
+        allowCustomValues
+        ariaLabel="Instruction tags"
+        inputLabel="Add tag"
+        onChange={onChange}
+      />,
+    );
+
+    fireEvent.keyDown(screen.getByLabelText("Add tag"), { key: "Backspace" });
+    expect(onChange).toHaveBeenLastCalledWith([]);
+  });
+
   it("updates row drafts from searchable select option selection", () => {
     const onDraftChange = vi.fn();
     render(

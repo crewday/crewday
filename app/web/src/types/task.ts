@@ -137,6 +137,8 @@ export interface Instruction {
   title: string;
   scope: "global" | "property" | "area";
   property_id: string | null;
+  property_ids?: string[];
+  area_id?: string | null;
   area: string | null;
   tags: string[];
   body_md: string;

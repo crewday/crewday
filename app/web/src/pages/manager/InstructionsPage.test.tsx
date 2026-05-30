@@ -22,6 +22,7 @@ function instructionListPayload() {
         title: "Entry code",
         scope: "property",
         property_id: "prop_1",
+        property_ids: ["prop_1"],
         area_id: null,
         current_revision_id: "rev_1",
         tags: ["entry"],
@@ -49,6 +50,21 @@ function propertyPayload() {
       color: "moss",
       kind: "str",
       areas: ["Kitchen"],
+      evidence_policy: "inherit",
+      country: "PT",
+      locale: "pt-PT",
+      settings_override: {},
+      client_org_id: null,
+      owner_user_id: null,
+    },
+    {
+      id: "prop_2",
+      name: "Casa Azul",
+      city: "Porto",
+      timezone: "Europe/Lisbon",
+      color: "sky",
+      kind: "str",
+      areas: [],
       evidence_policy: "inherit",
       country: "PT",
       locale: "pt-PT",
@@ -90,6 +106,7 @@ function createdInstructionEnvelope() {
       title: "Dishwasher reset",
       scope: "area",
       property_id: "prop_1",
+      property_ids: [],
       area_id: "area_kitchen",
       current_revision_id: "rev_new",
       tags: ["kitchen", "appliance"],
@@ -110,12 +127,42 @@ function createdInstructionEnvelope() {
   };
 }
 
+function createdPropertyInstructionEnvelope() {
+  return {
+    instruction: {
+      id: "ins_property",
+      workspace_id: "ws_1",
+      slug: "pool-rules",
+      title: "Pool rules",
+      scope: "property",
+      property_id: "prop_1",
+      property_ids: ["prop_1", "prop_2"],
+      area_id: null,
+      current_revision_id: "rev_property",
+      tags: ["pool"],
+      archived_at: null,
+      created_by: "user_1",
+      created_at: "2026-05-09T10:00:00Z",
+    },
+    current_revision: {
+      id: "rev_property",
+      instruction_id: "ins_property",
+      version: 1,
+      body_md: "Close the cover after service.",
+      body_hash: "hash",
+      author_id: "user_1",
+      change_note: null,
+      created_at: "2026-05-09T10:00:00Z",
+    },
+  };
+}
+
 function DetailRoute() {
   const params = useParams<{ iid: string }>();
   return <div>Instruction detail {params.iid}</div>;
 }
 
-function renderInstructions(routes: FetchRoute[] = []) {
+function renderInstructions(routes: FetchRoute[] = [], initial = "/w/acme/instructions") {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   const fetchEnv = installFetchRouteHandlers([
     {
@@ -138,9 +185,10 @@ function renderInstructions(routes: FetchRoute[] = []) {
   const view = render(
     <QueryClientProvider client={queryClient}>
       <WorkspaceProvider>
-        <MemoryRouter initialEntries={["/w/acme/instructions"]}>
+        <MemoryRouter initialEntries={[initial]}>
           <Routes>
             <Route path="/w/:slug/instructions" element={<InstructionsPage />} />
+            <Route path="/w/:slug/property/:pid/instructions" element={<InstructionsPage />} />
             <Route path="/w/:slug/instructions/:iid" element={<DetailRoute />} />
           </Routes>
         </MemoryRouter>
@@ -184,7 +232,7 @@ afterEach(() => {
 });
 
 describe("<InstructionsPage>", () => {
-  it("opens the create flow and creates an area-scoped instruction", async () => {
+  it("creates an area-scoped instruction from the inline create row", async () => {
     const { requests, queryClient } = renderInstructions([
       {
         path: "/w/acme/api/v1/instructions",
@@ -194,26 +242,32 @@ describe("<InstructionsPage>", () => {
     ]);
     const invalidate = vi.spyOn(queryClient, "invalidateQueries");
 
-    fireEvent.click(await screen.findByRole("button", { name: "+ New instruction" }));
-    const dialog = screen.getByRole("dialog", { name: "Create instruction" });
-    expect(within(dialog).getByRole("button", { name: "Create" })).toBeDisabled();
+    const row = await screen.findByLabelText("New instruction");
+    expect(within(row).getByRole("button", { name: "Save" })).toBeDisabled();
 
-    fireEvent.change(within(dialog).getByLabelText(/^Title\b/), {
+    fireEvent.change(within(row).getByLabelText(/^Instruction title\b/), {
       target: { value: "Dishwasher reset" },
     });
-    fireEvent.change(within(dialog).getByLabelText(/^Markdown\b/), {
+    fireEvent.change(within(row).getByLabelText(/^Markdown\b/), {
       target: { value: "Hold the reset button for five seconds." },
     });
-    fireEvent.change(within(dialog).getByLabelText(/^Scope\b/), { target: { value: "area" } });
-    await chooseSearchableOption(dialog, /^Property\b/, "Villa Rosa");
+    fireEvent.change(within(row).getByLabelText(/^Instruction scope\b/), { target: { value: "area" } });
+    await chooseSearchableOption(row, /^Instruction property\b/, "Villa Rosa");
 
-    const area = await within(dialog).findByRole("combobox", { name: /^Area\b/ });
+    const area = await within(row).findByRole("combobox", { name: /^Instruction area\b/ });
     await waitFor(() => expect(area).not.toBeDisabled());
-    await chooseSearchableOption(dialog, /^Area\b/, "Kitchen");
-    fireEvent.change(within(dialog).getByLabelText(/^Tags\b/), {
-      target: { value: "kitchen, appliance" },
-    });
-    fireEvent.click(within(dialog).getByRole("button", { name: "Create" }));
+    await chooseSearchableOption(row, /^Instruction area\b/, "Kitchen");
+    let tagInput = within(row).getByLabelText("Add instruction tag");
+    fireEvent.change(tagInput, { target: { value: "kitchen" } });
+    await within(row).findByText('Press Enter to add "kitchen"');
+    tagInput = within(row).getByLabelText("Add instruction tag");
+    fireEvent.keyDown(tagInput, { key: "Enter" });
+    tagInput = within(row).getByLabelText("Add instruction tag");
+    fireEvent.change(tagInput, { target: { value: "appliance" } });
+    await within(row).findByText('Press Enter to add "appliance"');
+    tagInput = within(row).getByLabelText("Add instruction tag");
+    fireEvent.keyDown(tagInput, { key: "Enter" });
+    fireEvent.click(within(row).getByRole("button", { name: "Save" }));
 
     await screen.findByText("Instruction detail ins_new");
     const post = requests.find(
@@ -238,7 +292,7 @@ describe("<InstructionsPage>", () => {
     expect(invalidate).toHaveBeenCalledWith({ queryKey: qk.instructions() });
   });
 
-  it("keeps incomplete property-scoped input in the dialog without posting", async () => {
+  it("keeps incomplete property-scoped input in the inline row without posting", async () => {
     const { requests } = renderInstructions([
       {
         path: "/w/acme/api/v1/instructions",
@@ -247,20 +301,17 @@ describe("<InstructionsPage>", () => {
       },
     ]);
 
-    fireEvent.click(await screen.findByRole("button", { name: "+ New instruction" }));
-    const dialog = screen.getByRole("dialog", { name: "Create instruction" });
+    const row = await screen.findByLabelText("New instruction");
 
-    fireEvent.change(within(dialog).getByLabelText(/^Title\b/), {
+    fireEvent.change(within(row).getByLabelText(/^Instruction title\b/), {
       target: { value: "Pool rules" },
     });
-    fireEvent.change(within(dialog).getByLabelText(/^Markdown\b/), {
+    fireEvent.change(within(row).getByLabelText(/^Markdown\b/), {
       target: { value: "Close the cover after service." },
     });
-    fireEvent.change(within(dialog).getByLabelText(/^Scope\b/), { target: { value: "property" } });
+    fireEvent.change(within(row).getByLabelText(/^Instruction scope\b/), { target: { value: "property" } });
 
-    const createButton = within(dialog).getByRole("button", { name: "Create" });
-    expect(createButton).toBeDisabled();
-    fireEvent.submit(createButton.closest("form")!);
+    fireEvent.click(within(row).getByRole("button", { name: "Save" }));
 
     await waitFor(() => {
       expect(
@@ -270,6 +321,59 @@ describe("<InstructionsPage>", () => {
         ),
       ).toBe(false);
     });
-    expect(screen.getByRole("dialog", { name: "Create instruction" })).toBeInTheDocument();
+    expect(screen.getByText("Select at least one property.")).toBeInTheDocument();
+  });
+
+  it("creates a property-scoped instruction with multiple property ids", async () => {
+    const { requests } = renderInstructions([
+      {
+        path: "/w/acme/api/v1/instructions",
+        method: "POST",
+        respond: { status: 201, body: createdPropertyInstructionEnvelope() },
+      },
+    ]);
+
+    const row = await screen.findByLabelText("New instruction");
+    fireEvent.change(within(row).getByLabelText(/^Instruction title\b/), {
+      target: { value: "Pool rules" },
+    });
+    fireEvent.change(within(row).getByLabelText(/^Markdown\b/), {
+      target: { value: "Close the cover after service." },
+    });
+    fireEvent.change(within(row).getByLabelText(/^Instruction scope\b/), { target: { value: "property" } });
+    fireEvent.click(within(row).getByRole("button", { name: "Villa Rosa" }));
+    fireEvent.click(within(row).getByRole("button", { name: "Casa Azul" }));
+    fireEvent.click(within(row).getByRole("button", { name: "Save" }));
+
+    await screen.findByText("Instruction detail ins_property");
+    const post = requests.find(
+      (request) =>
+        request.path === "/w/acme/api/v1/instructions" && request.method === "POST",
+    );
+    expect(post?.body).toMatchObject({
+      scope: "property",
+      property_id: "prop_1",
+      property_ids: ["prop_1", "prop_2"],
+      area_id: null,
+    });
+  });
+
+  it("loads property-tab instructions through the property-scoped list filter", async () => {
+    const { requests } = renderInstructions([
+      {
+        path: "/w/acme/api/v1/instructions?property_id=prop_1",
+        method: "GET",
+        respond: { body: instructionListPayload() },
+      },
+    ], "/w/acme/property/prop_1/instructions");
+
+    await screen.findByText("Entry code");
+    expect(
+      requests.some(
+        (request) =>
+          request.path === "/w/acme/api/v1/instructions?property_id=prop_1" &&
+          request.method === "GET",
+      ),
+    ).toBe(true);
   });
 });

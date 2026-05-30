@@ -490,7 +490,7 @@ export default function TaskDetailPage() {
                     ? i.area
                     : i.scope === "property"
                       ? (property?.name ?? "Property")
-                      : "House-wide"}
+                      : "Workspace"}
                 </Chip>
               </summary>
               <div className="instruction-card__body">{i.body_md}</div>

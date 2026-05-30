@@ -690,6 +690,89 @@
 .kb-item__preview { color: var(--ink-2); font-size: 13px; margin-bottom: 6px; line-height: 1.5; }
 .kb-item__meta { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
 
+.instructions-inline-table {
+  margin-top: 12px;
+}
+
+.instruction-inline-title {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+  color: inherit;
+}
+
+.instruction-inline-title strong {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.instruction-inline-title span {
+  color: var(--ink-2);
+  font-size: 12px;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.instruction-inline-chips,
+.instruction-inline-scope-fields {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  min-width: 0;
+}
+
+.instruction-inline-scope-fields {
+  flex-direction: column;
+}
+
+.instruction-inline-detail {
+  width: 100%;
+}
+
+.instruction-inline-detail .inline-table-form__note {
+  min-height: 140px;
+}
+
+.instruction-detail-editor {
+  display: grid;
+  gap: 14px;
+}
+
+.instruction-detail-editor__grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.instruction-detail-editor__field {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+  color: var(--ink-3);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.instruction-detail-editor__field > :not(span) {
+  color: var(--ink);
+  font-size: 14px;
+  font-weight: 500;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.instruction-detail-editor .inline-table-form__note {
+  min-height: 220px;
+}
+
+@media (max-width: 720px) {
+  .instruction-detail-editor__grid {
+    grid-template-columns: 1fr;
+  }
+}
+
 .kb-body {
   font-size: 16px; line-height: 1.7; color: var(--ink); max-width: 72ch;
   font-family: "Fraunces", serif;

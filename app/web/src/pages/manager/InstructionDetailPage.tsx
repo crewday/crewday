@@ -6,20 +6,27 @@ import { type ListEnvelope, unwrapList } from "@/lib/listResponse";
 import { qk } from "@/lib/queryKeys";
 import { workspaceRouteForPathname } from "@/lib/workspaceRoutes";
 import { useCloseOnEscape } from "@/lib/useCloseOnEscape";
-import AutoGrowTextarea from "@/components/AutoGrowTextarea";
+import {
+  InlineNoteField,
+  InlineSearchableSelectField,
+  InlineSelectField,
+  InlineTagPickerField,
+  InlineTextField,
+} from "@/components/InlineTableForm";
 import DeskPage from "@/components/DeskPage";
 import DateTime from "@/components/DateTime";
-import FormField from "@/components/FormField";
-import FormModal, { FormModalGrid } from "@/components/FormModal";
 import { Chip, Loading } from "@/components/common";
 import { INSTRUCTION_SCOPE_TONE } from "@/lib/tones";
 import type { Instruction, Property } from "@/types/api";
 
+type InstructionScope = Instruction["scope"];
+
 interface InstructionMeta {
   id: string;
   title: string;
-  scope: Instruction["scope"];
+  scope: InstructionScope;
   property_id: string | null;
+  property_ids: string[];
   area_id: string | null;
   tags: string[];
 }
@@ -46,8 +53,9 @@ interface InstructionEnvelope {
 interface InstructionPatch {
   title: string;
   body_md: string;
-  scope: Instruction["scope"];
+  scope: InstructionScope;
   property_id: string | null;
+  property_ids: string[];
   area_id: string | null;
   tags: string[];
   change_note: string;
@@ -58,10 +66,17 @@ const EMPTY_PATCH: InstructionPatch = {
   body_md: "",
   scope: "global",
   property_id: null,
+  property_ids: [],
   area_id: null,
   tags: [],
   change_note: "",
 };
+
+const SCOPE_OPTIONS = [
+  { value: "global", label: "Workspace" },
+  { value: "property", label: "Property" },
+  { value: "area", label: "Area" },
+];
 
 // Mock body is plain text with newlines; render with <br> between lines.
 // Real Markdown rendering will land when the spec calls for it.
@@ -81,6 +96,8 @@ function toInstruction(envelope: InstructionEnvelope): Instruction {
     title: envelope.instruction.title,
     scope: envelope.instruction.scope,
     property_id: envelope.instruction.property_id,
+    property_ids: envelope.instruction.property_ids,
+    area_id: envelope.instruction.area_id,
     area: envelope.instruction.area_id,
     tags: envelope.instruction.tags,
     body_md: envelope.current_revision.body_md,
@@ -90,29 +107,101 @@ function toInstruction(envelope: InstructionEnvelope): Instruction {
 }
 
 function toPatch(i: Instruction): InstructionPatch {
+  const propertyIds = instructionPropertyIds(i);
   return {
     title: i.title,
     body_md: i.body_md,
     scope: i.scope,
-    property_id: i.property_id,
+    property_id: i.property_id ?? propertyIds[0] ?? null,
+    property_ids: propertyIds,
     area_id: i.area,
     tags: i.tags,
     change_note: "",
   };
 }
 
-function parseTags(raw: string): string[] {
-  return raw
-    .split(",")
-    .map((tag) => tag.trim())
-    .filter(Boolean);
+function instructionPropertyIds(instruction: Instruction): string[] {
+  return instruction.property_ids && instruction.property_ids.length > 0
+    ? instruction.property_ids
+    : instruction.property_id
+      ? [instruction.property_id]
+      : [];
+}
+
+function normalizedTags(tags: readonly string[]): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const rawTag of tags) {
+    const tag = rawTag.trim().toLocaleLowerCase();
+    if (!tag || seen.has(tag)) continue;
+    seen.add(tag);
+    out.push(tag);
+  }
+  return out;
 }
 
 function canSubmitPatch(patch: InstructionPatch): boolean {
   if (!patch.title.trim()) return false;
-  if (patch.scope === "property") return Boolean(patch.property_id);
-  if (patch.scope === "area") return Boolean(patch.area_id);
+  if (patch.scope === "property") return patch.property_ids.length > 0;
+  if (patch.scope === "area") return Boolean(patch.property_id && patch.area_id);
   return true;
+}
+
+function nextScopePatch(patch: InstructionPatch, scope: InstructionScope): InstructionPatch {
+  const fallbackPropertyId = patch.property_ids[0] ?? patch.property_id;
+  if (scope === "global") {
+    return { ...patch, scope, property_id: null, property_ids: [], area_id: null };
+  }
+  if (scope === "property") {
+    const propertyIds = patch.property_ids.length > 0
+      ? patch.property_ids
+      : fallbackPropertyId
+        ? [fallbackPropertyId]
+        : [];
+    return {
+      ...patch,
+      scope,
+      property_id: propertyIds[0] ?? null,
+      property_ids: propertyIds,
+      area_id: null,
+    };
+  }
+  return {
+    ...patch,
+    scope,
+    property_id: fallbackPropertyId ?? null,
+    property_ids: [],
+    area_id: null,
+  };
+}
+
+function propertySelectOption(property: Property) {
+  return {
+    value: property.id,
+    label: property.name,
+    secondaryText: property.city,
+    searchText: `${property.name} ${property.city} ${property.timezone}`,
+  };
+}
+
+function areaSelectOption(area: AreaOption) {
+  return { value: area.id, label: area.name };
+}
+
+function patchBody(patch: InstructionPatch) {
+  return {
+    title: patch.title,
+    body_md: patch.body_md,
+    scope: patch.scope,
+    property_id:
+      patch.scope === "global" ? null :
+      patch.scope === "area" ? patch.property_id :
+      patch.property_ids[0] ?? null,
+    property_ids: patch.scope === "property" ? patch.property_ids : undefined,
+    area_id: patch.scope === "area" ? patch.area_id : null,
+    tags: normalizedTags(patch.tags),
+    change_note: patch.change_note || null,
+  };
 }
 
 export default function InstructionDetailPage() {
@@ -133,6 +222,11 @@ export default function InstructionDetailPage() {
   const propsQ = useQuery({
     queryKey: qk.properties(),
     queryFn: () => fetchJson<Property[]>("/api/v1/properties"),
+  });
+  const instrListQ = useQuery({
+    queryKey: qk.instructionsList(null),
+    queryFn: () => fetchJson<ListEnvelope<Instruction>>("/api/v1/instructions").then(unwrapList),
+    enabled: editing,
   });
   const areasPropertyId = editing ? draft.property_id : instrQ.data?.property_id ?? null;
   const areasQ = useQuery({
@@ -155,19 +249,12 @@ export default function InstructionDetailPage() {
     mutationFn: (patch: InstructionPatch) =>
       fetchJson<InstructionEnvelope>("/api/v1/instructions/" + iid, {
         method: "PATCH",
-        body: {
-          title: patch.title,
-          body_md: patch.body_md,
-          scope: patch.scope,
-          property_id: patch.scope === "global" ? null : patch.property_id,
-          area_id: patch.scope === "area" ? patch.area_id : null,
-          tags: patch.tags,
-          change_note: patch.change_note || null,
-        },
+        body: patchBody(patch),
       }).then(toInstruction),
     onSuccess: (next) => {
       queryClient.setQueryData(qk.instruction(next.id), next);
       void queryClient.invalidateQueries({ queryKey: qk.instructions() });
+      void queryClient.invalidateQueries({ queryKey: qk.instruction(next.id) });
       void queryClient.invalidateQueries({ queryKey: qk.instructionVersions(next.id) });
       setEditing(false);
     },
@@ -185,20 +272,32 @@ export default function InstructionDetailPage() {
 
   const i = instrQ.data;
   const propsById = new Map(propsQ.data.map((p) => [p.id, p]));
+  const propertyIds = instructionPropertyIds(i);
   const propName = i.property_id ? propsById.get(i.property_id)?.name ?? "" : "";
   const areaName =
     i.scope === "area"
       ? areasQ.data?.find((area) => area.id === i.area)?.name ?? i.area ?? ""
       : "";
-  const scopeLabel =
-    i.scope === "global" ? "House-wide" :
-    i.scope === "property" ? propName :
+  const scopeSummary =
+    i.scope === "global" ? "Workspace" :
+    i.scope === "property" ? propertyScopeSummary(propertyIds, propsById) :
     propName + (areaName ? " · " + areaName : "");
+  const propertyOptions = propsQ.data.map((property) => ({
+    value: property.id,
+    label: property.name,
+  }));
+  const searchablePropertyOptions = propsQ.data.map(propertySelectOption);
+  const tagOptions = Array.from(new Set([
+    ...(instrListQ.data ?? []).flatMap((instruction) => instruction.tags),
+    ...i.tags,
+  ]))
+    .sort((left, right) => left.localeCompare(right))
+    .map((tag) => ({ value: tag, label: "#" + tag }));
 
   const sub = (
     <>
       <Link to={workspaceRouteForPathname(pathname, "/instructions")} className="link">← All instructions</Link>{" "}·{" "}
-      <Chip tone={INSTRUCTION_SCOPE_TONE[i.scope]} size="sm">{scopeLabel}</Chip>
+      <Chip tone={INSTRUCTION_SCOPE_TONE[i.scope]} size="sm">{scopeSummary}</Chip>
     </>
   );
   const actions = (
@@ -228,6 +327,127 @@ export default function InstructionDetailPage() {
 
   return (
     <DeskPage title={i.title} sub={sub} actions={actions} overflow={overflow}>
+      {editing ? (
+        <form className="panel instruction-detail-editor" onSubmit={submitEdit}>
+          <header className="panel__head">
+            <h2>Edit instruction</h2>
+            <div className="btn-group">
+              <button type="button" className="btn btn--ghost" onClick={closeEdit}>
+                Cancel
+              </button>
+              <button
+                type="submit"
+                className="btn btn--moss"
+                disabled={save.isPending || !canSubmitPatch(draft)}
+              >
+                Save
+              </button>
+            </div>
+          </header>
+          <div className="instruction-detail-editor__grid">
+            <label className="instruction-detail-editor__field">
+              <span>Title</span>
+              <InlineTextField
+                value={draft.title}
+                ariaLabel="Title"
+                onChange={(title) => setDraft({ ...draft, title })}
+              />
+            </label>
+            <label className="instruction-detail-editor__field">
+              <span>Scope</span>
+              <InlineSelectField
+                value={draft.scope}
+                options={SCOPE_OPTIONS}
+                ariaLabel="Scope"
+                onChange={(scope) => setDraft(nextScopePatch(draft, scope as InstructionScope))}
+              />
+            </label>
+          </div>
+          {draft.scope === "property" ? (
+            <div className="instruction-detail-editor__field">
+              <span>Properties</span>
+              <InlineTagPickerField
+                value={draft.property_ids}
+                options={propertyOptions}
+                searchable
+                ariaLabel="Instruction properties"
+                inputLabel="Filter properties"
+                placeholder="Find property..."
+                onChange={(property_ids) => setDraft({
+                  ...draft,
+                  property_ids,
+                  property_id: property_ids[0] ?? null,
+                  area_id: null,
+                })}
+              />
+            </div>
+          ) : null}
+          {draft.scope === "area" ? (
+            <div className="instruction-detail-editor__grid">
+              <div className="instruction-detail-editor__field">
+                <span>Property</span>
+                <InlineSearchableSelectField
+                  value={draft.property_id ?? ""}
+                  options={searchablePropertyOptions}
+                  ariaLabel="Property"
+                  blankOption={{ label: "Select property" }}
+                  onChange={(propertyId) => setDraft({
+                    ...draft,
+                    property_id: propertyId || null,
+                    property_ids: [],
+                    area_id: null,
+                  })}
+                />
+              </div>
+              <div className="instruction-detail-editor__field">
+                <span>Area</span>
+                <InlineSearchableSelectField
+                  value={draft.area_id ?? ""}
+                  options={(areasQ.data ?? []).map(areaSelectOption)}
+                  disabled={!draft.property_id || areasQ.isPending}
+                  ariaLabel="Area"
+                  blankOption={{ label: draft.property_id ? "Select area" : "Select property first" }}
+                  noResultsLabel="No areas"
+                  renderOptionSecondaryText={() => null}
+                  onChange={(areaId) => setDraft({ ...draft, area_id: areaId || null })}
+                />
+              </div>
+            </div>
+          ) : null}
+          <div className="instruction-detail-editor__field">
+            <span>Markdown</span>
+            <InlineNoteField
+              value={draft.body_md}
+              ariaLabel="Markdown"
+              onChange={(body_md) => setDraft({ ...draft, body_md })}
+            />
+          </div>
+          <div className="instruction-detail-editor__field">
+            <span>Tags</span>
+            <InlineTagPickerField
+              value={draft.tags}
+              options={tagOptions}
+              searchable
+              allowCustomValues
+              ariaLabel="Instruction tags"
+              inputLabel="Add instruction tag"
+              placeholder="Add tag..."
+              normalizeCustomValue={(tag) => tag.trim().toLocaleLowerCase()}
+              onChange={(tags) => setDraft({ ...draft, tags: normalizedTags(tags) })}
+            />
+          </div>
+          <label className="instruction-detail-editor__field">
+            <span>Change note</span>
+            <InlineTextField
+              value={draft.change_note}
+              ariaLabel="Change note"
+              onChange={(change_note) => setDraft({ ...draft, change_note })}
+            />
+          </label>
+          {save.isError && <p className="form-error">Failed to save.</p>}
+        </form>
+      ) : null}
+
       <article className="panel panel--article">
         <div className="kb-body">
           {renderBody(i.body_md)}
@@ -249,7 +469,23 @@ export default function InstructionDetailPage() {
         <ul className="task-list task-list--desk">
           <li className="task-row">
             <span className="task-row__time mono">via scope</span>
-            <span className="task-row__title"><strong>All tasks matching the scope above</strong></span>
+            <span className="task-row__title">
+              <strong>All tasks matching the scope above</strong>
+              <span className="instruction-inline-chips">
+                {i.scope === "global" ? <Chip tone="ghost" size="sm">Workspace</Chip> : null}
+                {i.scope === "property" ? propertyIds.map((propertyId) => (
+                  <Chip key={propertyId} tone="ghost" size="sm">
+                    {propsById.get(propertyId)?.name ?? propertyId}
+                  </Chip>
+                )) : null}
+                {i.scope === "area" ? (
+                  <>
+                    <Chip tone="ghost" size="sm">{propName || "Property"}</Chip>
+                    <Chip tone="ghost" size="sm">{areaName || i.area || "Area"}</Chip>
+                  </>
+                ) : null}
+              </span>
+            </span>
             <Chip tone="ghost" size="sm">automatic</Chip>
           </li>
           <li className="task-row">
@@ -259,121 +495,6 @@ export default function InstructionDetailPage() {
           </li>
         </ul>
       </section>
-
-      {editing && (
-        <FormModal
-          open={editing}
-          title="Edit instruction"
-          eyebrow="Knowledge base"
-          formClassName="instruction-edit-form"
-          onClose={() => setEditing(false)}
-          onSubmit={submitEdit}
-          actions={
-            <>
-              <button type="button" className="btn btn--ghost" onClick={closeEdit}>
-                Cancel
-              </button>
-              <button
-                type="submit"
-                className="btn btn--moss"
-                disabled={save.isPending || !canSubmitPatch(draft)}
-              >
-                Save
-              </button>
-            </>
-          }
-        >
-            <FormField label="Title" requirement="required" className="instruction-edit-form__field sheet-form__field">
-              <input
-                value={draft.title}
-                onChange={(event) => setDraft({ ...draft, title: event.currentTarget.value })}
-                required
-              />
-            </FormField>
-            <FormModalGrid className="instruction-edit-form__grid">
-              <FormField label="Scope" requirement="required" className="instruction-edit-form__field sheet-form__field">
-                <select
-                  value={draft.scope}
-                  onChange={(event) => {
-                    const scope = event.currentTarget.value as Instruction["scope"];
-                    setDraft({
-                      ...draft,
-                      scope,
-                      property_id: scope === "global" ? null : draft.property_id,
-                      area_id: scope === "area" ? draft.area_id : null,
-                    });
-                  }}
-                >
-                  <option value="global">House-wide</option>
-                  <option value="property">Property</option>
-                  <option value="area">Area</option>
-                </select>
-              </FormField>
-              <FormField label="Property" requirement={draft.scope === "global" ? "optional" : "required"} className="instruction-edit-form__field sheet-form__field">
-                <select
-                  value={draft.property_id ?? ""}
-                  onChange={(event) =>
-                    setDraft({
-                      ...draft,
-                      property_id: event.currentTarget.value || null,
-                      area_id: null,
-                    })
-                  }
-                  disabled={draft.scope === "global"}
-                  required={draft.scope !== "global"}
-                >
-                  <option value="">House-wide</option>
-                  {propsQ.data.map((p) => (
-                    <option key={p.id} value={p.id}>{p.name}</option>
-                  ))}
-                </select>
-              </FormField>
-            </FormModalGrid>
-            {draft.scope === "area" && (
-              <FormField label="Area" requirement="required" className="instruction-edit-form__field sheet-form__field">
-                <select
-                  value={draft.area_id ?? ""}
-                  onChange={(event) =>
-                    setDraft({ ...draft, area_id: event.currentTarget.value || null })
-                  }
-                  disabled={!draft.property_id || areasQ.isPending}
-                  required
-                >
-                  <option value="">
-                    {draft.property_id ? "Select area" : "Select property first"}
-                  </option>
-                  {areasQ.data?.map((area) => (
-                    <option key={area.id} value={area.id}>{area.name}</option>
-                  ))}
-                </select>
-              </FormField>
-            )}
-            <FormField label="Markdown" requirement="required" className="instruction-edit-form__field sheet-form__field">
-              <AutoGrowTextarea
-                value={draft.body_md}
-                onChange={(event) => setDraft({ ...draft, body_md: event.currentTarget.value })}
-                rows={10}
-              />
-            </FormField>
-            <FormField label="Tags" requirement="optional" className="instruction-edit-form__field sheet-form__field">
-              <input
-                value={draft.tags.join(", ")}
-                onChange={(event) =>
-                  setDraft({ ...draft, tags: parseTags(event.currentTarget.value) })
-                }
-              />
-            </FormField>
-            <FormField label="Change note" requirement="optional" className="instruction-edit-form__field sheet-form__field">
-              <input
-                value={draft.change_note}
-                onChange={(event) =>
-                  setDraft({ ...draft, change_note: event.currentTarget.value })
-                }
-              />
-            </FormField>
-            {save.isError && <p className="form-error">Failed to save.</p>}
-        </FormModal>
-      )}
 
       {versionsOpen && (
         <div className="day-drawer__scrim" onClick={closeVersions}>
@@ -415,4 +536,13 @@ export default function InstructionDetailPage() {
       )}
     </DeskPage>
   );
+}
+
+function propertyScopeSummary(
+  propertyIds: readonly string[],
+  propsById: ReadonlyMap<string, Property>,
+) {
+  if (propertyIds.length === 0) return "Property";
+  if (propertyIds.length === 1) return propsById.get(propertyIds[0] ?? "")?.name ?? "Property";
+  return `${propertyIds.length} properties`;
 }

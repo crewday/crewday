@@ -2,7 +2,7 @@
   "include": [
     "app/api/v1"
   ],
-  "pythonVersion": "3.11",
+  "pythonVersion": "3.14",
   "reportMissingImports": false,
   "reportMissingModuleSource": false,
   "typeCheckingMode": "basic"

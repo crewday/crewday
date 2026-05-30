@@ -1564,6 +1564,12 @@ export interface InlineTagPickerFieldProps {
   label?: string;
   ariaLabel?: string;
   disabled?: boolean;
+  searchable?: boolean;
+  allowCustomValues?: boolean;
+  inputLabel?: string;
+  placeholder?: string;
+  noResultsLabel?: string;
+  normalizeCustomValue?: (value: string) => string;
 }
 
 export function InlineTagPickerField({
@@ -1573,12 +1579,28 @@ export function InlineTagPickerField({
   label,
   ariaLabel,
   disabled = false,
+  searchable = false,
+  allowCustomValues = false,
+  inputLabel,
+  placeholder = "Filter...",
+  noResultsLabel = "No matches",
+  normalizeCustomValue = defaultNormalizeCustomTagValue,
 }: InlineTagPickerFieldProps) {
   const labelId = useId();
-  const uniqueOptions = uniqueTagPickerOptions(options);
+  const inputId = useId();
+  const [query, setQuery] = useState("");
+  const uniqueOptions = uniqueTagPickerOptions([
+    ...options,
+    ...(allowCustomValues ? value.map((selected) => ({ value: selected, label: selected })) : []),
+  ]);
+  const visibleOptions = filterTagPickerOptions(uniqueOptions, query);
   const selectedValues = normalizeTagPickerValue(value, uniqueOptions);
   const selected = new Set(selectedValues);
   const resolvedLabel = ariaLabel ?? label ?? "Tag options";
+
+  const applySelected = (nextSelected: ReadonlySet<string>) => {
+    onChange(orderedTagPickerValues(uniqueOptions, nextSelected));
+  };
 
   const toggleOption = (option: InlineTagPickerOption) => {
     if (disabled || option.disabled) return;
@@ -1588,8 +1610,44 @@ export function InlineTagPickerField({
     } else {
       nextSelected.add(option.value);
     }
-    onChange(orderedTagPickerValues(uniqueOptions, nextSelected));
+    applySelected(nextSelected);
   };
+
+  const addValue = (rawValue: string) => {
+    const nextValue = normalizeCustomValue(rawValue);
+    if (disabled || !nextValue) return;
+    const matchingOption = uniqueOptions.find((option) => tagPickerOptionMatches(option, nextValue));
+    if (matchingOption?.disabled) return;
+    if (matchingOption) {
+      const nextSelected = new Set(selectedValues);
+      nextSelected.add(matchingOption.value);
+      applySelected(nextSelected);
+    } else {
+      onChange([...selectedValues, nextValue]);
+    }
+    setQuery("");
+  };
+
+  const removeLastSelected = () => {
+    if (disabled || selectedValues.length === 0) return;
+    applySelected(new Set(selectedValues.slice(0, -1)));
+  };
+
+  const commitQuery = () => {
+    if (!query.trim()) return;
+    const firstEnabled = visibleOptions.find((option) => !option.disabled);
+    if (firstEnabled) {
+      const nextSelected = new Set(selectedValues);
+      nextSelected.add(firstEnabled.value);
+      applySelected(nextSelected);
+      setQuery("");
+      return;
+    }
+    if (allowCustomValues) addValue(query);
+  };
+
+  const showInput = searchable || allowCustomValues;
+  const inputAccessibleLabel = inputLabel ?? `${resolvedLabel} input`;
 
   return (
     <div
@@ -1608,8 +1666,37 @@ export function InlineTagPickerField({
           {label}
         </span>
       ) : null}
+      {showInput ? (
+        <label className="inline-table-form__tag-input-label" htmlFor={inputId}>
+          {inputAccessibleLabel}
+        </label>
+      ) : null}
+      {showInput ? (
+        <input
+          id={inputId}
+          className="inline-table-form__tag-input"
+          type="text"
+          value={query}
+          placeholder={placeholder}
+          disabled={disabled}
+          aria-label={label || ariaLabel ? inputAccessibleLabel : undefined}
+          onChange={(event) => setQuery(event.currentTarget.value)}
+          onKeyDown={(event) => {
+            if (disabled) return;
+            if (event.key === "Enter" || event.key === ",") {
+              event.preventDefault();
+              event.stopPropagation();
+              commitQuery();
+            } else if (event.key === "Backspace" && query === "") {
+              event.preventDefault();
+              event.stopPropagation();
+              removeLastSelected();
+            }
+          }}
+        />
+      ) : null}
       <div className="inline-table-form__tag-options">
-        {uniqueOptions.map((option) => {
+        {visibleOptions.map((option) => {
           const isSelected = selected.has(option.value);
           const optionDisabled = disabled || option.disabled;
           return (
@@ -1631,6 +1718,13 @@ export function InlineTagPickerField({
             </button>
           );
         })}
+        {visibleOptions.length === 0 ? (
+          <span className="inline-table-form__tag-empty">
+            {allowCustomValues && query.trim()
+              ? `Press Enter to add "${query.trim()}"`
+              : noResultsLabel}
+          </span>
+        ) : null}
       </div>
     </div>
   );
@@ -1912,6 +2006,28 @@ function orderedTagPickerValues(
     next.push(option.value);
   }
   return next;
+}
+
+function filterTagPickerOptions(
+  options: readonly InlineTagPickerOption[],
+  query: string,
+) {
+  const needle = query.trim().toLocaleLowerCase();
+  if (!needle) return options;
+  return options.filter((option) => (
+    option.label.toLocaleLowerCase().includes(needle)
+    || option.value.toLocaleLowerCase().includes(needle)
+  ));
+}
+
+function tagPickerOptionMatches(option: InlineTagPickerOption, value: string) {
+  const needle = value.toLocaleLowerCase();
+  return option.value.toLocaleLowerCase() === needle
+    || option.label.toLocaleLowerCase() === needle;
+}
+
+function defaultNormalizeCustomTagValue(value: string) {
+  return value.trim();
 }
 
 function handleTagOptionKeyDown(
