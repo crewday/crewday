@@ -66,6 +66,40 @@ def _client(ctx: WorkspaceContext, factory: sessionmaker[Session]) -> TestClient
     return build_client([("", build_properties_router())], factory, ctx)
 
 
+def _manager_context(
+    factory: sessionmaker[Session],
+    *,
+    base_ctx: WorkspaceContext,
+    workspace_id: str,
+    email: str = "settings-manager@example.com",
+) -> WorkspaceContext:
+    from app.adapters.db.authz.models import RoleGrant
+
+    with factory() as s:
+        mgr = bootstrap_user(s, email=email, display_name="Settings Manager")
+        s.add(
+            RoleGrant(
+                id=new_ulid(),
+                workspace_id=workspace_id,
+                user_id=mgr.id,
+                grant_role="manager",
+                scope_property_id=None,
+                created_at=_PINNED,
+                created_by_user_id=None,
+            )
+        )
+        s.commit()
+        manager_id = mgr.id
+    return build_workspace_context(
+        workspace_id=base_ctx.workspace_id,
+        workspace_slug=base_ctx.workspace_slug,
+        actor_id=manager_id,
+        actor_kind="user",
+        actor_grant_role="manager",
+        actor_was_owner_member=False,
+    )
+
+
 def _seed_property(
     factory: sessionmaker[Session],
     *,
@@ -1061,6 +1095,34 @@ class TestPropertySettings:
             "source": "property",
         }
 
+    def test_manager_returns_property_settings(
+        self,
+        owner_ctx: tuple[WorkspaceContext, sessionmaker[Session], str],
+    ) -> None:
+        ctx, factory, ws_id = owner_ctx
+        property_id = _seed_property(
+            factory,
+            workspace_id=ws_id,
+            settings_override_json={"tasks.checklist_required": True},
+        )
+        manager_ctx = _manager_context(
+            factory,
+            base_ctx=ctx,
+            workspace_id=ws_id,
+        )
+
+        response = _client(manager_ctx, factory).get(
+            f"/properties/{property_id}/settings"
+        )
+
+        assert response.status_code == 200, response.text
+        body = response.json()
+        assert body["overrides"] == {"tasks.checklist_required": True}
+        assert body["resolved"]["tasks.checklist_required"] == {
+            "value": True,
+            "source": "property",
+        }
+
     def test_property_settings_inherit_from_workspace_then_catalog(
         self,
         owner_ctx: tuple[WorkspaceContext, sessionmaker[Session], str],
@@ -1136,7 +1198,7 @@ class TestPropertySettings:
         assert response.status_code == 404, response.text
         assert response.json()["detail"]["error"] == "property_not_found"
 
-    def test_worker_property_settings_returns_403(
+    def test_worker_property_settings_returns_404(
         self,
         worker_ctx: tuple[WorkspaceContext, sessionmaker[Session], str, str],
     ) -> None:
@@ -1149,8 +1211,8 @@ class TestPropertySettings:
 
         response = _client(ctx, factory).get(f"/properties/{property_id}/settings")
 
-        assert response.status_code == 403, response.text
-        assert response.json()["detail"]["error"] == "permission_denied"
+        assert response.status_code == 404, response.text
+        assert response.json()["detail"]["error"] == "property_not_found"
 
     def test_patch_property_settings_updates_override_and_returns_cascade(
         self,
@@ -1180,6 +1242,27 @@ class TestPropertySettings:
             row = session.get(Property, property_id)
             assert row is not None
             assert row.settings_override_json == {"tasks.checklist_required": True}
+
+    def test_manager_patches_property_settings(
+        self,
+        owner_ctx: tuple[WorkspaceContext, sessionmaker[Session], str],
+    ) -> None:
+        ctx, factory, ws_id = owner_ctx
+        property_id = _seed_property(factory, workspace_id=ws_id)
+        manager_ctx = _manager_context(
+            factory,
+            base_ctx=ctx,
+            workspace_id=ws_id,
+            email="settings-patch-manager@example.com",
+        )
+
+        response = _client(manager_ctx, factory).patch(
+            f"/properties/{property_id}/settings",
+            json={"tasks.checklist_required": True},
+        )
+
+        assert response.status_code == 200, response.text
+        assert response.json()["overrides"] == {"tasks.checklist_required": True}
 
     def test_patch_property_settings_clear_to_inherit_removes_override(
         self,
@@ -1297,7 +1380,7 @@ class TestPropertySettings:
             assert row is not None
             assert row.settings_override_json == {"tasks.checklist_required": True}
 
-    def test_patch_property_settings_denies_worker(
+    def test_patch_property_settings_hides_property_from_worker(
         self,
         worker_ctx: tuple[WorkspaceContext, sessionmaker[Session], str, str],
     ) -> None:
@@ -1309,8 +1392,8 @@ class TestPropertySettings:
             json={"tasks.checklist_required": True},
         )
 
-        assert response.status_code == 403, response.text
-        assert response.json()["detail"]["error"] == "permission_denied"
+        assert response.status_code == 404, response.text
+        assert response.json()["detail"]["error"] == "property_not_found"
 
     def test_patch_property_settings_audits_before_after_override_maps(
         self,

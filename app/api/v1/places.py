@@ -101,7 +101,7 @@ from app.api.v1.settings import (
     patch_entity_settings_overrides,
 )
 from app.authz import PermissionDenied, require
-from app.authz.dep import Permission
+from app.authz.dep import Permission, PermissionDependencyMetadata
 from app.authz.places_visibility import visible_property_ids_for_user
 from app.domain.places import (
     area_service,
@@ -982,13 +982,6 @@ def build_properties_router() -> APIRouter:
     read_gate = Depends(Permission("scope.view", scope_kind="workspace"))
     create_gate = Depends(Permission("properties.create", scope_kind="workspace"))
     edit_gate = Depends(Permission("properties.edit", scope_kind="workspace"))
-    edit_settings_gate = Depends(
-        Permission(
-            "scope.edit_settings",
-            scope_kind="property",
-            scope_id_from_path="property_id",
-        )
-    )
     archive_gate = Depends(Permission("properties.archive", scope_kind="workspace"))
     share_gate = Depends(
         Permission(
@@ -1125,23 +1118,48 @@ def build_properties_router() -> APIRouter:
         except property_service.PropertyNotFound as exc:
             raise _property_not_found() from exc
 
-    @api.get(
-        "/properties/{property_id}/settings",
-        response_model=EntitySettingsPayload,
-        operation_id="properties.settings.read",
-        summary="Read one property's resolved settings cascade",
-        dependencies=[edit_settings_gate],
-    )
-    def read_property_settings(
+    def property_settings_view(
         property_id: str,
         ctx: _Ctx,
         session: _Db,
-    ) -> EntitySettingsPayload:
+    ) -> property_service.PropertyView:
         try:
             view = property_service.get_property(session, ctx, property_id=property_id)
         except property_service.PropertyNotFound as exc:
             raise _property_not_found() from exc
 
+        try:
+            require(
+                session,
+                ctx,
+                action_key="scope.edit_settings",
+                scope_kind="property",
+                scope_id=property_id,
+            )
+        except PermissionDenied as exc:
+            raise _property_not_found() from exc
+        return view
+
+    vars(property_settings_view)["__crewday_permission__"] = (
+        PermissionDependencyMetadata(
+            action_key="scope.edit_settings",
+            scope_kind="property",
+            scope_id_from_path="property_id",
+        )
+    )
+    property_settings_view_dep = Depends(property_settings_view)
+
+    @api.get(
+        "/properties/{property_id}/settings",
+        response_model=EntitySettingsPayload,
+        operation_id="properties.settings.read",
+        summary="Read one property's resolved settings cascade",
+    )
+    def read_property_settings(
+        ctx: _Ctx,
+        session: _Db,
+        view: property_service.PropertyView = property_settings_view_dep,
+    ) -> EntitySettingsPayload:
         with tenant_agnostic():
             workspace = session.get(Workspace, ctx.workspace_id)
         if workspace is None:
@@ -1163,19 +1181,13 @@ def build_properties_router() -> APIRouter:
         response_model=EntitySettingsPayload,
         operation_id="properties.settings.patch",
         summary="Patch one property's settings overrides",
-        dependencies=[edit_settings_gate],
     )
     def patch_property_settings(
-        property_id: str,
         payload: EntitySettingsPatch,
         ctx: _Ctx,
         session: _Db,
+        view: property_service.PropertyView = property_settings_view_dep,
     ) -> EntitySettingsPayload:
-        try:
-            view = property_service.get_property(session, ctx, property_id=property_id)
-        except property_service.PropertyNotFound as exc:
-            raise _property_not_found() from exc
-
         new_overrides = patch_entity_settings_overrides(
             current_overrides=view.settings_override_json,
             payload=payload.root,
@@ -1185,7 +1197,7 @@ def build_properties_router() -> APIRouter:
             updated = property_service.update_property_settings_override(
                 session,
                 ctx,
-                property_id=property_id,
+                property_id=view.id,
                 settings_override_json=new_overrides,
             )
         except property_service.PropertyNotFound as exc:
