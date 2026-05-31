@@ -955,14 +955,14 @@ describe("<PropertyDetailPage>", () => {
       const kitchenRow = screen.getByLabelText("Kitchen");
       fireEvent.click(within(kitchenRow).getByRole("button", { name: "Edit" }));
       fireEvent.change(within(kitchenRow).getByRole("combobox", { name: /^Parent\b/ }), {
-        target: { value: "Terrace" },
+        target: { value: "Pool deck" },
       });
       expect(await screen.findByText("No parent areas")).toBeInTheDocument();
       fireEvent.click(within(kitchenRow).getByRole("button", { name: "Cancel" }));
 
       fireEvent.click(within(kitchenRow).getByRole("button", { name: "Delete" }));
       const parentDeleteDialog = screen.getByRole("alertdialog", { name: "Delete area?" });
-      expect(parentDeleteDialog).toHaveTextContent("Delete Kitchen? This will also delete 1 child area.");
+      expect(parentDeleteDialog).toHaveTextContent("Delete Kitchen? This will also delete 1 descendant area.");
       fireEvent.click(within(parentDeleteDialog).getByRole("button", { name: "Cancel" }));
 
       const deckRow = screen.getByLabelText("Pool deck");

@@ -180,7 +180,50 @@ describe("<AreasPanel>", () => {
     });
   });
 
-  it("disables reorder dragging while the create row has unsaved input", async () => {
+  it("renders areas as a stable pre-order tree and suppresses flat reorder dragging", async () => {
+    const { container } = renderAreasPanel([
+      areaFixture({
+        id: "area_bath",
+        name: "Master bathroom",
+        order_hint: 0,
+        parent_area_id: "area_bedroom",
+      }),
+      areaFixture({
+        id: "area_floor",
+        name: "Floor 1",
+        order_hint: 2,
+      }),
+      areaFixture({
+        id: "area_bedroom",
+        name: "Master bedroom",
+        order_hint: 1,
+        parent_area_id: "area_floor",
+      }),
+      areaFixture({
+        id: "area_patio",
+        name: "Patio",
+        kind: "outdoor",
+        order_hint: 0,
+      }),
+    ]);
+
+    expect(await screen.findByLabelText("Floor 1")).toBeInTheDocument();
+    const rowLabels = Array.from(container.querySelectorAll("[data-inline-table-row-group]")).map((row) =>
+      row.getAttribute("aria-label"),
+    );
+    expect(rowLabels.slice(0, 4)).toEqual(["Patio", "Floor 1", "Master bedroom", "Master bathroom"]);
+    expect(within(screen.getByLabelText("Floor 1")).getByText(/Level 1, has child rows/)).toHaveClass("sr-only");
+    expect(within(screen.getByLabelText("Master bedroom")).getByText(/Level 2, has child rows/)).toHaveClass(
+      "sr-only",
+    );
+    expect(within(screen.getByLabelText("Master bathroom")).getByText(/Level 3, last child/)).toHaveClass("sr-only");
+
+    const bedroomRow = screen.getByLabelText("Master bedroom");
+    expect(bedroomRow).not.toHaveAttribute("draggable");
+    expect(screen.queryByLabelText("Drag Master bedroom to reorder")).not.toBeInTheDocument();
+  });
+
+  it("keeps reorder disabled while editing the tree table", async () => {
     renderAreasPanel([
       areaFixture({
         id: "area_1",
@@ -197,8 +240,8 @@ describe("<AreasPanel>", () => {
 
     await screen.findByText("Kitchen");
     const poolRow = screen.getByLabelText("Pool");
-    expect(poolRow).toHaveAttribute("draggable", "true");
-    expect(screen.getByLabelText("Drag Pool to reorder")).toBeInTheDocument();
+    expect(poolRow).not.toHaveAttribute("draggable");
+    expect(screen.queryByLabelText("Drag Pool to reorder")).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /move .* up/i })).toBeNull();
     expect(screen.queryByRole("button", { name: /move .* down/i })).toBeNull();
 
@@ -208,133 +251,56 @@ describe("<AreasPanel>", () => {
     });
 
     expect(poolRow).not.toHaveAttribute("draggable");
-    expect(screen.getByLabelText("Drag Pool to reorder")).toBeInTheDocument();
+    expect(screen.queryByLabelText("Drag Pool to reorder")).not.toBeInTheDocument();
 
     fireEvent.click(within(createRow).getByRole("button", { name: "Cancel" }));
     await waitFor(() => {
-      expect(poolRow).toHaveAttribute("draggable", "true");
+      expect(poolRow).not.toHaveAttribute("draggable");
     });
   });
 
-  it("persists area reorders through hidden order hints", async () => {
-    const { container, requests } = renderAreasPanel([
+  it("allows multi-level parent edits while excluding self and descendants", async () => {
+    const { requests } = renderAreasPanel([
       areaFixture({
-        id: "area_1",
-        name: "Kitchen",
+        id: "area_floor",
+        name: "Floor 1",
         order_hint: 0,
       }),
       areaFixture({
-        id: "area_2",
-        name: "Pool",
-        kind: "outdoor",
+        id: "area_bedroom",
+        name: "Bedroom",
         order_hint: 1,
+        parent_area_id: "area_floor",
+      }),
+      areaFixture({
+        id: "area_bath",
+        name: "Bathroom",
+        order_hint: 2,
+        parent_area_id: "area_bedroom",
+      }),
+      areaFixture({
+        id: "area_patio",
+        name: "Patio",
+        kind: "outdoor",
+        order_hint: 3,
       }),
     ]);
 
-    await screen.findByText("Kitchen");
-    dragAreaAfter("Kitchen", "Pool");
+    const floorRow = await screen.findByLabelText("Floor 1");
+    fireEvent.click(within(floorRow).getByRole("button", { name: "Edit" }));
+    const parentInput = within(floorRow).getByRole("combobox", { name: /^Parent\b/ });
+    fireEvent.focus(parentInput);
+    fireEvent.change(parentInput, { target: { value: "bath" } });
+    expect(await screen.findByText("No parent areas")).toBeInTheDocument();
+    fireEvent.change(parentInput, { target: { value: "patio" } });
+    fireEvent.mouseDown(await screen.findByRole("option", { name: /Patio/ }));
+    fireEvent.click(within(floorRow).getByRole("button", { name: "Save" }));
 
     await waitFor(() => {
-      expect(requests.filter((request) => request.method === "PATCH")).toHaveLength(2);
+      expect(requests.find((request) => request.path === "/w/acme/api/v1/areas/area_floor")?.body).toMatchObject({
+        parent_area_id: "area_patio",
+      });
     });
-    expect(
-      requests.find((request) => request.path === "/w/acme/api/v1/areas/area_2")?.body,
-    ).toMatchObject({
-      order_hint: 0,
-    });
-    expect(
-      requests.find((request) => request.path === "/w/acme/api/v1/areas/area_1")?.body,
-    ).toMatchObject({
-      order_hint: 1,
-    });
-
-    await waitFor(() => {
-      const rowLabels = Array.from(container.querySelectorAll("[data-inline-table-row-group]")).map((row) =>
-        row.getAttribute("aria-label"),
-      );
-      expect(rowLabels.slice(0, 2)).toEqual(["Pool", "Kitchen"]);
-    });
-  });
-
-  it("persists drag reorders through the shared row affordance", async () => {
-    const { container, requests } = renderAreasPanel([
-      areaFixture({
-        id: "area_1",
-        name: "Kitchen",
-        order_hint: 0,
-      }),
-      areaFixture({
-        id: "area_2",
-        name: "Pool",
-        kind: "outdoor",
-        order_hint: 1,
-      }),
-    ]);
-
-    await screen.findByText("Kitchen");
-    const kitchenRow = screen.getByLabelText("Kitchen");
-    const poolRow = screen.getByLabelText("Pool");
-    const transfer = dataTransfer();
-    fireEvent.dragStart(kitchenRow, { dataTransfer: transfer });
-    fireEvent.dragOver(poolRow, { dataTransfer: transfer });
-    fireEvent.drop(poolRow, { dataTransfer: transfer });
-    fireEvent.dragEnd(kitchenRow, { dataTransfer: transfer });
-
-    await waitFor(() => {
-      expect(requests.filter((request) => request.method === "PATCH")).toHaveLength(2);
-    });
-    expect(
-      requests.find((request) => request.path === "/w/acme/api/v1/areas/area_2")?.body,
-    ).toMatchObject({
-      order_hint: 0,
-    });
-    expect(
-      requests.find((request) => request.path === "/w/acme/api/v1/areas/area_1")?.body,
-    ).toMatchObject({
-      order_hint: 1,
-    });
-
-    await waitFor(() => {
-      const rowLabels = Array.from(container.querySelectorAll("[data-inline-table-row-group]")).map((row) =>
-        row.getAttribute("aria-label"),
-      );
-      expect(rowLabels.slice(0, 2)).toEqual(["Pool", "Kitchen"]);
-    });
-  });
-
-  it("refetches the canonical area order when a reorder patch fails", async () => {
-    const { container, requests } = renderAreasPanel(
-      [
-        areaFixture({
-          id: "area_1",
-          name: "Kitchen",
-          order_hint: 0,
-        }),
-        areaFixture({
-          id: "area_2",
-          name: "Pool",
-          kind: "outdoor",
-          order_hint: 1,
-        }),
-      ],
-      { failPatchAreaIds: ["area_1"] },
-    );
-
-    await screen.findByText("Kitchen");
-    dragAreaAfter("Kitchen", "Pool");
-
-    expect(await screen.findByText("Reorder failed.")).toBeInTheDocument();
-    await waitFor(() => {
-      expect(
-        requests.filter(
-          (request) => request.method === "GET" && request.path === "/w/acme/api/v1/properties/prop_1/areas",
-        ).length,
-      ).toBeGreaterThan(1);
-    });
-    const rowLabels = Array.from(container.querySelectorAll("[data-inline-table-row-group]")).map((row) =>
-      row.getAttribute("aria-label"),
-    );
-    expect(rowLabels.slice(0, 2)).toEqual(["Kitchen", "Pool"]);
   });
 
   it("keeps a saved area draft visible across a stale refetch", async () => {
@@ -370,28 +336,115 @@ describe("<AreasPanel>", () => {
     fireEvent.click(within(savedRow).getByRole("button", { name: "Edit" }));
     expect(within(savedRow).getByLabelText("Name")).toHaveValue("Fresh pantry");
   });
+
+  it("disambiguates duplicate parent names with path labels and counts all descendants on delete", async () => {
+    renderAreasPanel([
+      areaFixture({
+        id: "area_floor_1",
+        name: "Floor 1",
+        order_hint: 0,
+      }),
+      areaFixture({
+        id: "area_bedroom_1",
+        name: "Bedroom",
+        order_hint: 0,
+        parent_area_id: "area_floor_1",
+      }),
+      areaFixture({
+        id: "area_bath",
+        name: "Bathroom",
+        order_hint: 0,
+        parent_area_id: "area_bedroom_1",
+      }),
+      areaFixture({
+        id: "area_floor_2",
+        name: "Floor 2",
+        order_hint: 1,
+      }),
+      areaFixture({
+        id: "area_bedroom_2",
+        name: "Bedroom",
+        order_hint: 0,
+        parent_area_id: "area_floor_2",
+      }),
+    ]);
+
+    const createRow = await screen.findByLabelText("New area");
+    const parentInput = within(createRow).getByRole("combobox", { name: /^Parent\b/ });
+    fireEvent.focus(parentInput);
+    fireEvent.change(parentInput, { target: { value: "bedroom" } });
+    expect((await screen.findAllByText("Floor 1 / Bedroom")).some((node) => node.closest("[role='option']"))).toBe(
+      true,
+    );
+    expect(screen.getAllByText("Floor 2 / Bedroom").some((node) => node.closest("[role='option']"))).toBe(true);
+
+    const floorRow = screen.getByLabelText("Floor 1");
+    fireEvent.click(within(floorRow).getByRole("button", { name: "Delete" }));
+    const dialog = screen.getByRole("alertdialog", { name: "Delete area?" });
+    expect(dialog).toHaveTextContent("Delete Floor 1? This will also delete 2 descendant areas.");
+  });
+
+  it("falls stale parent references back to roots while preserving descendants", async () => {
+    const { container } = renderAreasPanel([
+      areaFixture({
+        id: "area_orphan",
+        name: "Legacy wing",
+        order_hint: 0,
+        parent_area_id: "area_missing",
+      }),
+      areaFixture({
+        id: "area_closet",
+        name: "Supply closet",
+        order_hint: 0,
+        parent_area_id: "area_orphan",
+      }),
+      areaFixture({
+        id: "area_lobby",
+        name: "Lobby",
+        order_hint: 1,
+      }),
+    ]);
+
+    expect(await screen.findByLabelText("Legacy wing")).toBeInTheDocument();
+    const rowLabels = Array.from(container.querySelectorAll("[data-inline-table-row-group]")).map((row) =>
+      row.getAttribute("aria-label"),
+    );
+    expect(rowLabels.slice(0, 3)).toEqual(["Legacy wing", "Supply closet", "Lobby"]);
+    expect(within(screen.getByLabelText("Legacy wing")).getByText("Property-level")).toBeInTheDocument();
+    expect(within(screen.getByLabelText("Supply closet")).getByText("Legacy wing")).toBeInTheDocument();
+  });
+
+  it("keeps parent options cycle-safe when stale data already contains a cycle", async () => {
+    renderAreasPanel([
+      areaFixture({
+        id: "area_a",
+        name: "Cycle A",
+        order_hint: 0,
+        parent_area_id: "area_b",
+      }),
+      areaFixture({
+        id: "area_b",
+        name: "Cycle B",
+        order_hint: 1,
+        parent_area_id: "area_a",
+      }),
+      areaFixture({
+        id: "area_safe",
+        name: "Safe parent",
+        order_hint: 2,
+      }),
+    ]);
+
+    const cycleBRow = await screen.findByLabelText("Cycle B");
+    fireEvent.click(within(cycleBRow).getByRole("button", { name: "Edit" }));
+    const parentInput = within(cycleBRow).getByRole("combobox", { name: /^Parent\b/ });
+    fireEvent.focus(parentInput);
+    fireEvent.change(parentInput, { target: { value: "Cycle A" } });
+    expect(await screen.findByText("No parent areas")).toBeInTheDocument();
+    fireEvent.change(parentInput, { target: { value: "Safe parent" } });
+    expect(await screen.findByRole("option", { name: /Safe parent/ })).toBeInTheDocument();
+  });
 });
-
-function dragAreaAfter(sourceLabel: string, targetLabel: string): void {
-  const sourceRow = screen.getByLabelText(sourceLabel);
-  const targetRow = screen.getByLabelText(targetLabel);
-  const transfer = dataTransfer();
-  fireEvent.dragStart(sourceRow, { dataTransfer: transfer });
-  fireEvent.dragOver(targetRow, { dataTransfer: transfer });
-  fireEvent.drop(targetRow, { dataTransfer: transfer });
-  fireEvent.dragEnd(sourceRow, { dataTransfer: transfer });
-}
-
-function dataTransfer(): DataTransfer {
-  return {
-    effectAllowed: "",
-    dropEffect: "",
-    setData() {},
-    getData() {
-      return "";
-    },
-  } as unknown as DataTransfer;
-}
 
 function areaFixture(overrides: Partial<TestArea>): TestArea {
   return {

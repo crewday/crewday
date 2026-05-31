@@ -8,7 +8,6 @@ import {
   InlineTableForm,
   InlineTextField,
   type InlineTableColumn,
-  type InlineTableReorder,
   type InlineTableRow,
 } from "@/components/InlineTableForm";
 import { Loading } from "@/components/common";
@@ -55,15 +54,6 @@ interface AreaSaveVariables {
   orderHint?: number;
 }
 
-interface AreaReorderVariables {
-  rowId: string;
-  orderedRows: readonly InlineTableRow<AreaDraft>[];
-}
-
-interface AreaReorderContext {
-  previousAreas?: Area[];
-}
-
 interface AreasPanelState {
   editedDrafts: ReadonlyMap<string, AreaDraft>;
   savedDrafts: ReadonlyMap<string, AreaDraft>;
@@ -84,6 +74,19 @@ type AreasPanelAction =
 const CREATE_ROW_ID = "__new_area__";
 const AREA_KINDS: readonly AreaKind[] = ["indoor_room", "outdoor", "service"];
 const AREA_KIND_OPTIONS = AREA_KINDS.map((kind) => ({ value: kind, label: kind }));
+
+interface AreaTreeRow {
+  area: Area;
+  depth: number;
+  hasChildren: boolean;
+  isLastChild: boolean;
+}
+
+interface AreaTree {
+  rows: AreaTreeRow[];
+  descendantIdsByAreaId: ReadonlyMap<string, ReadonlySet<string>>;
+  pathLabelsByAreaId: ReadonlyMap<string, string>;
+}
 
 function errorMessage(err: unknown, fallback: string): string {
   return err instanceof Error ? err.message : fallback;
@@ -145,10 +148,6 @@ function draftFromArea(area: Area): AreaDraft {
   };
 }
 
-function areaSelectOption(area: Area): SearchableSelectOption {
-  return { value: area.id, label: area.name };
-}
-
 function bodyFromDraft(draft: AreaDraft, orderHint = draft.order_hint): AreaWriteBody {
   return {
     name: draft.name.trim(),
@@ -163,17 +162,6 @@ function bodyFromDraft(draft: AreaDraft, orderHint = draft.order_hint): AreaWrit
 function nextAreaOrderHint(areas: readonly Area[]): number {
   if (areas.length === 0) return 0;
   return Math.max(...areas.map((area) => area.order_hint)) + 1;
-}
-
-function reorderedAreasFromRows(
-  orderedRows: readonly InlineTableRow<AreaDraft>[],
-  areasById: ReadonlyMap<string, Area>,
-): Area[] {
-  return orderedRows.flatMap((row, index) => {
-    const area = areasById.get(row.id);
-    if (!area) return [];
-    return [{ ...area, order_hint: index }];
-  });
 }
 
 // react-doctor-disable-next-line react-doctor/no-giant-component -- Existing promoted surface is intentionally deferred until a focused component split preserves behavior.
@@ -274,63 +262,10 @@ export default function AreasPanel({ propertyId }: { propertyId: string }) {
     setSavedDrafts(normalizedSavedDrafts);
   }
 
-  const reorderAreas = useMutation<Area[], Error, AreaReorderVariables, AreaReorderContext>({
-    mutationFn: async ({ orderedRows }) => {
-      const updates = orderedRows.flatMap((row, orderHint) =>
-        row.id !== CREATE_ROW_ID && row.draft.id && row.draft.order_hint !== orderHint
-          ? [{ row, orderHint }]
-          : [],
-      );
-      const results = await Promise.allSettled(
-        updates.map(({ row, orderHint }) =>
-          fetchJson<Area>("/api/v1/areas/" + row.id, {
-            method: "PATCH",
-            body: bodyFromDraft(row.draft, orderHint),
-          }),
-        ),
-      );
-      const areas: Area[] = [];
-      let firstError: unknown = null;
-      for (const result of results) {
-        if (result.status === "fulfilled") {
-          areas.push(result.value);
-        } else {
-          firstError ??= result.reason;
-        }
-      }
-      if (firstError !== null) throw firstError;
-      return areas;
-    },
-    onMutate: async (variables) => {
-      await queryClient.cancelQueries({ queryKey: qk.propertyAreas(propertyId) });
-      const previousAreas = queryClient.getQueryData<Area[]>(qk.propertyAreas(propertyId));
-      queryClient.setQueryData<Area[]>(
-        qk.propertyAreas(propertyId),
-        reorderedAreasFromRows(variables.orderedRows, areasById),
-      );
-      setRowErrors((current) => clearMapValue(current, variables.rowId));
-      return { previousAreas };
-    },
-    onError: (err, variables, context) => {
-      if (context?.previousAreas) {
-        queryClient.setQueryData(qk.propertyAreas(propertyId), context.previousAreas);
-      }
-      setRowErrors((current) =>
-        setMapValue(current, variables.rowId, errorMessage(err, "Areas could not be reordered.")),
-      );
-    },
-    onSettled: async () => {
-      await Promise.all([
-        queryClient.invalidateQueries({ queryKey: qk.propertyAreas(propertyId) }),
-        queryClient.invalidateQueries({ queryKey: qk.property(propertyId) }),
-        queryClient.invalidateQueries({ queryKey: qk.properties() }),
-      ]);
-    },
-  });
-  const busy = saveArea.isPending || deleteArea.isPending || reorderAreas.isPending;
-  const canReorderAreas = editedDrafts.size === 0 && !createDirty && !busy;
+  const busy = saveArea.isPending || deleteArea.isPending;
+  const areaTree = useMemo(() => buildAreaTree(areas), [areas]);
   const rows = useMemo(
-    () => areas.map((area): InlineTableRow<AreaDraft> => {
+    () => areaTree.rows.map(({ area, depth, hasChildren, isLastChild }): InlineTableRow<AreaDraft> => {
       const editedDraft = editedDrafts.get(area.id);
       const savedDraft = activeSavedDrafts.get(area.id);
       const savingThisRow = saveArea.isPending && saveArea.variables?.rowId === area.id;
@@ -344,9 +279,10 @@ export default function AreasPanel({ propertyId }: { propertyId: string }) {
         saving: savingThisRow,
         disabled: busy && !savingThisRow,
         error: rowErrors.get(area.id),
+        tree: { depth, parentId: area.parent_area_id ?? undefined, hasChildren, isLastChild },
       };
     }),
-    [areas, busy, editedDrafts, rowErrors, activeSavedDrafts, saveArea.isPending, saveArea.variables],
+    [areaTree.rows, busy, editedDrafts, rowErrors, activeSavedDrafts, saveArea.isPending, saveArea.variables],
   );
   const trailingCreateRow: InlineTableRow<AreaDraft> = {
     id: CREATE_ROW_ID,
@@ -395,14 +331,13 @@ export default function AreasPanel({ propertyId }: { propertyId: string }) {
         key: "parent",
         header: "Parent",
         width: { flex: 1.1, min: 170 },
-        renderRead: ({ row }) => parentAreaName(areasById, row.draft.parent_area_id),
+        renderRead: ({ row }) => parentAreaName(areaTree.pathLabelsByAreaId, row.draft.parent_area_id),
         renderEdit: ({ row, update, disabled }) => (
           <InlineSearchableSelectField
             value={row.draft.parent_area_id}
-            options={parentOptions(areas, row.draft).map(areaSelectOption)}
+            options={parentOptions(areaTree, row.draft)}
             blankOption={{ label: "Property-level" }}
             noResultsLabel="No parent areas"
-            renderOptionSecondaryText={() => null}
             onChange={(parent_area_id) => update({ parent_area_id })}
             disabled={disabled}
             label="Parent"
@@ -410,15 +345,8 @@ export default function AreasPanel({ propertyId }: { propertyId: string }) {
         ),
       },
     ],
-    [areas, areasById],
+    [areaTree],
   );
-
-  function handleReorder(reordered: InlineTableReorder<AreaDraft>): void {
-    reorderAreas.mutate({
-      rowId: reordered.rowId,
-      orderedRows: reordered.orderedRows,
-    });
-  }
 
   if (areasQ.isPending) return <Loading />;
   if (areasQ.isError || !areasQ.data) {
@@ -490,8 +418,7 @@ export default function AreasPanel({ propertyId }: { propertyId: string }) {
           setSavedDrafts((current) => clearMapValue(current, rowId));
           setRowErrors((current) => clearMapValue(current, rowId));
         }}
-        onReorder={canReorderAreas ? handleReorder : undefined}
-        showReorderHandles={areas.length > 1}
+        showReorderHandles={false}
         onDelete={(rowId) => deleteArea.mutate(rowId)}
         trailingCreateRow={trailingCreateRow}
         getRowLabel={(row) => row.draft.name || row.label || "New area"}
@@ -510,14 +437,15 @@ export default function AreasPanel({ propertyId }: { propertyId: string }) {
           return row.draft.notes_md ? <InlineNoteDisplay>{row.draft.notes_md}</InlineNoteDisplay> : null;
         }}
         renderDeleteConfirmation={({ row, label }) => {
-          const childCount = childAreaCount(areas, row.id);
+          const descendantCount = areaTree.descendantIdsByAreaId.get(row.id)?.size ?? 0;
           return {
             title: "Delete area?",
             confirmLabel: "Delete area",
             children: (
               <p>
-                Delete <strong>{label}</strong>? {childCount > 0
-                  ? "This will also delete " + childCount + " child " + (childCount === 1 ? "area." : "areas.")
+                Delete <strong>{label}</strong>? {descendantCount > 0
+                  ? "This will also delete " + descendantCount + " descendant "
+                    + (descendantCount === 1 ? "area." : "areas.")
                   : "This cannot be undone."}
               </p>
             ),
@@ -528,17 +456,113 @@ export default function AreasPanel({ propertyId }: { propertyId: string }) {
   );
 }
 
-function parentAreaName(areasById: ReadonlyMap<string, Area>, parentAreaId: string): string {
-  return areasById.get(parentAreaId)?.name ?? "Property-level";
+function parentAreaName(pathLabelsByAreaId: ReadonlyMap<string, string>, parentAreaId: string): string {
+  return pathLabelsByAreaId.get(parentAreaId) ?? "Property-level";
 }
 
-function parentOptions(areas: readonly Area[], draft: AreaDraft): Area[] {
-  if (draft.id && childAreaCount(areas, draft.id) > 0) return [];
-  return areas.filter((area) => area.parent_area_id === null && area.id !== draft.id);
+function parentOptions(areaTree: AreaTree, draft: AreaDraft): SearchableSelectOption[] {
+  const excludedIds = new Set(draft.id ? [draft.id, ...(areaTree.descendantIdsByAreaId.get(draft.id) ?? [])] : []);
+  return areaTree.rows.flatMap(({ area }) => {
+    if (excludedIds.has(area.id)) return [];
+    const pathLabel = areaTree.pathLabelsByAreaId.get(area.id) ?? area.name;
+    return [{
+      value: area.id,
+      label: pathLabel,
+      searchText: pathLabel,
+    }];
+  });
 }
 
-function childAreaCount(areas: readonly Area[], areaId: string): number {
-  return areas.filter((area) => area.parent_area_id === areaId).length;
+function buildAreaTree(areas: readonly Area[]): AreaTree {
+  const areasById = new Map(areas.map((area) => [area.id, area]));
+  const childrenByParentId = new Map<string, Area[]>();
+  const roots: Area[] = [];
+  for (const area of sortAreas(areas)) {
+    if (!area.parent_area_id || !areasById.has(area.parent_area_id)) {
+      roots.push(area);
+      continue;
+    }
+    const siblings = childrenByParentId.get(area.parent_area_id) ?? [];
+    siblings.push(area);
+    childrenByParentId.set(area.parent_area_id, siblings);
+  }
+  for (const [parentId, children] of childrenByParentId) {
+    childrenByParentId.set(parentId, sortAreas(children));
+  }
+
+  const rows: AreaTreeRow[] = [];
+  const pathLabelsByAreaId = new Map<string, string>();
+  const visited = new Set<string>();
+  const collect = (area: Area, depth: number, isLastChild: boolean, path: readonly string[]): ReadonlySet<string> => {
+    visited.add(area.id);
+    const nextPath = [...path, area.name];
+    pathLabelsByAreaId.set(area.id, nextPath.join(" / "));
+    const children = childrenByParentId.get(area.id)?.filter((child) => !visited.has(child.id)) ?? [];
+    rows.push({ area, depth, hasChildren: children.length > 0, isLastChild });
+    const descendantIds = new Set<string>();
+    children.forEach((child, index) => {
+      descendantIds.add(child.id);
+      const childDescendantIds = collect(child, depth + 1, index === children.length - 1, nextPath);
+      for (const descendantId of childDescendantIds) {
+        descendantIds.add(descendantId);
+      }
+    });
+    return descendantIds;
+  };
+
+  const sortedRoots = sortAreas(roots);
+  sortedRoots.forEach((area, index) => {
+    if (!visited.has(area.id)) {
+      collect(area, 0, index === sortedRoots.length - 1, []);
+    }
+  });
+  for (const area of sortAreas(areas)) {
+    if (!visited.has(area.id)) {
+      collect(area, 0, true, []);
+    }
+  }
+  const descendantIdsByAreaId = descendantIdsByOriginalGraph(areas, childrenByParentId);
+  return { rows, descendantIdsByAreaId, pathLabelsByAreaId };
+}
+
+function sortAreas(areas: readonly Area[]): Area[] {
+  return areas.toSorted(
+    (left, right) =>
+      left.order_hint - right.order_hint
+      || left.name.localeCompare(right.name)
+      || left.id.localeCompare(right.id),
+  );
+}
+
+function descendantIdsByOriginalGraph(
+  areas: readonly Area[],
+  childrenByParentId: ReadonlyMap<string, readonly Area[]>,
+): ReadonlyMap<string, ReadonlySet<string>> {
+  const descendantsByAreaId = new Map<string, ReadonlySet<string>>();
+  for (const area of areas) {
+    descendantsByAreaId.set(area.id, descendantIdsForArea(area.id, area.id, childrenByParentId, new Set()));
+  }
+  return descendantsByAreaId;
+}
+
+function descendantIdsForArea(
+  areaId: string,
+  rootId: string,
+  childrenByParentId: ReadonlyMap<string, readonly Area[]>,
+  visiting: ReadonlySet<string>,
+): ReadonlySet<string> {
+  if (visiting.has(areaId)) return new Set();
+  const nextVisiting = new Set(visiting);
+  nextVisiting.add(areaId);
+  const descendantIds = new Set<string>();
+  for (const child of childrenByParentId.get(areaId) ?? []) {
+    if (child.id === rootId) continue;
+    descendantIds.add(child.id);
+    for (const childDescendantId of descendantIdsForArea(child.id, rootId, childrenByParentId, nextVisiting)) {
+      descendantIds.add(childDescendantId);
+    }
+  }
+  return descendantIds;
 }
 
 function areaDraftsEqual(left: AreaDraft, right: AreaDraft): boolean {
