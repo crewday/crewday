@@ -14,7 +14,8 @@ Public surface:
   country-code length, address_json structure) runs inside the DTO
   so the same rule fires for HTTP + Python callers.
 * **Service functions** — :func:`create_property`,
-  :func:`update_property`, :func:`soft_delete_property`,
+  :func:`update_property`, :func:`update_property_settings_override`,
+  :func:`soft_delete_property`,
   :func:`list_properties`, :func:`get_property`. Every function
   takes a :class:`~app.tenancy.WorkspaceContext` as its first
   argument; workspace scoping flows through the
@@ -112,6 +113,7 @@ __all__ = [
     "list_properties",
     "soft_delete_property",
     "update_property",
+    "update_property_settings_override",
 ]
 
 
@@ -826,6 +828,40 @@ def update_property(
         diff={
             "before": _view_to_diff_dict(before),
             "after": _view_to_diff_dict(after),
+        },
+        clock=resolved_clock,
+    )
+    return after
+
+
+def update_property_settings_override(
+    session: Session,
+    ctx: WorkspaceContext,
+    *,
+    property_id: str,
+    settings_override_json: dict[str, Any],
+    clock: Clock | None = None,
+) -> PropertyView:
+    """Replace ``property_id``'s sparse settings override map."""
+    resolved_clock = clock if clock is not None else SystemClock()
+    now = resolved_clock.now()
+    row = _load_row(session, ctx, property_id=property_id)
+    before = dict(row.settings_override_json or {})
+
+    row.settings_override_json = dict(settings_override_json)
+    row.updated_at = now
+    session.flush()
+    after = _row_to_view(row)
+
+    write_audit(
+        session,
+        ctx,
+        entity_kind="property",
+        entity_id=row.id,
+        action="property.settings_updated",
+        diff={
+            "before": {"settings_override_json": before},
+            "after": {"settings_override_json": dict(after.settings_override_json)},
         },
         clock=resolved_clock,
     )

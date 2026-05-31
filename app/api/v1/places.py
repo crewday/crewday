@@ -94,7 +94,12 @@ from app.adapters.db.places.models import Area, Property, PropertyWorkspace
 from app.adapters.db.workspace.models import Workspace
 from app.api.deps import current_workspace_context, db_session
 from app.api.v1._problem_json import IDENTITY_PROBLEM_RESPONSES
-from app.api.v1.settings import EntitySettingsPayload, build_entity_settings_payload
+from app.api.v1.settings import (
+    EntitySettingsPatch,
+    EntitySettingsPayload,
+    build_entity_settings_payload,
+    patch_entity_settings_overrides,
+)
 from app.authz import PermissionDenied, require
 from app.authz.dep import Permission
 from app.authz.places_visibility import visible_property_ids_for_user
@@ -1150,6 +1155,55 @@ def build_properties_router() -> APIRouter:
         return build_entity_settings_payload(
             workspace_settings_json=workspace_settings,
             entity_overrides=view.settings_override_json,
+            entity_layer="property",
+        )
+
+    @api.patch(
+        "/properties/{property_id}/settings",
+        response_model=EntitySettingsPayload,
+        operation_id="properties.settings.patch",
+        summary="Patch one property's settings overrides",
+        dependencies=[edit_settings_gate],
+    )
+    def patch_property_settings(
+        property_id: str,
+        payload: EntitySettingsPatch,
+        ctx: _Ctx,
+        session: _Db,
+    ) -> EntitySettingsPayload:
+        try:
+            view = property_service.get_property(session, ctx, property_id=property_id)
+        except property_service.PropertyNotFound as exc:
+            raise _property_not_found() from exc
+
+        new_overrides = patch_entity_settings_overrides(
+            current_overrides=view.settings_override_json,
+            payload=payload.root,
+            entity_scope="P",
+        )
+        try:
+            updated = property_service.update_property_settings_override(
+                session,
+                ctx,
+                property_id=property_id,
+                settings_override_json=new_overrides,
+            )
+        except property_service.PropertyNotFound as exc:
+            raise _property_not_found() from exc
+
+        with tenant_agnostic():
+            workspace = session.get(Workspace, ctx.workspace_id)
+        if workspace is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail={"error": "workspace_not_found"},
+            )
+        workspace_settings = (
+            workspace.settings_json if isinstance(workspace.settings_json, dict) else {}
+        )
+        return build_entity_settings_payload(
+            workspace_settings_json=workspace_settings,
+            entity_overrides=updated.settings_override_json,
             entity_layer="property",
         )
 

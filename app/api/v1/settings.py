@@ -75,12 +75,14 @@ from app.tenancy import WorkspaceContext, tenant_agnostic
 from app.util.clock import SystemClock
 
 __all__ = [
+    "EntitySettingsPatch",
     "EntitySettingsPayload",
     "ResolvedSettingPayload",
     "SettingDefinitionResponse",
     "WorkspaceSettingsResponse",
     "build_entity_settings_payload",
     "build_settings_router",
+    "patch_entity_settings_overrides",
 ]
 
 # §02 cascade source enum exposed to the SPA. The cascade resolver
@@ -191,6 +193,15 @@ class WorkspaceSettingsPatch(RootModel[dict[str, Any]]):
 
     The root object is a map of catalog key to value. `null` restores
     the catalog default by removing the workspace override.
+    """
+
+
+class EntitySettingsPatch(RootModel[dict[str, Any]]):
+    """Partial entity override update.
+
+    The root object is a map of catalog key to value. ``null`` and
+    ``"inherit"`` both clear the entity override so the setting inherits
+    from the broader cascade layer.
     """
 
 
@@ -875,6 +886,33 @@ def build_entity_settings_payload(
         overrides=dict(entity_overrides),
         resolved=resolved,
     )
+
+
+def patch_entity_settings_overrides(
+    *,
+    current_overrides: Mapping[str, Any],
+    payload: Mapping[str, Any],
+    entity_scope: str,
+) -> dict[str, Any]:
+    """Validate and apply a sparse entity settings override patch."""
+    updated = _concrete_overrides(current_overrides)
+    for key, raw_value in payload.items():
+        definition = _CATALOG_BY_KEY.get(key)
+        if definition is None:
+            raise Validation(extra={"error": "unknown_setting", "key": key})
+        if entity_scope not in definition.override_scope.split("/"):
+            raise Validation(
+                extra={
+                    "error": "setting_scope_invalid",
+                    "key": key,
+                    "scope": entity_scope,
+                },
+            )
+        if raw_value is None or raw_value == "inherit":
+            updated.pop(key, None)
+            continue
+        updated[key] = _validate_value(definition, raw_value)
+    return updated
 
 
 def _concrete_overrides(raw: Mapping[str, Any]) -> dict[str, Any]:
