@@ -85,6 +85,16 @@ function parsePropertySettingDraft(def: SettingDefinition, draft: string): unkno
   return parseSettingDraft(def, draft);
 }
 
+function SettingNameCell({ def, fallbackLabel }: { def: SettingDefinition | undefined; fallbackLabel: string | undefined }) {
+  const label = def?.label ?? fallbackLabel ?? "Setting";
+  return (
+    <span className="setting-name" title={def?.description}>
+      <strong className="setting-name__label">{label}</strong>
+      {def?.description ? <span className="muted setting-name__description">{def.description}</span> : null}
+    </span>
+  );
+}
+
 function SettingsOverrideValueEditor({
   def,
   value,
@@ -252,7 +262,6 @@ export default function SettingsOverridePanel({
           && def.type === "int" && invalidIntegerSettingDraft(editedDraft.value)
           ? "Enter a whole number."
           : undefined,
-        meta: def.description,
         isNew: source !== "property" && !hasPropertyOverride(overrides, def.key),
       };
     }),
@@ -267,21 +276,11 @@ export default function SettingsOverridePanel({
         width: { flex: 1.35, min: 190 },
         renderRead: ({ row }) => {
           const def = definitionsByKey.get(row.id);
-          return (
-            <span title={def?.description}>
-              <code className="inline-code">{row.id}</code>
-              <span className="muted setting-label">{def?.label ?? row.label}</span>
-            </span>
-          );
+          return <SettingNameCell def={def} fallbackLabel={row.label} />;
         },
         renderEdit: ({ row }) => {
           const def = definitionsByKey.get(row.id);
-          return (
-            <span title={def?.description}>
-              <code className="inline-code">{row.id}</code>
-              <span className="muted setting-label">{def?.label ?? row.label}</span>
-            </span>
-          );
+          return <SettingNameCell def={def} fallbackLabel={row.label} />;
         },
       },
       {

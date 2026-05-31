@@ -1239,14 +1239,27 @@ describe("<PropertyDetailPage>", () => {
 
       expect(await screen.findByRole("heading", { name: "Settings overrides" })).toBeInTheDocument();
       expect(screen.getByRole("table", { name: "Property settings overrides" })).toHaveClass("inline-table-form__table");
-      expect(screen.getByText("evidence_policy")).toBeInTheDocument();
-      expect(screen.getByText("require_photos")).toBeInTheDocument();
-      expect(screen.getByText("minimum_notice_hours")).toBeInTheDocument();
+      expect(screen.queryByText("evidence_policy")).not.toBeInTheDocument();
+      expect(screen.queryByText("require_photos")).not.toBeInTheDocument();
+      expect(screen.queryByText("minimum_notice_hours")).not.toBeInTheDocument();
       expect(screen.queryByText("workspace_only")).not.toBeInTheDocument();
 
       const evidence = settingRow("Evidence policy");
+      expect(within(evidence).getByText("Evidence policy")).toHaveClass("setting-name__label");
+      expect(within(evidence).getByText("Evidence requirement for work on this property.")).toHaveClass(
+        "muted",
+        "setting-name__description",
+      );
       expect(within(evidence).getByText("Inherited")).toBeInTheDocument();
       expect(within(evidence).getByText("inherited (workspace)")).toBeInTheDocument();
+
+      fireEvent.click(within(evidence).getByRole("button", { name: "Edit" }));
+      expect(within(evidence).getByText("Evidence policy")).toHaveClass("setting-name__label");
+      expect(within(evidence).getByText("Evidence requirement for work on this property.")).toHaveClass(
+        "muted",
+        "setting-name__description",
+      );
+      expect(within(evidence).queryByText("evidence_policy")).not.toBeInTheDocument();
       expect(fake.calls).toContainEqual({
         url: "/w/acme/api/v1/properties/prop_1/settings",
         method: "GET",
