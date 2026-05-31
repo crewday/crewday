@@ -359,7 +359,7 @@ export default function SettingsOverridePanel({
   return (
     <div className="panel">
       <header className="panel__head"><h2>Settings overrides</h2></header>
-      <p className="muted">
+      <p className="panel__sub">
         Property-scoped settings. Overridden values take precedence over workspace defaults.
       </p>
       <InlineTableForm

@@ -9,6 +9,7 @@ import { __resetApiProvidersForTests } from "@/lib/api";
 import { __resetQueryKeyGetterForTests } from "@/lib/queryKeys";
 import * as preferences from "@/lib/preferences";
 import { jsonResponse } from "@/test/helpers";
+import managerPanelsCss from "@/styles/manager-panels.css?raw";
 import PropertyDetailPage from "./PropertyDetailPage";
 import PropertyTabs from "./property/PropertyTabs";
 import { type PropertyRelatedPage } from "./property/PropertyTabs.lib";
@@ -1238,6 +1239,9 @@ describe("<PropertyDetailPage>", () => {
       render(<Harness initial="/w/acme/property/prop_1#settings" />);
 
       expect(await screen.findByRole("heading", { name: "Settings overrides" })).toBeInTheDocument();
+      expect(
+        screen.getByText("Property-scoped settings. Overridden values take precedence over workspace defaults."),
+      ).toHaveClass("panel__sub");
       expect(screen.getByRole("table", { name: "Property settings overrides" })).toHaveClass("inline-table-form__table");
       expect(screen.queryByText("evidence_policy")).not.toBeInTheDocument();
       expect(screen.queryByText("require_photos")).not.toBeInTheDocument();
@@ -1269,6 +1273,13 @@ describe("<PropertyDetailPage>", () => {
     } finally {
       fake.restore();
     }
+  });
+
+  it("keeps standalone panel subtitles spaced from following table and form content", () => {
+    expect(managerPanelsCss).toContain(
+      ".panel > .panel__sub + :where(.inline-table-form, .form-layout, form, table, ul, ol, .settings-kv, .settings-list) {\n  margin-top: 12px;\n}",
+    );
+    expect(managerPanelsCss).toContain(".panel__head-stack {\n  display: flex; flex-direction: column; gap: 4px;");
   });
 
   it("renders existing property setting overrides distinctly without saving unchanged rows", async () => {
