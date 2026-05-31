@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { WorkspaceProvider } from "@/context/WorkspaceContext";
@@ -68,6 +68,21 @@ function propertyPayload() {
       client_org_id: null,
       owner_user_id: null,
     },
+    {
+      id: "prop_2",
+      name: "Casa Azul",
+      city: "Porto",
+      timezone: "Europe/Lisbon",
+      color: "sky",
+      kind: "str",
+      areas: [],
+      evidence_policy: "inherit",
+      country: "PT",
+      locale: "pt-PT",
+      settings_override: {},
+      client_org_id: null,
+      owner_user_id: null,
+    },
   ];
 }
 
@@ -116,6 +131,27 @@ function installFetch(options: FetchOptions = {}) {
     }
     if (resolved === "/w/acme/api/v1/properties/prop_1/areas") {
       return jsonResponse(areaListPayload());
+    }
+    if (resolved === "/w/acme/api/v1/instructions") {
+      return jsonResponse({
+        data: [
+          {
+            id: "ins_existing",
+            title: "Kitchen reset",
+            scope: "property",
+            property_id: "prop_1",
+            property_ids: ["prop_1"],
+            area_id: null,
+            area: null,
+            tags: ["kitchen"],
+            body_md: "Reset appliances.",
+            version: 1,
+            updated_at: "2026-04-19T10:00:00Z",
+          },
+        ],
+        next_cursor: null,
+        has_more: false,
+      });
     }
     if (resolved === "/w/acme/api/v1/instructions/ins_1/versions") {
       return jsonResponse({
@@ -252,6 +288,64 @@ describe("<InstructionDetailPage>", () => {
       });
       expect(invalidate).toHaveBeenCalledWith({ queryKey: qk.instructions() });
       expect(invalidate).toHaveBeenCalledWith({ queryKey: qk.instructionVersions("ins_1") });
+    } finally {
+      fake.restore();
+    }
+  });
+
+  it("edits metadata with token combobox property and tag fields", async () => {
+    const fake = installFetch();
+    try {
+      render(<Harness />);
+
+      expect(await screen.findByRole("heading", { name: "Entry code" })).toBeInTheDocument();
+      fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+
+      const propertyPicker = screen.getByRole("group", { name: "Instruction properties" });
+      expect(within(propertyPicker).getByText("Villa Rosa")).toBeInTheDocument();
+      expect(within(propertyPicker).queryByRole("option", { name: "Casa Azul" })).not.toBeInTheDocument();
+
+      const propertyInput = within(propertyPicker).getByRole("combobox", { name: /^Filter properties\b/ });
+      fireEvent.focus(propertyInput);
+      expect(within(propertyPicker).getByRole("option", { name: "Casa Azul" })).toBeInTheDocument();
+      fireEvent.keyDown(propertyInput, { key: "Escape" });
+      expect(within(propertyPicker).queryByRole("option", { name: "Casa Azul" })).not.toBeInTheDocument();
+
+      fireEvent.focus(propertyInput);
+      fireEvent.mouseDown(within(propertyPicker).getByRole("option", { name: "Casa Azul" }));
+      fireEvent.click(within(propertyPicker).getByRole("button", { name: "Remove Villa Rosa" }));
+
+      const tagPicker = screen.getByRole("group", { name: "Instruction tags" });
+      expect(within(tagPicker).queryByRole("option", { name: "#kitchen" })).not.toBeInTheDocument();
+      const tagInput = within(tagPicker).getByRole("combobox", { name: /^Add instruction tag\b/ });
+      fireEvent.change(tagInput, { target: { value: "SAFETY" } });
+      expect(await within(tagPicker).findByText('Press Enter to add "SAFETY"')).toBeInTheDocument();
+      fireEvent.keyDown(tagInput, { key: "Enter" });
+      fireEvent.click(within(tagPicker).getByRole("button", { name: "Remove #entry" }));
+
+      fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+      await waitFor(() => {
+        expect(
+          fake.requests.some(
+            (request) =>
+              request.url === "/w/acme/api/v1/instructions/ins_1" &&
+              request.init?.method === "PATCH",
+          ),
+        ).toBe(true);
+      });
+      const patch = fake.requests.find(
+        (request) =>
+          request.url === "/w/acme/api/v1/instructions/ins_1" &&
+          request.init?.method === "PATCH",
+      );
+      expect(JSON.parse(String(patch?.init?.body))).toMatchObject({
+        scope: "property",
+        property_id: "prop_2",
+        property_ids: ["prop_2"],
+        area_id: null,
+        tags: ["safety"],
+      });
     } finally {
       fake.restore();
     }

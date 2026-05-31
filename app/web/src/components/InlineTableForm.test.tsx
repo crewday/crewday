@@ -421,7 +421,7 @@ describe("InlineTableForm", () => {
     )).toBe("hidden");
   });
 
-  it("toggles fixed tag options and normalizes duplicate unknown values into option order", () => {
+  it("shows tag picker options only while open and normalizes duplicate unknown values into option order", () => {
     const onChange = vi.fn();
     render(
       <InlineTagPickerField
@@ -433,15 +433,15 @@ describe("InlineTableForm", () => {
     );
 
     const group = screen.getByRole("group", { name: "Agent doc roles" });
-    const buttons = within(group).getAllByRole("button");
-    expect(buttons.map((button) => button.textContent)).toEqual(["Manager", "Employee", "Admin"]);
-    expect(within(group).getByRole("button", { name: "Manager" })).toHaveAttribute("aria-pressed", "true");
-    expect(within(group).getByRole("button", { name: "Admin" })).toHaveAttribute("aria-pressed", "true");
+    expect(within(group).getByText("Manager")).toBeInTheDocument();
+    expect(within(group).getByText("Admin")).toBeInTheDocument();
+    expect(within(group).queryByRole("option", { name: "Employee" })).not.toBeInTheDocument();
 
-    fireEvent.click(within(group).getByRole("button", { name: "Employee" }));
+    fireEvent.focus(within(group).getByRole("combobox", { name: "Agent doc roles input" }));
+    fireEvent.mouseDown(within(group).getByRole("option", { name: "Employee" }));
     expect(onChange).toHaveBeenLastCalledWith(["manager", "employee", "admin"]);
 
-    fireEvent.click(within(group).getByRole("button", { name: "Admin" }));
+    fireEvent.click(within(group).getByRole("button", { name: "Remove Admin" }));
     expect(onChange).toHaveBeenLastCalledWith(["manager"]);
   });
 
@@ -472,15 +472,20 @@ describe("InlineTableForm", () => {
     );
 
     const rowGroup = screen.getByLabelText("Agent roles");
-    const manager = within(rowGroup).getByRole("button", { name: "Manager" });
-    fireEvent.keyDown(manager, { key: "Enter" });
-    fireEvent.keyDown(manager, { key: "d" });
+    const input = within(rowGroup).getByRole("combobox", { name: "Document roles input" });
+    fireEvent.focus(input);
+    fireEvent.keyDown(input, { key: "Enter" });
+    fireEvent.keyDown(input, { key: "d" });
 
     expect(onDraftChange).toHaveBeenCalledWith("role-1", { roles: ["manager", "employee"] });
     expect(onSave).not.toHaveBeenCalled();
     expect(onDelete).not.toHaveBeenCalled();
 
-    fireEvent.keyDown(manager, { key: "Escape" });
+    fireEvent.keyDown(input, { key: "Escape" });
+
+    expect(onCancel).not.toHaveBeenCalled();
+
+    fireEvent.keyDown(input, { key: "Escape" });
 
     expect(onCancel).toHaveBeenCalledWith("role-1");
   });
@@ -497,10 +502,12 @@ describe("InlineTableForm", () => {
     );
 
     const group = screen.getByRole("group", { name: "Document roles" });
-    fireEvent.keyDown(within(group).getByRole("button", { name: "Manager" }), { key: "Enter" });
+    const input = within(group).getByRole("combobox", { name: "Document roles input" });
+    fireEvent.focus(input);
+    fireEvent.keyDown(input, { key: "Enter" });
     expect(onChange).toHaveBeenLastCalledWith(["manager", "employee"]);
 
-    fireEvent.keyDown(within(group).getByRole("button", { name: "Employee" }), { key: " " });
+    fireEvent.click(within(group).getByRole("button", { name: "Remove Employee" }));
     expect(onChange).toHaveBeenLastCalledWith([]);
   });
 
@@ -520,10 +527,10 @@ describe("InlineTableForm", () => {
       />,
     );
 
-    const disabledOption = screen.getByRole("button", { name: "Employee" });
+    fireEvent.focus(screen.getByRole("combobox", { name: "Editable roles input" }));
+    const disabledOption = screen.getByRole("option", { name: "Employee" });
     expect(disabledOption).toBeDisabled();
-    fireEvent.click(disabledOption);
-    fireEvent.keyDown(disabledOption, { key: "Enter" });
+    fireEvent.mouseDown(disabledOption);
     expect(onChange).not.toHaveBeenCalled();
 
     rerender(
@@ -537,8 +544,8 @@ describe("InlineTableForm", () => {
     );
 
     expect(screen.getByRole("group", { name: "Editable roles" })).toHaveAttribute("aria-disabled", "true");
-    expect(screen.getByRole("button", { name: "Manager" })).toBeDisabled();
-    fireEvent.click(screen.getByRole("button", { name: "Admin" }));
+    expect(screen.getByRole("button", { name: "Remove Manager" })).toBeDisabled();
+    expect(screen.queryByRole("option", { name: "Admin" })).not.toBeInTheDocument();
 
     expect(onChange).not.toHaveBeenCalled();
   });

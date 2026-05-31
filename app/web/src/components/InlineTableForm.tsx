@@ -55,6 +55,9 @@ const CELL_ROLE = "cell";
 const SEARCH_ROLE = "search";
 const STATUS_ROLE = "status";
 const GROUP_ROLE = "group";
+const COMBOBOX_ROLE = "combobox";
+const LISTBOX_ROLE = "listbox";
+const OPTION_ROLE = "option";
 let createRowCounter = 0;
 
 function InlineTableRowGroup({
@@ -1665,29 +1668,35 @@ export function InlineTagPickerField({
 }: InlineTagPickerFieldProps) {
   const labelId = useId();
   const inputId = useId();
-  const [query, setQuery] = useState("");
+  const listId = useId();
+  const inputRef = useRef<HTMLInputElement>(null);
+  const [picker, setPicker] = useState({ query: "", open: false, activeIndex: 0 });
+  const { query, open } = picker;
   const uniqueOptions = uniqueTagPickerOptions([
     ...options,
     ...(allowCustomValues ? value.map((selected) => ({ value: selected, label: selected })) : []),
   ]);
-  const visibleOptions = filterTagPickerOptions(uniqueOptions, query);
   const selectedValues = normalizeTagPickerValue(value, uniqueOptions);
   const selected = new Set(selectedValues);
+  const visibleOptions = filterTagPickerOptions(uniqueOptions, query).filter((option) => !selected.has(option.value));
+  const activeIndex = Math.min(picker.activeIndex, Math.max(visibleOptions.length - 1, 0));
+  const activeOption = visibleOptions[activeIndex] ?? null;
+  const selectedOptions = selectedValues.map((selectedValue) => (
+    uniqueOptions.find((option) => option.value === selectedValue) ?? { value: selectedValue, label: selectedValue }
+  ));
   const resolvedLabel = ariaLabel ?? label ?? "Tag options";
 
   const applySelected = (nextSelected: ReadonlySet<string>) => {
     onChange(orderedTagPickerValues(uniqueOptions, nextSelected));
   };
 
-  const toggleOption = (option: InlineTagPickerOption) => {
+  const selectOption = (option: InlineTagPickerOption) => {
     if (disabled || option.disabled) return;
     const nextSelected = new Set(selectedValues);
-    if (nextSelected.has(option.value)) {
-      nextSelected.delete(option.value);
-    } else {
-      nextSelected.add(option.value);
-    }
+    nextSelected.add(option.value);
     applySelected(nextSelected);
+    setPicker({ query: "", open: true, activeIndex: 0 });
+    inputRef.current?.focus();
   };
 
   const addValue = (rawValue: string) => {
@@ -1702,29 +1711,84 @@ export function InlineTagPickerField({
     } else {
       onChange([...selectedValues, nextValue]);
     }
-    setQuery("");
+    setPicker({ query: "", open: true, activeIndex: 0 });
+    inputRef.current?.focus();
+  };
+
+  const removeValue = (selectedValue: string) => {
+    if (disabled) return;
+    applySelected(new Set(selectedValues.filter((valueItem) => valueItem !== selectedValue)));
+    inputRef.current?.focus();
   };
 
   const removeLastSelected = () => {
     if (disabled || selectedValues.length === 0) return;
-    applySelected(new Set(selectedValues.slice(0, -1)));
+    removeValue(selectedValues[selectedValues.length - 1]!);
   };
 
   const commitQuery = () => {
-    if (!query.trim()) return;
-    const firstEnabled = visibleOptions.find((option) => !option.disabled);
-    if (firstEnabled) {
-      const nextSelected = new Set(selectedValues);
-      nextSelected.add(firstEnabled.value);
-      applySelected(nextSelected);
-      setQuery("");
+    if (activeOption && !activeOption.disabled) {
+      selectOption(activeOption);
       return;
     }
     if (allowCustomValues) addValue(query);
   };
 
-  const showInput = searchable || allowCustomValues;
   const inputAccessibleLabel = inputLabel ?? `${resolvedLabel} input`;
+  const showPopover = open && !disabled;
+
+  const handleKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
+    if (disabled) return;
+    if (event.key === "ArrowDown") {
+      event.preventDefault();
+      event.stopPropagation();
+      if (!open) {
+        setPicker((current) => ({ ...current, open: true, activeIndex: 0 }));
+        return;
+      }
+      setPicker((current) => ({
+        ...current,
+        open: true,
+        activeIndex: Math.min(activeIndex + 1, Math.max(visibleOptions.length - 1, 0)),
+      }));
+      return;
+    }
+    if (event.key === "ArrowUp") {
+      event.preventDefault();
+      event.stopPropagation();
+      if (!open) {
+        setPicker((current) => ({
+          ...current,
+          open: true,
+          activeIndex: Math.max(visibleOptions.length - 1, 0),
+        }));
+        return;
+      }
+      setPicker((current) => ({ ...current, open: true, activeIndex: Math.max(activeIndex - 1, 0) }));
+      return;
+    }
+    if (event.key === "Enter" || event.key === ",") {
+      event.preventDefault();
+      event.stopPropagation();
+      if (!open) {
+        setPicker((current) => ({ ...current, open: true, activeIndex: 0 }));
+        return;
+      }
+      commitQuery();
+      return;
+    }
+    if (event.key === "Backspace" && query === "") {
+      event.preventDefault();
+      event.stopPropagation();
+      removeLastSelected();
+      return;
+    }
+    if (event.key === "Escape" && open) {
+      event.preventDefault();
+      event.stopPropagation();
+      setPicker((current) => ({ ...current, open: false }));
+    }
+  };
 
   return (
     <div
@@ -1737,72 +1801,103 @@ export function InlineTagPickerField({
       aria-labelledby={label ? labelId : undefined}
       aria-disabled={disabled || undefined}
       data-inline-table-enter-save="false"
+      onBlur={(event) => {
+        if (!event.currentTarget.contains(event.relatedTarget)) {
+          setPicker((current) => ({ ...current, open: false }));
+        }
+      }}
     >
       {label ? (
         <span id={labelId} className="inline-table-form__tag-picker-label">
           {label}
         </span>
       ) : null}
-      {showInput ? (
-        <label className="inline-table-form__tag-input-label" htmlFor={inputId}>
-          {inputAccessibleLabel}
-        </label>
-      ) : null}
-      {showInput ? (
+      <label className="inline-table-form__tag-input-label" htmlFor={inputId}>
+        {inputAccessibleLabel}
+      </label>
+      <div
+        className="inline-table-form__tag-control"
+        role="presentation"
+        onMouseDown={(event) => {
+          if (event.target instanceof HTMLButtonElement) return;
+          inputRef.current?.focus();
+        }}
+      >
+        <Search className="inline-table-form__tag-search" size={15} aria-hidden="true" />
+        {selectedOptions.map((option) => (
+          <span key={option.value} className="inline-table-form__tag-chip">
+            {option.label}
+            <button
+              type="button"
+              className="inline-table-form__tag-remove"
+              disabled={disabled}
+              aria-label={`Remove ${option.label}`}
+              onClick={() => removeValue(option.value)}
+            >
+              <X size={12} aria-hidden="true" />
+            </button>
+          </span>
+        ))}
         <input
           id={inputId}
+          ref={inputRef}
           className="inline-table-form__tag-input"
           type="text"
+          role={COMBOBOX_ROLE}
           value={query}
-          placeholder={placeholder}
+          placeholder={selectedOptions.length === 0 ? placeholder : ""}
           disabled={disabled}
+          readOnly={!searchable && !allowCustomValues}
           aria-label={label || ariaLabel ? inputAccessibleLabel : undefined}
-          onChange={(event) => setQuery(event.currentTarget.value)}
-          onKeyDown={(event) => {
-            if (disabled) return;
-            if (event.key === "Enter" || event.key === ",") {
-              event.preventDefault();
-              event.stopPropagation();
-              commitQuery();
-            } else if (event.key === "Backspace" && query === "") {
-              event.preventDefault();
-              event.stopPropagation();
-              removeLastSelected();
-            }
+          aria-autocomplete={searchable || allowCustomValues ? "list" : "none"}
+          aria-expanded={showPopover}
+          aria-controls={listId}
+          aria-activedescendant={showPopover && activeOption ? `${listId}-${activeOption.value}` : undefined}
+          onChange={(event) => {
+            if (!searchable && !allowCustomValues) return;
+            setPicker({ query: event.currentTarget.value, open: true, activeIndex: 0 });
           }}
+          onFocus={() => setPicker((current) => ({ ...current, open: true }))}
+          onKeyDown={handleKeyDown}
         />
-      ) : null}
-      <div className="inline-table-form__tag-options">
-        {visibleOptions.map((option) => {
-          const isSelected = selected.has(option.value);
-          const optionDisabled = disabled || option.disabled;
-          return (
-            <button
-              key={option.value}
-              type="button"
-              className={[
-                "inline-table-form__tag-option",
-                isSelected ? "is-selected" : null,
-              ].filter(Boolean).join(" ")}
-              aria-pressed={isSelected}
-              disabled={optionDisabled}
-              onClick={() => toggleOption(option)}
-              onKeyDown={(event) => (
-                handleTagOptionKeyDown(event, () => toggleOption(option), optionDisabled)
-              )}
-            >
-              {option.label}
-            </button>
-          );
-        })}
-        {visibleOptions.length === 0 ? (
-          <span className="inline-table-form__tag-empty">
-            {allowCustomValues && query.trim()
-              ? `Press Enter to add "${query.trim()}"`
-              : noResultsLabel}
-          </span>
-        ) : null}
       </div>
+      {showPopover ? (
+        <div className="inline-table-form__tag-popover">
+          <div id={listId} className="inline-table-form__tag-options" role={LISTBOX_ROLE}>
+            {visibleOptions.map((option, index) => {
+              const optionDisabled = disabled || option.disabled;
+              return (
+                <button
+                  key={option.value}
+                  id={`${listId}-${option.value}`}
+                  type="button"
+                  role={OPTION_ROLE}
+                  aria-selected={index === activeIndex}
+                  className={[
+                    "inline-table-form__tag-option",
+                    index === activeIndex ? "is-active" : null,
+                  ].filter(Boolean).join(" ")}
+                  disabled={optionDisabled}
+                  onMouseDown={(event) => {
+                    event.preventDefault();
+                    selectOption(option);
+                  }}
+                  onMouseEnter={() => setPicker((current) => ({ ...current, activeIndex: index }))}
+                >
+                  {option.label}
+                </button>
+              );
+            })}
+            {visibleOptions.length === 0 ? (
+              <span className="inline-table-form__tag-empty">
+                {allowCustomValues && query.trim()
+                  ? `Press Enter to add "${query.trim()}"`
+                  : noResultsLabel}
+              </span>
+            ) : null}
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -2094,18 +2189,6 @@ function tagPickerOptionMatches(option: InlineTagPickerOption, value: string) {
 
 function defaultNormalizeCustomTagValue(value: string) {
   return value.trim();
-}
-
-function handleTagOptionKeyDown(
-  event: KeyboardEvent<HTMLButtonElement>,
-  toggle: () => void,
-  disabled?: boolean,
-) {
-  if (disabled) return;
-  if (event.key !== "Enter" && event.key !== " ") return;
-  event.preventDefault();
-  event.stopPropagation();
-  toggle();
 }
 
 function cellClasses<TDraft>(

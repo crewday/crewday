@@ -210,6 +210,17 @@ async function chooseSearchableOption(
   fireEvent.keyDown(input, { key: "Enter" });
 }
 
+function openTokenPicker(container: HTMLElement, label: RegExp): HTMLElement {
+  const input = within(container).getByRole("combobox", { name: label });
+  fireEvent.focus(input);
+  return input;
+}
+
+function selectTokenOption(container: HTMLElement, inputLabel: RegExp, optionName: string): void {
+  openTokenPicker(container, inputLabel);
+  fireEvent.mouseDown(within(container).getByRole("option", { name: optionName }));
+}
+
 beforeEach(() => {
   HTMLDialogElement.prototype.showModal = vi.fn(function showModal(this: HTMLDialogElement) {
     this.setAttribute("open", "");
@@ -342,8 +353,9 @@ describe("<InstructionsPage>", () => {
       target: { value: "Close the cover after service." },
     });
     fireEvent.change(within(row).getByLabelText(/^Instruction scope\b/), { target: { value: "property" } });
-    fireEvent.click(within(row).getByRole("button", { name: "Villa Rosa" }));
-    fireEvent.click(within(row).getByRole("button", { name: "Casa Azul" }));
+    expect(within(row).queryByRole("option", { name: "Villa Rosa" })).not.toBeInTheDocument();
+    selectTokenOption(row, /^Filter properties\b/, "Villa Rosa");
+    selectTokenOption(row, /^Filter properties\b/, "Casa Azul");
     fireEvent.click(within(row).getByRole("button", { name: "Save" }));
 
     await screen.findByText("Instruction detail ins_property");
@@ -396,7 +408,8 @@ describe("<InstructionsPage>", () => {
 
     const row = await screen.findByLabelText("New instruction");
     expect(within(row).getByLabelText(/^Instruction scope\b/)).toHaveValue("property");
-    expect(within(row).getByRole("button", { name: "Villa Rosa" })).toHaveAttribute("aria-pressed", "true");
+    expect(within(row).getByText("Villa Rosa")).toBeInTheDocument();
+    expect(within(row).queryByRole("option", { name: "Casa Azul" })).not.toBeInTheDocument();
 
     fireEvent.change(within(row).getByLabelText(/^Instruction title\b/), {
       target: { value: "Pool rules" },
@@ -404,7 +417,7 @@ describe("<InstructionsPage>", () => {
     fireEvent.change(within(row).getByLabelText(/^Markdown\b/), {
       target: { value: "Close the cover after service." },
     });
-    fireEvent.click(within(row).getByRole("button", { name: "Casa Azul" }));
+    selectTokenOption(row, /^Filter properties\b/, "Casa Azul");
     fireEvent.click(within(row).getByRole("button", { name: "Save" }));
 
     await screen.findByText("Instruction detail ins_property?property_id=prop_1");
