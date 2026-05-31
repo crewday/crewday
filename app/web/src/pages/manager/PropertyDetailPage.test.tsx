@@ -1289,7 +1289,9 @@ describe("<PropertyDetailPage>", () => {
       expect(await screen.findByRole("heading", { name: "Settings overrides" })).toBeInTheDocument();
       const evidence = settingRow("Evidence policy");
       fireEvent.click(within(evidence).getByRole("button", { name: "Edit" }));
-      fireEvent.change(within(evidence).getByLabelText("Evidence policy"), {
+      const evidenceSelect = within(evidence).getByLabelText("Evidence policy");
+      expect(within(evidenceSelect).getByRole("option", { name: "Inherited" })).toBeInTheDocument();
+      fireEvent.change(evidenceSelect, {
         target: { value: "required" },
       });
       fireEvent.click(within(evidence).getByRole("button", { name: "Save" }));
@@ -1304,13 +1306,38 @@ describe("<PropertyDetailPage>", () => {
       const savedEvidence = settingRow("Evidence policy");
       expect(await within(savedEvidence).findByText("property override")).toBeInTheDocument();
       expect(within(savedEvidence).getAllByText("required")).toHaveLength(2);
+
+      fireEvent.click(within(savedEvidence).getByRole("button", { name: "Edit" }));
+      const savedEvidenceSelect = within(savedEvidence).getByLabelText("Evidence policy");
+      const inheritedOption = within(savedEvidenceSelect).getByRole("option", { name: "Inherited" }) as HTMLOptionElement;
+      fireEvent.change(savedEvidenceSelect, {
+        target: { value: inheritedOption.value },
+      });
+      fireEvent.click(within(savedEvidence).getByRole("button", { name: "Save" }));
+      await waitFor(() => {
+        expect(fake.calls).toContainEqual({
+          url: "/w/acme/api/v1/properties/prop_1/settings",
+          method: "PATCH",
+          body: { evidence_policy: null },
+        });
+      });
+      const inheritedEvidence = settingRow("Evidence policy");
+      expect(await within(inheritedEvidence).findByText("Inherited")).toBeInTheDocument();
+      expect(within(inheritedEvidence).getByText("inherited (workspace)")).toBeInTheDocument();
       await waitFor(() => {
         expect(fake.calls.filter((call) => call.url === "/w/acme/api/v1/properties/prop_1/settings").length).toBeGreaterThan(1);
         expect(fake.calls.filter((call) => call.url === "/w/acme/api/v1/properties/prop_1" && call.method === "GET").length).toBeGreaterThan(1);
         expect(fake.calls.filter((call) => call.url === "/w/acme/api/v1/properties" && call.method === "GET").length).toBeGreaterThan(1);
       });
 
-      fireEvent.click(within(savedEvidence).getByRole("button", { name: "Clear" }));
+      fireEvent.click(within(settingRow("Evidence policy")).getByRole("button", { name: "Edit" }));
+      fireEvent.change(within(settingRow("Evidence policy")).getByLabelText("Evidence policy"), {
+        target: { value: "required" },
+      });
+      fireEvent.click(within(settingRow("Evidence policy")).getByRole("button", { name: "Save" }));
+      expect(await within(settingRow("Evidence policy")).findByText("property override")).toBeInTheDocument();
+
+      fireEvent.click(within(settingRow("Evidence policy")).getByRole("button", { name: "Clear" }));
       await waitFor(() => {
         expect(fake.calls).toContainEqual({
           url: "/w/acme/api/v1/properties/prop_1/settings",

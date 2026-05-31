@@ -31,8 +31,14 @@ interface PropertySettingMutation {
   value: unknown;
 }
 
+const INHERITED_SETTING_DRAFT_VALUE = "__crewday_inherited_setting__";
+
 function hasPropertyScope(def: SettingDefinition): boolean {
   return settingOverrideScopes(def.override_scope).includes("P");
+}
+
+function hasPropertyOverride(overrides: Record<string, unknown>, key: string): boolean {
+  return key in overrides && overrides[key] !== null;
 }
 
 function settingErrorMessage(error: unknown): string {
@@ -62,6 +68,104 @@ function updatePropertyOverrides<T extends { settings_override: Record<string, u
     ...item,
     settings_override: patchOverride(item.settings_override, key, value),
   };
+}
+
+function propertySettingDraftValue(
+  key: string,
+  def: SettingDefinition,
+  overrides: Record<string, unknown>,
+  resolved: Record<string, { value: unknown; source: string }>,
+): string {
+  if (!hasPropertyOverride(overrides, key)) return INHERITED_SETTING_DRAFT_VALUE;
+  return settingDraftFromValue(resolved[key]?.value ?? def.catalog_default);
+}
+
+function parsePropertySettingDraft(def: SettingDefinition, draft: string): unknown {
+  if (draft === INHERITED_SETTING_DRAFT_VALUE) return null;
+  return parseSettingDraft(def, draft);
+}
+
+function SettingsOverrideValueEditor({
+  def,
+  value,
+  resolvedValue,
+  update,
+  disabled,
+}: {
+  def: SettingDefinition;
+  value: string;
+  resolvedValue: unknown;
+  update: (patch: Partial<PropertySettingDraft>) => void;
+  disabled: boolean;
+}) {
+  if (def.type === "bool") {
+    return (
+      <InlineSelectField
+        value={value}
+        options={[
+          { value: INHERITED_SETTING_DRAFT_VALUE, label: "Inherited" },
+          { value: "true", label: "Yes" },
+          { value: "false", label: "No" },
+        ]}
+        onChange={(nextValue) => update({ value: nextValue })}
+        disabled={disabled}
+        ariaLabel={def.label}
+      />
+    );
+  }
+  if (def.type === "enum") {
+    return (
+      <InlineSelectField
+        value={value}
+        options={[
+          { value: INHERITED_SETTING_DRAFT_VALUE, label: "Inherited" },
+          ...(def.enum_values ?? []).map((option) => ({
+            value: option,
+            label: settingEnumOptionLabel(def, option),
+          })),
+        ]}
+        onChange={(nextValue) => update({ value: nextValue })}
+        disabled={disabled}
+        ariaLabel={def.label}
+      />
+    );
+  }
+  if (value === INHERITED_SETTING_DRAFT_VALUE) {
+    return (
+      <InlineSelectField
+        value={value}
+        options={[
+          { value: INHERITED_SETTING_DRAFT_VALUE, label: "Inherited" },
+          {
+            value: settingDraftFromValue(resolvedValue ?? def.catalog_default),
+            label: "Set value",
+          },
+        ]}
+        onChange={(nextValue) => update({ value: nextValue })}
+        disabled={disabled}
+        ariaLabel={def.label}
+      />
+    );
+  }
+  return (
+    <span className="settings-override-source">
+      <InlineNumberField
+        value={value}
+        onChange={(nextValue) => update({ value: nextValue })}
+        disabled={disabled}
+        ariaLabel={def.label}
+        ariaInvalid={invalidIntegerSettingDraft(value)}
+      />
+      <button
+        type="button"
+        className="btn btn--ghost btn--sm"
+        disabled={disabled}
+        onClick={() => update({ value: INHERITED_SETTING_DRAFT_VALUE })}
+      >
+        Inherited
+      </button>
+    </span>
+  );
 }
 
 export default function SettingsOverridePanel({
@@ -131,7 +235,7 @@ export default function SettingsOverridePanel({
     (): InlineTableRow<PropertySettingDraft>[] => propertyScoped.map((def) => {
       const res = resolved[def.key];
       const editedDraft = editedDrafts.get(def.key);
-      const committedValue = settingDraftFromValue(res?.value ?? def.catalog_default);
+      const committedValue = propertySettingDraftValue(def.key, def, overrides, resolved);
       const savingThisRow = saveSetting.isPending && saveSetting.variables?.key === def.key;
       const source = res?.source ?? "catalog";
       return {
@@ -144,11 +248,12 @@ export default function SettingsOverridePanel({
         saving: savingThisRow,
         disabled: saveSetting.isPending && !savingThisRow,
         error: rowErrors.get(def.key) ? <span role="alert">{rowErrors.get(def.key)}</span> : undefined,
-        validation: editedDraft && def.type === "int" && invalidIntegerSettingDraft(editedDraft.value)
+        validation: editedDraft && editedDraft.value !== INHERITED_SETTING_DRAFT_VALUE
+          && def.type === "int" && invalidIntegerSettingDraft(editedDraft.value)
           ? "Enter a whole number."
           : undefined,
         meta: def.description,
-        isNew: source !== "property" && !(def.key in overrides),
+        isNew: source !== "property" && !hasPropertyOverride(overrides, def.key),
       };
     }),
     [editedDrafts, overrides, propertyScoped, resolved, rowErrors, saveSetting.isPending, saveSetting.variables],
@@ -184,7 +289,7 @@ export default function SettingsOverridePanel({
         header: "Override value",
         width: { flex: 1, min: 160 },
         renderRead: ({ row }) => {
-          const hasOverride = row.id in overrides;
+          const hasOverride = hasPropertyOverride(overrides, row.id);
           const res = resolved[row.id];
           return hasOverride ? (
             <strong>{formatValue(res?.value)}</strong>
@@ -195,41 +300,13 @@ export default function SettingsOverridePanel({
         renderEdit: ({ row, update, disabled }) => {
           const def = definitionsByKey.get(row.id);
           if (!def) return null;
-          if (def.type === "bool") {
-            return (
-              <InlineSelectField
-                value={row.draft.value}
-                options={[
-                  { value: "true", label: "Yes" },
-                  { value: "false", label: "No" },
-                ]}
-                onChange={(value) => update({ value })}
-                disabled={disabled}
-                ariaLabel={def.label}
-              />
-            );
-          }
-          if (def.type === "enum") {
-            return (
-              <InlineSelectField
-                value={row.draft.value}
-                options={(def.enum_values ?? []).map((option) => ({
-                  value: option,
-                  label: settingEnumOptionLabel(def, option),
-                }))}
-                onChange={(value) => update({ value })}
-                disabled={disabled}
-                ariaLabel={def.label}
-              />
-            );
-          }
           return (
-            <InlineNumberField
+            <SettingsOverrideValueEditor
+              def={def}
               value={row.draft.value}
-              onChange={(value) => update({ value })}
+              resolvedValue={resolved[row.id]?.value}
+              update={update}
               disabled={disabled}
-              ariaLabel={def.label}
-              ariaInvalid={invalidIntegerSettingDraft(row.draft.value)}
             />
           );
         },
@@ -247,7 +324,7 @@ export default function SettingsOverridePanel({
         width: { flex: 1.05, min: 190 },
         renderRead: ({ row }) => {
           const res = resolved[row.id];
-          if (res?.source === "property" || row.id in overrides) {
+          if (res?.source === "property" || hasPropertyOverride(overrides, row.id)) {
             return (
               <span className="settings-override-source">
                 <Chip tone="moss" size="sm">property override</Chip>
@@ -268,7 +345,9 @@ export default function SettingsOverridePanel({
           const def = definitionsByKey.get(row.id);
           return (
             <span className="muted">
-              {row.id in overrides ? "Editing property override" : "Will create property override"}
+              {hasPropertyOverride(overrides, row.id)
+                ? "Editing property override"
+                : "Will create property override"}
               {def ? <> · {settingScopeLabel(def.override_scope)}</> : null}
             </span>
           );
@@ -294,7 +373,7 @@ export default function SettingsOverridePanel({
           if (!def) return;
           setEditedDrafts((current) => {
             const currentDraft = current.get(rowId) ?? {
-              value: settingDraftFromValue(resolved[rowId]?.value ?? def.catalog_default),
+              value: propertySettingDraftValue(rowId, def, overrides, resolved),
             };
             const nextDrafts = new Map(current);
             nextDrafts.set(rowId, { ...currentDraft, ...patch });
@@ -312,7 +391,7 @@ export default function SettingsOverridePanel({
           setEditedDrafts((current) => {
             const nextDrafts = new Map(current);
             nextDrafts.set(rowId, {
-              value: settingDraftFromValue(resolved[rowId]?.value ?? def.catalog_default),
+              value: propertySettingDraftValue(rowId, def, overrides, resolved),
             });
             return nextDrafts;
           });
@@ -325,8 +404,16 @@ export default function SettingsOverridePanel({
         onSave={(rowId) => {
           const def = definitionsByKey.get(rowId);
           const draft = editedDrafts.get(rowId);
-          if (!def || !draft || (def.type === "int" && invalidIntegerSettingDraft(draft.value))) return;
-          const committedValue = settingDraftFromValue(resolved[rowId]?.value ?? def.catalog_default);
+          if (
+            !def
+            || !draft
+            || (
+              draft.value !== INHERITED_SETTING_DRAFT_VALUE
+              && def.type === "int"
+              && invalidIntegerSettingDraft(draft.value)
+            )
+          ) return;
+          const committedValue = propertySettingDraftValue(rowId, def, overrides, resolved);
           if (draft.value === committedValue) {
             setEditedDrafts((current) => {
               const nextDrafts = new Map(current);
@@ -340,7 +427,7 @@ export default function SettingsOverridePanel({
             });
             return;
           }
-          saveSetting.mutate({ key: rowId, value: parseSettingDraft(def, draft.value) });
+          saveSetting.mutate({ key: rowId, value: parsePropertySettingDraft(def, draft.value) });
         }}
         onCancel={(rowId) => {
           setEditedDrafts((current) => {
