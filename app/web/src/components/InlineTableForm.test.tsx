@@ -3432,6 +3432,15 @@ describe("InlineTableForm", () => {
     expect(inlineTableCss).toMatch(
       /@media \(max-width: 720px\)\s*{[\s\S]*\.inline-table-form__td\s*{[\s\S]*grid-template-columns: minmax\(90px, 0\.35fr\) minmax\(0, 1fr\);/m,
     );
+    expect(inlineTableCss).toMatch(
+      /\.inline-table-form--container-responsive\s*{[\s\S]*container-type: inline-size;/m,
+    );
+    expect(inlineTableCss).toMatch(
+      /@container \(max-width: 720px\)\s*{[\s\S]*\.inline-table-form--container-responsive \.inline-table-form__table\s*{[\s\S]*min-width: 0;[\s\S]*overflow: visible;/m,
+    );
+    expect(inlineTableCss).toMatch(
+      /@container \(max-width: 720px\)\s*{[\s\S]*\.inline-table-form--container-responsive \.inline-table-form__td\s*{[\s\S]*grid-template-columns: minmax\(90px, 0\.35fr\) minmax\(0, 1fr\);/m,
+    );
   });
 });
 

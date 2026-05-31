@@ -16,6 +16,7 @@ import { __resetQueryKeyGetterForTests, qk } from "@/lib/queryKeys";
 import * as preferences from "@/lib/preferences";
 import type { TaskTemplate } from "@/types/task";
 import type { WorkRole } from "@/types/employee";
+import managerPanelsCss from "@/styles/manager-panels.css?raw";
 
 import TemplatesPage from "./TemplatesPage";
 
@@ -256,6 +257,31 @@ describe("<TemplatesPage> checklist reorder", () => {
       expect(screen.getByRole("table", { name: "Daily clean checklist" })).toBeInTheDocument();
       expect(harness.calls.some((c) => callPath(c) === TASK_TEMPLATES_API_PATH)).toBe(
         true,
+      );
+    } finally {
+      harness.restore();
+    }
+  });
+
+  it("uses checklist-aware card and table layout hooks", async () => {
+    const harness = installFetch();
+    const client = makeClient();
+    try {
+      render(<Harness client={client} />);
+      await screen.findByText("First step");
+
+      const cardGrid = document.querySelector(".grid--template-cards");
+      const checklistEditor = screen
+        .getByRole("table", { name: "Daily clean checklist" })
+        .closest(".inline-table-form");
+
+      expect(cardGrid).toHaveClass("grid", "grid--cards", "grid--template-cards");
+      expect(checklistEditor).toHaveClass(
+        "tpl-card__checklist-editor",
+        "inline-table-form--container-responsive",
+      );
+      expect(managerPanelsCss).toContain(
+        ".grid--template-cards { grid-template-columns: repeat(auto-fit, minmax(min(100%, 720px), 1fr)); }",
       );
     } finally {
       harness.restore();

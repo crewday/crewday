@@ -208,7 +208,7 @@ export default function TemplatesPage() {
       actions={createAction}
     >
       {createDialog}
-      <section className="grid grid--cards">
+      <section className="grid grid--cards grid--template-cards">
         {templates.map((tpl) => {
           const role = tpl.role_id ? rolesById.get(tpl.role_id) : undefined;
           const roleLabel = role?.name ?? (tpl.role_id ? "Unknown role" : "Any role");
@@ -776,7 +776,7 @@ function ChecklistEditor({ template }: ChecklistEditorProps): ReactElement {
       <InlineTableForm
         compact
         ariaLabel={`${template.name} checklist`}
-        className="tpl-card__checklist-editor"
+        className="tpl-card__checklist-editor inline-table-form--container-responsive"
         columns={columns}
         rows={rows}
         saveMode="explicit"

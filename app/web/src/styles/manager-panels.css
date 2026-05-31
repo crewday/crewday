@@ -33,6 +33,7 @@
 .grid--split { grid-template-columns: 1.4fr 1fr; }
 @media (max-width: 1024px) { .grid--split { grid-template-columns: 1fr; } }
 .grid--cards { grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); }
+.grid--template-cards { grid-template-columns: repeat(auto-fit, minmax(min(100%, 720px), 1fr)); }
 
 .stat-card {
   background: var(--card); border: 1px solid var(--line);
@@ -613,6 +614,7 @@
 .tpl-card {
   background: var(--card); border: 1px solid var(--line); border-radius: 12px;
   padding: 16px; box-shadow: var(--shadow);
+  min-width: 0;
 }
 .tpl-card__head { display: flex; flex-direction: column; gap: 6px; margin-bottom: 8px; }
 .tpl-card__title {
