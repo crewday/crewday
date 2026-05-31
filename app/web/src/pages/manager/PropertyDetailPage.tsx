@@ -140,7 +140,7 @@ export default function PropertyDetailPage() {
       />
 
       {activeTab === "overview" && (
-        <div id={panelIdFor("overview")} role="tabpanel">
+        <div id={panelIdFor("overview")} role="tabpanel" className="grid">
           <OverviewPanel detail={detail} employees={empsQ.data} />
           <AgentPreferencesPanel
             scope="property"
