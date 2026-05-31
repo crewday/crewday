@@ -25,11 +25,13 @@ import hashlib
 from datetime import UTC, datetime
 from typing import Any
 
+from fastapi.routing import APIRoute
 from fastapi.testclient import TestClient
 from pydantic import SecretStr
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.adapters.db.places.models import Area, Property, PropertyWorkspace
+from app.adapters.db.workspace.models import Workspace
 from app.admin.init import workspace_bootstrap
 from app.api.v1.places import _COLOR_PALETTE, _color_for, build_properties_router
 from app.config import Settings
@@ -76,6 +78,7 @@ def _seed_property(
     address: str = "1 Test Street",
     client_org_id: str | None = None,
     owner_user_id: str | None = None,
+    settings_override_json: dict[str, object] | None = None,
     deleted: bool = False,
     created_at: datetime = _PINNED,
 ) -> str:
@@ -110,6 +113,7 @@ def _seed_property(
             owner_user_id=owner_user_id,
             tags_json=[],
             welcome_defaults_json={},
+            settings_override_json=settings_override_json or {},
             property_notes_md="",
             created_at=created_at,
             updated_at=created_at,
@@ -128,6 +132,19 @@ def _seed_property(
         )
         s.commit()
         return prop.id
+
+
+def _set_workspace_settings(
+    factory: sessionmaker[Session],
+    *,
+    workspace_id: str,
+    settings_json: dict[str, object],
+) -> None:
+    with factory() as s, tenant_agnostic():
+        ws = s.get(Workspace, workspace_id)
+        assert ws is not None
+        ws.settings_json = settings_json
+        s.commit()
 
 
 def _seed_area(
@@ -747,6 +764,7 @@ class TestWorkerProjection:
             name="Governance Villa",
             client_org_id="01HZGOVRORGCLIENTABCDEFGHJ",
             owner_user_id="01HZGOVROWNERUSERABCDEFGHJ",
+            settings_override_json={"tasks.checklist_required": True},
         )
         client = _client(ctx, factory)
         body = client.get("/properties").json()
@@ -869,6 +887,7 @@ class TestManagerProjectionUnchanged:
             name="Governance Villa",
             client_org_id=client_org,
             owner_user_id=owner_user,
+            settings_override_json={"tasks.checklist_required": True},
         )
         with factory() as s:
             mgr = bootstrap_user(s, email="mgr-gov@example.com", display_name="MgrGov")
@@ -897,11 +916,7 @@ class TestManagerProjectionUnchanged:
         row = client.get("/properties").json()[0]
         assert row["client_org_id"] == client_org
         assert row["owner_user_id"] == owner_user
-        # ``settings_override`` is currently a static ``{}`` placeholder
-        # for both branches (the per-property column hasn't landed); the
-        # real assertion is "not masked away to a placeholder when the
-        # column lands". Pin the v1 default explicitly.
-        assert row["settings_override"] == {}
+        assert row["settings_override"] == {"tasks.checklist_required": True}
 
     def test_owner_projection_includes_governance_fields(
         self,
@@ -923,11 +938,13 @@ class TestManagerProjectionUnchanged:
             name="Owner Governance Villa",
             client_org_id=client_org,
             owner_user_id=owner_user,
+            settings_override_json={"tasks.checklist_required": True},
         )
         client = _client(ctx, factory)
         row = client.get("/properties").json()[0]
         assert row["client_org_id"] == client_org
         assert row["owner_user_id"] == owner_user
+        assert row["settings_override"] == {"tasks.checklist_required": True}
 
     def test_manager_sees_all_workspace_properties(
         self,
@@ -974,3 +991,158 @@ class TestManagerProjectionUnchanged:
         body = client.get("/properties").json()
         ids = {row["id"] for row in body}
         assert ids == {prop_a, prop_b}
+
+
+class TestPropertySettings:
+    """Pin the per-property ``EntitySettingsPayload`` cascade."""
+
+    def test_property_settings_gate_is_property_scoped(self) -> None:
+        routes = [
+            route
+            for route in build_properties_router().routes
+            if isinstance(route, APIRoute)
+            and route.path == "/properties/{property_id}/settings"
+        ]
+        assert len(routes) == 1
+        permission_metadata = [
+            getattr(dependency.call, "__crewday_permission__", None)
+            for dependency in routes[0].dependant.dependencies
+        ]
+
+        assert any(
+            metadata is not None
+            and metadata.action_key == "scope.edit_settings"
+            and metadata.scope_kind == "property"
+            and metadata.scope_id_from_path == "property_id"
+            for metadata in permission_metadata
+        )
+
+    def test_owner_returns_property_overrides_with_property_source(
+        self,
+        owner_ctx: tuple[WorkspaceContext, sessionmaker[Session], str],
+    ) -> None:
+        ctx, factory, ws_id = owner_ctx
+        _set_workspace_settings(
+            factory,
+            workspace_id=ws_id,
+            settings_json={
+                "evidence.policy": "require",
+                "tasks.checklist_required": False,
+            },
+        )
+        property_id = _seed_property(
+            factory,
+            workspace_id=ws_id,
+            settings_override_json={
+                "tasks.checklist_required": True,
+                "scheduling.horizon_days": 45,
+            },
+        )
+
+        response = _client(ctx, factory).get(f"/properties/{property_id}/settings")
+
+        assert response.status_code == 200, response.text
+        body = response.json()
+        assert body["overrides"] == {
+            "tasks.checklist_required": True,
+            "scheduling.horizon_days": 45,
+        }
+        assert body["resolved"]["tasks.checklist_required"] == {
+            "value": True,
+            "source": "property",
+        }
+        assert body["resolved"]["scheduling.horizon_days"] == {
+            "value": 45,
+            "source": "property",
+        }
+
+    def test_property_settings_inherit_from_workspace_then_catalog(
+        self,
+        owner_ctx: tuple[WorkspaceContext, sessionmaker[Session], str],
+    ) -> None:
+        ctx, factory, ws_id = owner_ctx
+        _set_workspace_settings(
+            factory,
+            workspace_id=ws_id,
+            settings_json={"evidence.policy": "require"},
+        )
+        property_id = _seed_property(
+            factory,
+            workspace_id=ws_id,
+            settings_override_json={
+                "evidence.policy": "inherit",
+                "tasks.checklist_required": None,
+            },
+        )
+
+        body = _client(ctx, factory).get(f"/properties/{property_id}/settings").json()
+
+        assert body["overrides"] == {
+            "evidence.policy": "inherit",
+            "tasks.checklist_required": None,
+        }
+        assert body["resolved"]["evidence.policy"] == {
+            "value": "require",
+            "source": "workspace",
+        }
+        assert body["resolved"]["tasks.checklist_required"] == {
+            "value": False,
+            "source": "catalog",
+        }
+
+    def test_unknown_property_settings_returns_404(
+        self,
+        owner_ctx: tuple[WorkspaceContext, sessionmaker[Session], str],
+    ) -> None:
+        ctx, factory, _ = owner_ctx
+
+        response = _client(ctx, factory).get(
+            "/properties/01HWNOTAREALPROPERTYID0/settings"
+        )
+
+        assert response.status_code == 404, response.text
+        assert response.json()["detail"]["error"] == "property_not_found"
+
+    def test_wrong_workspace_property_settings_returns_404(
+        self,
+        owner_ctx: tuple[WorkspaceContext, sessionmaker[Session], str],
+    ) -> None:
+        ctx, factory, _ = owner_ctx
+        with factory() as s:
+            sibling_owner = bootstrap_user(
+                s, email="settings-sibling@example.com", display_name="Sibling Owner"
+            )
+            sibling_workspace = bootstrap_workspace(
+                s,
+                slug="settings-sibling",
+                name="Settings Sibling",
+                owner_user_id=sibling_owner.id,
+            )
+            s.commit()
+            sibling_workspace_id = sibling_workspace.id
+        property_id = _seed_property(
+            factory,
+            workspace_id=sibling_workspace_id,
+            settings_override_json={"tasks.checklist_required": True},
+        )
+
+        response = _client(ctx, factory).get(f"/properties/{property_id}/settings")
+
+        assert response.status_code == 404, response.text
+        assert response.json()["detail"]["error"] == "property_not_found"
+
+    def test_worker_property_settings_returns_403(
+        self,
+        worker_ctx: tuple[WorkspaceContext, sessionmaker[Session], str, str],
+    ) -> None:
+        ctx, factory, ws_id, _ = worker_ctx
+        property_id = _seed_property(
+            factory,
+            workspace_id=ws_id,
+            settings_override_json={"tasks.checklist_required": True},
+        )
+
+        response = _client(ctx, factory).get(f"/properties/{property_id}/settings")
+
+        assert response.status_code == 403, response.text
+        assert response.json()["detail"]["error"] == "permission_denied"

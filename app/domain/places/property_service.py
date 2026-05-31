@@ -367,6 +367,7 @@ class PropertyView:
     owner_user_id: str | None
     tags_json: tuple[str, ...]
     welcome_defaults_json: dict[str, Any]
+    settings_override_json: dict[str, Any]
     property_notes_md: str
     created_at: datetime
     updated_at: datetime | None
@@ -477,6 +478,7 @@ def _row_to_view(row: Property) -> PropertyView:
         owner_user_id=row.owner_user_id,
         tags_json=tuple(row.tags_json or []),
         welcome_defaults_json=dict(row.welcome_defaults_json or {}),
+        settings_override_json=dict(row.settings_override_json or {}),
         property_notes_md=row.property_notes_md or "",
         created_at=row.created_at,
         updated_at=row.updated_at,
@@ -523,6 +525,7 @@ def _view_to_diff_dict(view: PropertyView) -> dict[str, Any]:
             view.tags_json
         ),  # code-health: ignore[duplicate] Boundary field list kept explicit.  # noqa: E501
         "welcome_defaults_json": dict(view.welcome_defaults_json),
+        "settings_override_json": dict(view.settings_override_json),
         "property_notes_md": view.property_notes_md,
         "created_at": view.created_at.isoformat(),
         "updated_at": (

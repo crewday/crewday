@@ -44,7 +44,7 @@ split by role inside the handler:
 * **Owners + managers** (``properties.read`` resolves allow): full
   projection — every field on :class:`PropertyResponse`, including
   governance-adjacent ``client_org_id`` / ``owner_user_id`` (§22)
-  and workspace-level ``settings_override``.
+  and property-level ``settings_override``.
 * **Workers** (``properties.read`` resolves deny): narrowed to the
   properties the actor holds a ``role_grant`` on (workspace-wide
   grant fans out across every live property; property-pinned
@@ -68,9 +68,8 @@ would leak whether *any* property exists.
 the SPA's :class:`Property` shape declares — ``city`` (we project from
 ``address_json.city``), ``color`` (palette pick by id hash), ``areas``
 (from the :class:`Area` join), ``evidence_policy`` (default
-``"inherit"``), ``settings_override`` (default ``{}``). Each default
-is documented inline against the column it will eventually resolve
-from once the matching ORM widening lands.
+``"inherit"``). Each default is documented inline against the column it
+will eventually resolve from once the matching ORM widening lands.
 
 See ``docs/specs/12-rest-api.md`` §"Properties / areas / stays",
 ``docs/specs/05-employees-and-roles.md`` §"Action catalog" /
@@ -95,6 +94,7 @@ from app.adapters.db.places.models import Area, Property, PropertyWorkspace
 from app.adapters.db.workspace.models import Workspace
 from app.api.deps import current_workspace_context, db_session
 from app.api.v1._problem_json import IDENTITY_PROBLEM_RESPONSES
+from app.api.v1.settings import EntitySettingsPayload, build_entity_settings_payload
 from app.authz import PermissionDenied, require
 from app.authz.dep import Permission
 from app.authz.places_visibility import visible_property_ids_for_user
@@ -159,19 +159,6 @@ _COLOR_PALETTE: tuple[Literal["moss", "sky", "rust"], ...] = (
     "rust",
 )
 
-# Per-property settings cascade override blob. The SPA's
-# ``Property.settings_override`` is typed as ``Record<string, unknown>``;
-# the v1 ORM has no settings_override column on :class:`Property` yet
-# (§05 "Settings cascade" lands the per-property override with the
-# next migration), so projection emits a frozen empty mapping. Future
-# migration: replace this constant with a column read in
-# :func:`_project_property`. ``mappingproxy`` would be more correct
-# but it's not JSON-serialisable by Pydantic v2 — the freshly-built
-# ``dict[str, object]`` returned at projection time keeps the wire
-# shape JSON-serialisable; the constant is the named seam to grep for.
-_SETTINGS_OVERRIDE_DEFAULT: dict[str, object] = {}
-
-
 # ---------------------------------------------------------------------------
 # Wire-facing shape — flat ``Property`` matching app/web/src/types/property.ts.
 # ---------------------------------------------------------------------------
@@ -214,9 +201,8 @@ class PropertyResponse(BaseModel):
     locale: str
     # ``Record<string, unknown>`` on the SPA side. ``object`` keeps the
     # value space soundly typed without opting out of mypy strict (which
-    # ``Any`` would). Today the field is a static ``{}`` placeholder
-    # until the per-property settings_override column lands. Masked to
-    # ``{}`` for workers regardless of the eventual column value.
+    # ``Any`` would). Masked to ``{}`` for workers regardless of the
+    # underlying property setting value.
     settings_override: dict[str, object]
     # Governance-adjacent (§22). Masked to ``None`` for workers — the
     # cross-roster surface intentionally hides which org bills the
@@ -352,6 +338,7 @@ class PropertyDetailResponse(BaseModel):
     owner_user_id: str | None
     tags_json: list[str]
     welcome_defaults_json: dict[str, Any]
+    settings_override_json: dict[str, Any]
     property_notes_md: str
     created_at: datetime
     updated_at: datetime | None
@@ -375,6 +362,7 @@ class PropertyDetailResponse(BaseModel):
             owner_user_id=view.owner_user_id,
             tags_json=list(view.tags_json),
             welcome_defaults_json=dict(view.welcome_defaults_json),
+            settings_override_json=dict(view.settings_override_json),
             property_notes_md=view.property_notes_md,
             created_at=view.created_at,
             updated_at=view.updated_at,
@@ -890,16 +878,16 @@ def _project_property(
     if mask_governance:
         client_org_id: str | None = None
         owner_user_id: str | None = None
-        # Fresh empty dict — see the manager-branch comment below for
-        # the rationale on never sharing a module-level mapping.
         settings_override: dict[str, object] = {}
     else:
         client_org_id = row.client_org_id
         owner_user_id = row.owner_user_id
-        # Fresh dict per row — never share the module-level constant
-        # by reference, in case Pydantic mutates the value during
-        # validation (it doesn't today; the copy is cheap insurance).
-        settings_override = dict(_SETTINGS_OVERRIDE_DEFAULT)
+        raw_settings_override = row.settings_override_json
+        settings_override = (
+            dict(raw_settings_override)
+            if isinstance(raw_settings_override, dict)
+            else {}
+        )
     return PropertyResponse(
         id=row.id,
         name=name,
@@ -989,6 +977,13 @@ def build_properties_router() -> APIRouter:
     read_gate = Depends(Permission("scope.view", scope_kind="workspace"))
     create_gate = Depends(Permission("properties.create", scope_kind="workspace"))
     edit_gate = Depends(Permission("properties.edit", scope_kind="workspace"))
+    edit_settings_gate = Depends(
+        Permission(
+            "scope.edit_settings",
+            scope_kind="property",
+            scope_id_from_path="property_id",
+        )
+    )
     archive_gate = Depends(Permission("properties.archive", scope_kind="workspace"))
     share_gate = Depends(
         Permission(
@@ -1124,6 +1119,39 @@ def build_properties_router() -> APIRouter:
             )
         except property_service.PropertyNotFound as exc:
             raise _property_not_found() from exc
+
+    @api.get(
+        "/properties/{property_id}/settings",
+        response_model=EntitySettingsPayload,
+        operation_id="properties.settings.read",
+        summary="Read one property's resolved settings cascade",
+        dependencies=[edit_settings_gate],
+    )
+    def read_property_settings(
+        property_id: str,
+        ctx: _Ctx,
+        session: _Db,
+    ) -> EntitySettingsPayload:
+        try:
+            view = property_service.get_property(session, ctx, property_id=property_id)
+        except property_service.PropertyNotFound as exc:
+            raise _property_not_found() from exc
+
+        with tenant_agnostic():
+            workspace = session.get(Workspace, ctx.workspace_id)
+        if workspace is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail={"error": "workspace_not_found"},
+            )
+        workspace_settings = (
+            workspace.settings_json if isinstance(workspace.settings_json, dict) else {}
+        )
+        return build_entity_settings_payload(
+            workspace_settings_json=workspace_settings,
+            entity_overrides=view.settings_override_json,
+            entity_layer="property",
+        )
 
     @api.patch(
         "/properties/{property_id}",
