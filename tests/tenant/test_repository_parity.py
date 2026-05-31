@@ -577,6 +577,7 @@ COVERED_METHODS: frozenset[str] = frozenset(
         "app.domain.places.property_service.list_properties",
         "app.domain.places.property_service.soft_delete_property",
         "app.domain.places.property_service.update_property",
+        "app.domain.places.property_service.update_property_settings_override",
         # cd-147o: property_work_role_assignments CRUD — every entry
         # point loads the row through ``_load_row`` (workspace-scoped
         # SELECT) and ``list_*`` filters by ``workspace_id`` directly;
