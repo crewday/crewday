@@ -18,6 +18,7 @@ const OPTION_ROLE = "option";
 const POPOVER_GAP_PX = 8;
 const POPOVER_MAX_HEIGHT_PX = 240;
 const POPOVER_MIN_HEIGHT_PX = 120;
+const POPOVER_MIN_WIDTH_PX = 260;
 const POPOVER_VIEWPORT_MARGIN_PX = 8;
 
 export interface SearchableSelectOption {
@@ -386,7 +387,7 @@ function calculatePopoverLayout(input: HTMLInputElement): SearchableSelectPopove
     Math.min(POPOVER_MAX_HEIGHT_PX, Math.floor(availableHeight)),
   );
   const maxWidth = Math.max(0, viewportWidth - POPOVER_VIEWPORT_MARGIN_PX * 2);
-  const width = Math.min(rect.width, maxWidth);
+  const width = Math.min(Math.max(rect.width, POPOVER_MIN_WIDTH_PX), maxWidth);
   const left = Math.min(
     Math.max(rect.left, POPOVER_VIEWPORT_MARGIN_PX),
     Math.max(POPOVER_VIEWPORT_MARGIN_PX, viewportWidth - width - POPOVER_VIEWPORT_MARGIN_PX),
@@ -426,7 +427,7 @@ function withBlankOption(
 }
 
 function defaultOptionSecondaryText(option: SearchableSelectOption): ReactNode {
-  return option.secondaryText ?? option.value;
+  return option.secondaryText;
 }
 
 function filterOptions(

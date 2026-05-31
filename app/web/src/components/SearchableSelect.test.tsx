@@ -233,6 +233,40 @@ describe("SearchableSelect", () => {
     expect(screen.queryByRole("listbox", { name: /country/i })).not.toBeInTheDocument();
   });
 
+  it("does not expose option values as secondary text by default", () => {
+    render(
+      <SearchableSelect
+        label="Area"
+        value=""
+        options={[{ value: "01KSSZZHSNXK3K87B9Y76PAQKP", label: "Floor 1" }]}
+        onChange={vi.fn()}
+      />,
+    );
+
+    fireEvent.focus(screen.getByRole("combobox", { name: /area/i }));
+
+    const option = screen.getByRole("option", { name: "Floor 1" });
+    expect(option).toBeInTheDocument();
+    expect(option).not.toHaveTextContent("01KSSZZHSNXK3K87B9Y76PAQKP");
+  });
+
+  it("preserves explicitly provided secondary text", () => {
+    render(
+      <SearchableSelect
+        label="Template"
+        value=""
+        options={[{ value: "template-cleaning", label: "Turnover clean", secondaryText: "45 min" }]}
+        onChange={vi.fn()}
+      />,
+    );
+
+    fireEvent.focus(screen.getByRole("combobox", { name: /template/i }));
+
+    const option = screen.getByRole("option", { name: /turnover clean/i });
+    expect(option).toHaveTextContent("Turnover clean");
+    expect(option).toHaveTextContent("45 min");
+  });
+
   it("keeps a required blank option invalid until a real option is selected", () => {
     render(<SearchableSelectHarness initialValue="" required />);
 
@@ -396,7 +430,7 @@ describe("SearchableSelect", () => {
     expect(popover?.parentElement).toBe(document.body);
     expect(popover).toHaveClass("searchable-select__popover--above");
     expect(popover).toHaveAttribute("data-placement", "above");
-    expect(popover).toHaveStyle({ left: "420px", width: "200px" });
+    expect(popover).toHaveStyle({ left: "420px", width: "260px" });
   });
 
   it("keeps the popover below inline table controls when there is enough table space", () => {
@@ -423,7 +457,7 @@ describe("SearchableSelect", () => {
     const popover = screen.getByRole("listbox", { name: /property/i }).closest(".searchable-select__popover");
     expect(popover).toHaveClass("searchable-select__popover--below");
     expect(popover).toHaveAttribute("data-placement", "below");
-    expect(popover).toHaveStyle({ top: "168px", width: "200px" });
+    expect(popover).toHaveStyle({ top: "168px", width: "260px" });
   });
 
   it("updates fixed popover placement on layout changes and removes window listeners when closed", () => {

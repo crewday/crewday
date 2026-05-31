@@ -514,6 +514,41 @@ describe("<AreasPanel>", () => {
     expect(dialog).toHaveTextContent("Delete Floor 1? This will also delete 2 descendant areas.");
   });
 
+  it("keeps the new-row parent selector human-readable and scoped to the create row", async () => {
+    renderAreasPanel([
+      areaFixture({
+        id: "01KSSZZHSNXK3K87B9Y76PAQKP",
+        name: "Floor 1",
+        order_hint: 0,
+      }),
+      areaFixture({
+        id: "01KSSZZJ54THD2BK2P1BTDPA0J",
+        name: "Bedroom",
+        order_hint: 0,
+        parent_area_id: "01KSSZZHSNXK3K87B9Y76PAQKP",
+      }),
+    ]);
+
+    const floorRow = await screen.findByLabelText("Floor 1");
+    const bedroomRow = screen.getByLabelText("Bedroom");
+    const createRow = screen.getByLabelText("New area");
+    const parentInput = within(createRow).getByRole("combobox", { name: /^Parent\b/ });
+    fireEvent.focus(parentInput);
+
+    const floorOption = await screen.findByRole("option", { name: "Floor 1" });
+    expect(floorOption).not.toHaveTextContent("01KSSZZHSNXK3K87B9Y76PAQKP");
+    expect(screen.queryByRole("option", { name: /01KSSZZ/ })).not.toBeInTheDocument();
+    expect(within(floorRow).queryByLabelText("Name")).not.toBeInTheDocument();
+    expect(within(bedroomRow).queryByLabelText("Name")).not.toBeInTheDocument();
+
+    fireEvent.mouseDown(floorOption);
+
+    expect(parentInput).toHaveValue("Floor 1");
+    expect(within(createRow).getByRole("button", { name: "Save" })).toBeEnabled();
+    expect(within(floorRow).queryByRole("button", { name: "Save" })).not.toBeInTheDocument();
+    expect(within(bedroomRow).queryByRole("button", { name: "Save" })).not.toBeInTheDocument();
+  });
+
   it("falls stale parent references back to roots while preserving descendants", async () => {
     const { container } = renderAreasPanel([
       areaFixture({
