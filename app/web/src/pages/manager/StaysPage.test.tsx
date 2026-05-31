@@ -577,9 +577,11 @@ describe("<StaysPage>", () => {
       const createRow = await screen.findByLabelText("New stay");
       expect(await screen.findByText("Scroll up for past weeks")).toBeInTheDocument();
       const dayCell = (iso: string) => document.querySelector(`[data-schedule-iso="${iso}"]`) as HTMLElement;
-      const [startIso, endIso] = Array.from(document.querySelectorAll<HTMLElement>("[data-schedule-iso]"))
+      const scheduleIsos = Array.from(document.querySelectorAll<HTMLElement>("[data-schedule-iso]"))
         .slice(0, 2)
         .map((cell) => cell.dataset.scheduleIso ?? "");
+      const [startIso, endIso] = scheduleIsos;
+      if (!startIso || !endIso) throw new Error("Expected at least two scheduler cells.");
       const checkoutIso = nextIso(endIso);
 
       fireEvent.pointerDown(dayCell(startIso), { button: 0 });

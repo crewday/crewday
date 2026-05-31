@@ -9,6 +9,13 @@ import { workspaceRouteForPathname, workspaceSlugFromRoutePath } from "@/lib/wor
 import DeskPage from "@/components/DeskPage";
 import AgentPreferencesPanel from "@/components/AgentPreferencesPanel";
 import { Chip, Loading, ProgressBar } from "@/components/common";
+import {
+  invalidIntegerSettingDraft,
+  parseSettingDraft,
+  settingDraftFromValue,
+  settingEnumOptionLabel,
+  settingScopeLabel,
+} from "./settingsEditor";
 import type { AuthMe } from "@/auth/types";
 import type {
   AvailableWorkspace,
@@ -51,45 +58,6 @@ function groupByNamespace(
   }
   return groups;
 }
-
-function draftFromValue(value: unknown): string {
-  // code-health: ignore[ccn nloc] Small draft mapper is mis-scored by the TS parser around setting editor JSX.
-  if (typeof value === "boolean") return value ? "true" : "false";
-  if (typeof value === "number") return String(value);
-  if (typeof value === "string") return value;
-  return "";
-}
-
-const SCOPE_LABELS: Record<string, string> = {
-  W: "workspace",
-  P: "property",
-  U: "unit",
-  WE: "work engagement",
-  T: "task",
-  E: "employee",
-  workspace: "workspace",
-};
-
-const ENUM_LABELS: Record<string, Record<string, string>> = {
-  "evidence.policy": {
-    require: "Required",
-    optional: "Optional",
-    forbid: "Forbidden",
-  },
-  "bookings.pay_basis": {
-    scheduled: "Scheduled time",
-    actual: "Actual worked time",
-  },
-  "pay.frequency": {
-    weekly: "Weekly",
-    fortnightly: "Fortnightly",
-    monthly: "Monthly",
-  },
-  "pay.week_start": {
-    monday: "Monday",
-    sunday: "Sunday",
-  },
-};
 
 const ARCHIVE_CONFIRMATION = "ARCHIVE";
 const DELETE_CONFIRMATION = "DELETE";
@@ -248,30 +216,6 @@ async function routeAfterWorkspaceArchived(pathname: string): Promise<string> {
   return nextWorkspaceRoute(pathname, workspaces);
 }
 
-function enumOptionLabel(def: SettingDefinition, option: string): string {
-  const label = ENUM_LABELS[def.key]?.[option];
-  if (label) return label;
-  return option
-    .replaceAll("_", " ")
-    .split(" ")
-    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
-    .join(" ");
-}
-
-function scopeLabel(scope: string): string {
-  return scope
-    .split("/")
-    .map((part) => SCOPE_LABELS[part] ?? part)
-    .join(", ");
-}
-
-function parseDraft(def: SettingDefinition, draft: string): unknown {
-  // code-health: ignore[ccn] Tiny type switch is over-counted by lizard after TSX parser recovery.
-  if (def.type === "bool") return draft === "true";
-  if (def.type === "int") return Number(draft);
-  return draft;
-}
-
 interface SettingPaneItem {
   def: SettingDefinition;
   value: unknown;
@@ -288,7 +232,7 @@ function settingHelpId(key: string): string {
 }
 
 function draftsFromItems(items: SettingPaneItem[]): Record<string, string> {
-  return Object.fromEntries(items.map(({ def, value }) => [def.key, draftFromValue(value)]));
+  return Object.fromEntries(items.map(({ def, value }) => [def.key, settingDraftFromValue(value)]));
 }
 
 function settingsPaneDraftState(items: SettingPaneItem[], valuesKey: string): SettingsPaneDraftState {
@@ -300,7 +244,7 @@ function settingsPaneDraftState(items: SettingPaneItem[], valuesKey: string): Se
 }
 
 function catalogDraftsFromItems(items: SettingPaneItem[]): Record<string, string> {
-  return Object.fromEntries(items.map(({ def }) => [def.key, draftFromValue(def.catalog_default)]));
+  return Object.fromEntries(items.map(({ def }) => [def.key, settingDraftFromValue(def.catalog_default)]));
 }
 
 function dirtyPayload(
@@ -311,12 +255,12 @@ function dirtyPayload(
   const payload: Record<string, unknown> = {};
   for (const { def, value } of items) {
     const draft = drafts[def.key] ?? "";
-    const current = draftFromValue(value);
-    if (resetKeys.has(def.key) && draft === draftFromValue(def.catalog_default)) {
+    const current = settingDraftFromValue(value);
+    if (resetKeys.has(def.key) && draft === settingDraftFromValue(def.catalog_default)) {
       if (draft !== current) payload[def.key] = null;
       continue;
     }
-    if (draft !== current) payload[def.key] = parseDraft(def, draft);
+    if (draft !== current) payload[def.key] = parseSettingDraft(def, draft);
   }
   return payload;
 }
@@ -324,8 +268,8 @@ function dirtyPayload(
 function invalidDirtySetting(items: SettingPaneItem[], drafts: Record<string, string>): boolean {
   return items.some(({ def, value }) => {
     const draft = drafts[def.key] ?? "";
-    if (draft === draftFromValue(value)) return false;
-    return def.type === "int" && (!Number.isInteger(Number(draft)) || draft.trim() === "");
+    if (draft === settingDraftFromValue(value)) return false;
+    return def.type === "int" && invalidIntegerSettingDraft(draft);
   });
 }
 
@@ -371,7 +315,7 @@ function SettingEditorRow({
               disabled={disabled}
             >
               {(def.enum_values ?? []).map((option) => (
-                <option key={option} value={option}>{enumOptionLabel(def, option)}</option>
+                <option key={option} value={option}>{settingEnumOptionLabel(def, option)}</option>
               ))}
             </select>
           ) : (
@@ -391,7 +335,7 @@ function SettingEditorRow({
         <span>{def.description}</span>
         {" "}
         <span className="settings-editor__scope">
-          Can be overridden at: {scopeLabel(def.override_scope)}
+          Can be overridden at: {settingScopeLabel(def.override_scope)}
         </span>
       </dd>
     </div>
@@ -433,8 +377,8 @@ function SettingsPane({
   const dirty = Object.keys(payload).length > 0;
   const invalid = invalidDirtySetting(items, drafts);
   const canUseDefaults = items.some(({ def, value }) => {
-    const catalogDefault = draftFromValue(def.catalog_default);
-    return (drafts[def.key] ?? "") !== catalogDefault || draftFromValue(value) !== catalogDefault;
+    const catalogDefault = settingDraftFromValue(def.catalog_default);
+    return (drafts[def.key] ?? "") !== catalogDefault || settingDraftFromValue(value) !== catalogDefault;
   });
 
   return (

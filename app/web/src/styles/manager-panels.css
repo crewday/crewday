@@ -911,6 +911,7 @@
   border-color: var(--moss);
 }
 .setting-label { display: block; font-size: 0.8em; }
+.settings-override-source { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 @media (max-width: 480px) {
   .settings-kv--editable.form-layout--two-column {
     grid-template-columns: minmax(0, 1fr);

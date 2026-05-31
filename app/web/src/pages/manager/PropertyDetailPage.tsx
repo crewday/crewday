@@ -13,7 +13,6 @@ import type {
   Employee,
   EntitySettingsPayload,
   SettingDefinition,
-  WorkspaceSettings,
 } from "@/types/api";
 import AreasPanel from "./property/AreasPanel";
 import OverviewPanel from "./property/OverviewPanel";
@@ -69,16 +68,7 @@ export default function PropertyDetailPage() {
   });
   const settingsQ = useQuery({
     queryKey: qk.propertySettings(pid),
-    queryFn: async (): Promise<EntitySettingsPayload> => {
-      const settings = await fetchJson<WorkspaceSettings>("/api/v1/settings");
-      const overrides = detailQ.data?.property.settings_override ?? {};
-      return {
-        overrides,
-        resolved: Object.fromEntries(
-          Object.entries(settings.defaults).map(([key, value]) => [key, { value, source: "workspace" }]),
-        ),
-      };
-    },
+    queryFn: () => fetchJson<EntitySettingsPayload>("/api/v1/properties/" + pid + "/settings"),
     enabled: pid !== "" && activeTab === "settings",
   });
   const catalogQ = useQuery({
@@ -173,6 +163,7 @@ export default function PropertyDetailPage() {
             <Loading />
           ) : settingsQ.data && catalogQ.data ? (
             <SettingsOverridePanel
+              propertyId={property.id}
               overrides={settingsQ.data.overrides}
               resolved={settingsQ.data.resolved}
               catalog={catalogQ.data}

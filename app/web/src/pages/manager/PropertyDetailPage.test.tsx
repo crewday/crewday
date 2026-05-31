@@ -70,6 +70,8 @@ interface InstallFetchOptions {
   failAreaPost?: boolean;
   failAreasList?: boolean;
   failPropertyPatch?: boolean;
+  failPropertySettingsPatch?: boolean;
+  settingsOverride?: Record<string, unknown>;
   availableWorkspaces?: Array<{
     workspace_id?: string | null;
     workspace: {
@@ -118,7 +120,7 @@ function installFetch(options: InstallFetchOptions = {}) {
     tags_json: [],
     welcome_defaults_json: {},
     property_notes_md: "Gate code changes each spring.",
-    settings_override: {},
+    settings_override: options.settingsOverride ?? {},
     created_at: "2026-04-29T00:00:00Z",
     updated_at: null,
     deleted_at: null,
@@ -193,7 +195,7 @@ function installFetch(options: InstallFetchOptions = {}) {
           name: "Acme",
           current_role: "manager",
           last_seen_at: null,
-          settings_override: {},
+          settings_override: property.settings_override,
         },
         ...(options.availableWorkspaces ?? []).map((entry) => ({
           workspace_id: entry.workspace_id ?? entry.workspace.id,
@@ -478,6 +480,51 @@ function installFetch(options: InstallFetchOptions = {}) {
         },
       });
     }
+    if (resolved === "/w/acme/api/v1/properties/prop_1/settings") {
+      if (method === "PATCH") {
+        if (options.failPropertySettingsPatch) {
+          return jsonResponse({ detail: "Setting update rejected." }, 422);
+        }
+        const patch = body as Record<string, unknown>;
+        property = {
+          ...property,
+          settings_override: Object.entries(patch).reduce<Record<string, unknown>>(
+            (next, [key, value]) => {
+              if (value === null) {
+                delete next[key];
+              } else {
+                next[key] = value;
+              }
+              return next;
+            },
+            { ...property.settings_override },
+          ),
+        };
+      }
+      const defaults: Record<string, unknown> = {
+        evidence_policy: "inherit",
+        require_photos: true,
+        minimum_notice_hours: 24,
+      };
+      const catalog = [
+        { key: "evidence_policy", catalog_default: "inherit" },
+        { key: "require_photos", catalog_default: false },
+        { key: "minimum_notice_hours", catalog_default: 12 },
+        { key: "workspace_only", catalog_default: true },
+      ];
+      return jsonResponse({
+        overrides: property.settings_override,
+        resolved: Object.fromEntries(catalog.map(({ key, catalog_default }) => {
+          if (key in property.settings_override) {
+            return [key, { value: property.settings_override[key], source: "property" }];
+          }
+          if (key in defaults) {
+            return [key, { value: defaults[key], source: "workspace" }];
+          }
+          return [key, { value: catalog_default, source: "catalog" }];
+        })),
+      });
+    }
     if (resolved === "/w/acme/api/v1/settings/catalog") {
       return jsonResponse([
         {
@@ -486,9 +533,39 @@ function installFetch(options: InstallFetchOptions = {}) {
           type: "enum",
           catalog_default: "inherit",
           enum_values: ["inherit", "required"],
-          override_scope: "WPET",
+          override_scope: "W/P/U/WE/T",
           description: "Evidence requirement for work on this property.",
           spec: "docs/specs/06-tasks-and-scheduling.md",
+        },
+        {
+          key: "require_photos",
+          label: "Require photos",
+          type: "bool",
+          catalog_default: false,
+          enum_values: null,
+          override_scope: "P",
+          description: "Whether this property requires photo evidence.",
+          spec: "docs/specs/06-tasks-and-scheduling.md",
+        },
+        {
+          key: "minimum_notice_hours",
+          label: "Minimum notice",
+          type: "int",
+          catalog_default: 12,
+          enum_values: null,
+          override_scope: "P",
+          description: "Minimum scheduling notice in hours.",
+          spec: "docs/specs/06-tasks-and-scheduling.md",
+        },
+        {
+          key: "workspace_only",
+          label: "Workspace only",
+          type: "bool",
+          catalog_default: true,
+          enum_values: null,
+          override_scope: "W",
+          description: "Workspace-only setting.",
+          spec: "docs/specs/00.md",
         },
       ]);
     }
@@ -561,6 +638,14 @@ function Harness({ initial = "/w/acme/property/prop_1" }: { initial?: string }) 
       </MemoryRouter>
     </QueryClientProvider>
   );
+}
+
+function settingRow(label: string): HTMLElement {
+  const row = screen.getAllByLabelText(label).find((candidate) =>
+    candidate instanceof HTMLElement && candidate.classList.contains("inline-table-form__group")
+  );
+  if (!row) throw new Error(`Missing settings row: ${label}`);
+  return row;
 }
 
 function RelatedRoute({
@@ -948,7 +1033,7 @@ describe("<PropertyDetailPage>", () => {
 
       expect(await screen.findByText("Tasks for this property")).toBeInTheDocument();
       const settingsCallsBeforeSelection = fake.calls.filter((call) =>
-        call.url === "/w/acme/api/v1/settings" || call.url === "/w/acme/api/v1/settings/catalog"
+        call.url === "/w/acme/api/v1/properties/prop_1/settings" || call.url === "/w/acme/api/v1/settings/catalog"
       );
       expect(settingsCallsBeforeSelection).toHaveLength(0);
 
@@ -1074,8 +1159,160 @@ describe("<PropertyDetailPage>", () => {
       await waitFor(() => expect(window.location.hash).toBe("#settings"));
       expect(screen.getByRole("tab", { name: "Settings" })).toHaveAttribute("aria-selected", "true");
 
-      expect(fake.calls.some((call) => call.url === "/w/acme/api/v1/settings")).toBe(true);
+      expect(fake.calls.some((call) => call.url === "/w/acme/api/v1/properties/prop_1/settings")).toBe(true);
       expect(fake.calls.some((call) => call.url === "/w/acme/api/v1/settings/catalog")).toBe(true);
+    } finally {
+      fake.restore();
+    }
+  });
+
+  it("renders property settings as editable InlineTableForm rows filtered to property scope", async () => {
+    const fake = installFetch();
+    try {
+      window.history.replaceState(null, "", "/w/acme/property/prop_1#settings");
+      render(<Harness initial="/w/acme/property/prop_1#settings" />);
+
+      expect(await screen.findByRole("heading", { name: "Settings overrides" })).toBeInTheDocument();
+      expect(screen.getByRole("table", { name: "Property settings overrides" })).toHaveClass("inline-table-form__table");
+      expect(screen.getByText("evidence_policy")).toBeInTheDocument();
+      expect(screen.getByText("require_photos")).toBeInTheDocument();
+      expect(screen.getByText("minimum_notice_hours")).toBeInTheDocument();
+      expect(screen.queryByText("workspace_only")).not.toBeInTheDocument();
+
+      const evidence = settingRow("Evidence policy");
+      expect(within(evidence).getByText("Inherited")).toBeInTheDocument();
+      expect(within(evidence).getByText("inherited (workspace)")).toBeInTheDocument();
+      expect(fake.calls).toContainEqual({
+        url: "/w/acme/api/v1/properties/prop_1/settings",
+        method: "GET",
+        body: null,
+      });
+      expect(fake.calls.some((call) => call.url === "/w/acme/api/v1/settings" && call.method === "GET")).toBe(false);
+    } finally {
+      fake.restore();
+    }
+  });
+
+  it("renders existing property setting overrides distinctly without saving unchanged rows", async () => {
+    const fake = installFetch({ settingsOverride: { require_photos: false } });
+    try {
+      window.history.replaceState(null, "", "/w/acme/property/prop_1#settings");
+      render(<Harness initial="/w/acme/property/prop_1#settings" />);
+
+      expect(await screen.findByRole("heading", { name: "Settings overrides" })).toBeInTheDocument();
+      const photos = settingRow("Require photos");
+      expect(within(photos).getByText("property override")).toBeInTheDocument();
+      expect(within(photos).getAllByText("no")).toHaveLength(2);
+
+      fireEvent.click(within(photos).getByRole("button", { name: "Edit" }));
+      expect(within(photos).getByRole("button", { name: "Save" })).toBeDisabled();
+      fireEvent.click(within(photos).getByRole("button", { name: "Cancel" }));
+      expect(fake.calls.some((call) => (
+        call.url === "/w/acme/api/v1/properties/prop_1/settings" && call.method === "PATCH"
+      ))).toBe(false);
+    } finally {
+      fake.restore();
+    }
+  });
+
+  it("saves and clears property setting overrides without a page reload", async () => {
+    const fake = installFetch();
+    try {
+      window.history.replaceState(null, "", "/w/acme/property/prop_1#settings");
+      render(<Harness initial="/w/acme/property/prop_1#settings" />);
+
+      expect(await screen.findByRole("heading", { name: "Settings overrides" })).toBeInTheDocument();
+      const evidence = settingRow("Evidence policy");
+      fireEvent.click(within(evidence).getByRole("button", { name: "Edit" }));
+      fireEvent.change(within(evidence).getByLabelText("Evidence policy"), {
+        target: { value: "required" },
+      });
+      fireEvent.click(within(evidence).getByRole("button", { name: "Save" }));
+
+      await waitFor(() => {
+        expect(fake.calls).toContainEqual({
+          url: "/w/acme/api/v1/properties/prop_1/settings",
+          method: "PATCH",
+          body: { evidence_policy: "required" },
+        });
+      });
+      const savedEvidence = settingRow("Evidence policy");
+      expect(await within(savedEvidence).findByText("property override")).toBeInTheDocument();
+      expect(within(savedEvidence).getAllByText("required")).toHaveLength(2);
+      await waitFor(() => {
+        expect(fake.calls.filter((call) => call.url === "/w/acme/api/v1/properties/prop_1/settings").length).toBeGreaterThan(1);
+        expect(fake.calls.filter((call) => call.url === "/w/acme/api/v1/properties/prop_1" && call.method === "GET").length).toBeGreaterThan(1);
+        expect(fake.calls.filter((call) => call.url === "/w/acme/api/v1/properties" && call.method === "GET").length).toBeGreaterThan(1);
+      });
+
+      fireEvent.click(within(savedEvidence).getByRole("button", { name: "Clear" }));
+      await waitFor(() => {
+        expect(fake.calls).toContainEqual({
+          url: "/w/acme/api/v1/properties/prop_1/settings",
+          method: "PATCH",
+          body: { evidence_policy: null },
+        });
+      });
+      const clearedEvidence = settingRow("Evidence policy");
+      expect(await within(clearedEvidence).findByText("Inherited")).toBeInTheDocument();
+      expect(within(clearedEvidence).getByText("inherited (workspace)")).toBeInTheDocument();
+    } finally {
+      fake.restore();
+    }
+  });
+
+  it("saves bool property setting overrides", async () => {
+    const fake = installFetch();
+    try {
+      window.history.replaceState(null, "", "/w/acme/property/prop_1#settings");
+      render(<Harness initial="/w/acme/property/prop_1#settings" />);
+
+      expect(await screen.findByRole("heading", { name: "Settings overrides" })).toBeInTheDocument();
+      const photos = settingRow("Require photos");
+      fireEvent.click(within(photos).getByRole("button", { name: "Edit" }));
+      fireEvent.change(within(photos).getByLabelText("Require photos"), {
+        target: { value: "false" },
+      });
+      fireEvent.click(within(photos).getByRole("button", { name: "Save" }));
+
+      await waitFor(() => {
+        expect(fake.calls).toContainEqual({
+          url: "/w/acme/api/v1/properties/prop_1/settings",
+          method: "PATCH",
+          body: { require_photos: false },
+        });
+      });
+      const savedPhotos = settingRow("Require photos");
+      expect(await within(savedPhotos).findByText("property override")).toBeInTheDocument();
+      expect(within(savedPhotos).getAllByText("no")).toHaveLength(2);
+    } finally {
+      fake.restore();
+    }
+  });
+
+  it("keeps property setting row validation and save errors attached to the draft", async () => {
+    const fake = installFetch({ failPropertySettingsPatch: true });
+    try {
+      window.history.replaceState(null, "", "/w/acme/property/prop_1#settings");
+      render(<Harness initial="/w/acme/property/prop_1#settings" />);
+
+      expect(await screen.findByRole("heading", { name: "Settings overrides" })).toBeInTheDocument();
+      const notice = settingRow("Minimum notice");
+      fireEvent.click(within(notice).getByRole("button", { name: "Edit" }));
+      fireEvent.change(within(notice).getByLabelText("Minimum notice"), {
+        target: { value: "soon" },
+      });
+      expect(within(notice).getByText("Enter a whole number.")).toBeInTheDocument();
+      fireEvent.click(within(notice).getByRole("button", { name: "Save" }));
+      expect(fake.calls.some((call) => call.method === "PATCH" && call.url === "/w/acme/api/v1/properties/prop_1/settings")).toBe(false);
+
+      fireEvent.change(within(notice).getByLabelText("Minimum notice"), {
+        target: { value: "48" },
+      });
+      fireEvent.click(within(notice).getByRole("button", { name: "Save" }));
+
+      expect(await within(notice).findByRole("alert")).toHaveTextContent("Setting update rejected.");
+      expect(within(notice).getByLabelText("Minimum notice")).toHaveValue("48");
     } finally {
       fake.restore();
     }
