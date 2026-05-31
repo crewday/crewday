@@ -640,6 +640,13 @@ function Harness({ initial = "/w/acme/property/prop_1" }: { initial?: string }) 
   );
 }
 
+function propertyPreferenceCalls(calls: RequestRecord[], method?: string): RequestRecord[] {
+  return calls.filter((call) =>
+    call.url === "/w/acme/api/v1/agent_preferences/property/prop_1" &&
+    (method === undefined || call.method === method)
+  );
+}
+
 function settingRow(label: string): HTMLElement {
   const row = screen.getAllByLabelText(label).find((candidate) =>
     candidate instanceof HTMLElement && candidate.classList.contains("inline-table-form__group")
@@ -748,6 +755,64 @@ describe("<PropertyDetailPage>", () => {
       expect(screen.getByText("Property tasks will land here once cleanings, inspections, or maintenance work are assigned.")).toBeInTheDocument();
       expect(screen.queryByRole("table")).not.toBeInTheDocument();
       expect(screen.queryByRole("list")).not.toBeInTheDocument();
+    } finally {
+      fake.restore();
+    }
+  });
+
+  it("loads and saves property agent preferences on overview only", async () => {
+    const fake = installFetch();
+    try {
+      render(<Harness />);
+
+      const preferencesRegion = await screen.findByRole("region", {
+        name: "Agent preferences, Villa Rosa",
+      });
+      await waitFor(() => {
+        expect(propertyPreferenceCalls(fake.calls, "GET")).toHaveLength(1);
+      });
+
+      const guidance = within(preferencesRegion).getByLabelText("Guidance (Markdown)");
+      fireEvent.change(guidance, {
+        target: { value: "Never schedule outdoor work on Tuesdays." },
+      });
+      fireEvent.click(within(preferencesRegion).getByRole("button", { name: "Save" }));
+
+      await waitFor(() => {
+        expect(propertyPreferenceCalls(fake.calls, "PUT").at(-1)?.body).toEqual({
+          body_md: "Never schedule outdoor work on Tuesdays.",
+        });
+      });
+
+      fireEvent.click(screen.getByRole("tab", { name: "Areas" }));
+      expect(await screen.findByText("Kitchen")).toBeInTheDocument();
+      expect(screen.queryByRole("region", { name: "Agent preferences, Villa Rosa" })).not.toBeInTheDocument();
+
+      fireEvent.click(screen.getByRole("tab", { name: "Documents" }));
+      expect(await screen.findByText("Pool permit")).toBeInTheDocument();
+      expect(screen.queryByRole("region", { name: "Agent preferences, Villa Rosa" })).not.toBeInTheDocument();
+
+      fireEvent.click(screen.getByRole("tab", { name: "Sharing & client" }));
+      expect(await screen.findByText("Billing client")).toBeInTheDocument();
+      expect(screen.queryByRole("region", { name: "Agent preferences, Villa Rosa" })).not.toBeInTheDocument();
+
+      fireEvent.click(screen.getByRole("tab", { name: "Settings" }));
+      expect(await screen.findByText("Settings overrides")).toBeInTheDocument();
+      expect(screen.queryByRole("region", { name: "Agent preferences, Villa Rosa" })).not.toBeInTheDocument();
+    } finally {
+      fake.restore();
+    }
+  });
+
+  it("does not fetch property agent preferences when opened directly to a non-overview tab", async () => {
+    const fake = installFetch();
+    try {
+      window.history.replaceState(null, "", "/w/acme/property/prop_1#areas");
+      render(<Harness initial="/w/acme/property/prop_1#areas" />);
+
+      expect(await screen.findByText("Kitchen")).toBeInTheDocument();
+      expect(screen.queryByRole("region", { name: "Agent preferences, Villa Rosa" })).not.toBeInTheDocument();
+      expect(propertyPreferenceCalls(fake.calls)).toHaveLength(0);
     } finally {
       fake.restore();
     }

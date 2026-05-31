@@ -142,6 +142,12 @@ export default function PropertyDetailPage() {
       {activeTab === "overview" && (
         <div id={panelIdFor("overview")} role="tabpanel">
           <OverviewPanel detail={detail} employees={empsQ.data} />
+          <AgentPreferencesPanel
+            scope="property"
+            scopeId={property.id}
+            title={"Agent preferences, " + property.name}
+            subtitle="Sits between workspace and user preferences when the agent discusses this property. Soft guidance only, hard rules belong in the settings cascade above."
+          />
         </div>
       )}
 
@@ -182,13 +188,6 @@ export default function PropertyDetailPage() {
           />
         </div>
       )}
-
-      <AgentPreferencesPanel
-        scope="property"
-        scopeId={property.id}
-        title={"Agent preferences, " + property.name}
-        subtitle="Sits between workspace and user preferences when the agent discusses this property. Soft guidance only, hard rules belong in the settings cascade above."
-      />
 
       {editingProperty && (
         <PropertyEditDialog
