@@ -106,7 +106,11 @@ the no-RRULE items, if any); the task is not itself skipped.
 *Simple* (photo-required toggle + "appears every N occurrences /
 every N weeks / monthly / …") that compiles to an RRULE, and
 *Advanced* (raw RRULE field with a live "next 8 occurrences"
-preview). Behaviour is identical; both write the same RRULE string.
+preview). Monthly simple rules support both fixed day-of-month
+patterns (`BYMONTHDAY`, e.g. day 1) and ordinal weekday patterns
+for first, second, third, fourth, or last weekday of the month
+(`BYDAY`, e.g. first Monday / last Friday). Behaviour is identical;
+both write the same RRULE string.
 
 ## Schedule
 
@@ -137,8 +141,9 @@ these times". Stored as RFC 5545 RRULE plus a property-local timezone.
 
 Manager UI shows two panels:
 
-- **Simple:** frequency (weekly/daily/monthly), days of week, time,
-  duration. Generates an RRULE under the hood.
+- **Simple:** frequency (weekly/daily/monthly), days of week, monthly
+  fixed day-of-month or first/second/third/fourth/last weekday
+  patterns, time, duration. Generates an RRULE under the hood.
 - **Advanced:** raw RRULE field (with live "next 5 occurrences"
   preview) + RDATE/EXDATE editors.
 

@@ -1,11 +1,18 @@
 export type RecurrenceFrequency = "DAILY" | "WEEKLY" | "MONTHLY" | "YEARLY";
 export type RecurrenceWeekday = "MO" | "TU" | "WE" | "TH" | "FR" | "SA" | "SU";
+export type RecurrenceMonthlyOrdinal = -1 | 1 | 2 | 3 | 4;
+
+export interface RecurrenceMonthlyOrdinalWeekday {
+  ordinal: RecurrenceMonthlyOrdinal;
+  weekday: RecurrenceWeekday;
+}
 
 export interface RecurrenceParts {
   frequency: RecurrenceFrequency;
   interval: number;
   byday: RecurrenceWeekday[];
   bymonthday: number | null;
+  monthlyOrdinalWeekday: RecurrenceMonthlyOrdinalWeekday | null;
   count: number | null;
   until: Date | null;
   unsupported: string[];
@@ -24,6 +31,7 @@ export interface FriendlyRecurrence {
   interval?: number;
   byday?: RecurrenceWeekday[];
   bymonthday?: number | null;
+  monthlyOrdinalWeekday?: RecurrenceMonthlyOrdinalWeekday | null;
 }
 
 export const RECURRENCE_WEEKDAYS: readonly { value: RecurrenceWeekday; label: string; shortLabel: string }[] = [
@@ -38,7 +46,7 @@ export const RECURRENCE_WEEKDAYS: readonly { value: RecurrenceWeekday; label: st
 
 const WEEKDAY_SET = new Set(RECURRENCE_WEEKDAYS.map((day) => day.value));
 const FREQUENCY_SET = new Set<RecurrenceFrequency>(["DAILY", "WEEKLY", "MONTHLY", "YEARLY"]);
-const PREVIEW_KEYS = new Set(["FREQ", "INTERVAL", "BYDAY", "BYMONTHDAY", "COUNT", "UNTIL"]);
+const PREVIEW_KEYS = new Set(["FREQ", "INTERVAL", "BYDAY", "BYMONTHDAY", "BYSETPOS", "COUNT", "UNTIL"]);
 const RRULE_KEYS = new Set([
   "FREQ",
   "UNTIL",
@@ -115,7 +123,8 @@ export function parseRecurrenceRrule(value: string | null | undefined): Recurren
     return invalid(raw, "BYDAY must use MO,TU,WE,TH,FR,SA,SU.", hasPrefix);
   }
   const simpleByday = byday.filter((day): day is RecurrenceWeekday => WEEKDAY_SET.has(day as RecurrenceWeekday));
-  if (simpleByday.length !== byday.length) unsupported.push("BYDAY");
+  const bysetposValue = entries.get("BYSETPOS");
+  const bysetpos = bysetposValue ? bysetposValue.split(",") : [];
 
   const bymonthdayValue = entries.get("BYMONTHDAY");
   const bymonthdays = bymonthdayValue ? bymonthdayValue.split(",") : [];
@@ -144,6 +153,16 @@ export function parseRecurrenceRrule(value: string | null | undefined): Recurren
   const numericListError = validateNumericLists(entries);
   if (numericListError) return invalid(raw, numericListError, hasPrefix);
 
+  const monthlyOrdinalWeekday = parseMonthlyOrdinalWeekday({
+    frequency: frequency as RecurrenceFrequency,
+    byday,
+    simpleByday,
+    bymonthdays,
+    bysetpos,
+  });
+  if (byday.length > 0 && frequency !== "WEEKLY" && !monthlyOrdinalWeekday) unsupported.push("BYDAY");
+  if (bysetpos.length > 0 && !monthlyOrdinalWeekday) unsupported.push("BYSETPOS");
+
   return {
     valid: true,
     value: body,
@@ -152,6 +171,7 @@ export function parseRecurrenceRrule(value: string | null | undefined): Recurren
       interval,
       byday: simpleByday,
       bymonthday,
+      monthlyOrdinalWeekday,
       count,
       until,
       unsupported,
@@ -168,7 +188,10 @@ export function buildRecurrenceRrule(recurrence: FriendlyRecurrence, options: { 
   if (recurrence.frequency === "WEEKLY" && recurrence.byday?.length) {
     segments.push(`BYDAY=${recurrence.byday.join(",")}`);
   }
-  if (recurrence.frequency === "MONTHLY" && recurrence.bymonthday) {
+  if (recurrence.frequency === "MONTHLY" && recurrence.monthlyOrdinalWeekday) {
+    const { ordinal, weekday } = recurrence.monthlyOrdinalWeekday;
+    segments.push(`BYDAY=${ordinal}${weekday}`);
+  } else if (recurrence.frequency === "MONTHLY" && recurrence.bymonthday) {
     segments.push(`BYMONTHDAY=${recurrence.bymonthday}`);
   }
   const rrule = segments.join(";");
@@ -191,7 +214,7 @@ export function recurrenceSummary(value: string | null | undefined, options: { e
   if (!parsed.value) return options.emptyLabel ?? "No recurrence";
   if (!parsed.valid || !parsed.parts) return "Advanced recurrence";
 
-  const { frequency, interval, byday, bymonthday, unsupported } = parsed.parts;
+  const { frequency, interval, byday, bymonthday, monthlyOrdinalWeekday, unsupported } = parsed.parts;
   if (unsupported.length > 0) return "Advanced recurrence";
   if (frequency === "DAILY") return interval > 1 ? `Every ${interval} days` : "Daily";
   if (frequency === "WEEKLY") {
@@ -200,6 +223,9 @@ export function recurrenceSummary(value: string | null | undefined, options: { e
     return `${cadence}${days}`;
   }
   if (frequency === "MONTHLY") {
+    if (monthlyOrdinalWeekday) {
+      return `Monthly on the ${monthlyOrdinalLabel(monthlyOrdinalWeekday.ordinal)} ${weekdayLabel(monthlyOrdinalWeekday.weekday)}`;
+    }
     return bymonthday ? `Monthly on day ${bymonthday}` : "Monthly";
   }
   return interval > 1 ? `Every ${interval} years` : "Yearly";
@@ -232,7 +258,23 @@ function invalid(value: string, error: string, hasPrefix: boolean): RecurrencePa
 }
 
 function weekdayLabels(days: readonly RecurrenceWeekday[]): string[] {
-  return days.map((day) => RECURRENCE_WEEKDAYS.find((candidate) => candidate.value === day)?.shortLabel ?? day);
+  return days.map((day) => weekdayLabel(day, "short"));
+}
+
+function weekdayLabel(day: RecurrenceWeekday, format: "short" | "long" = "long"): string {
+  const candidate = RECURRENCE_WEEKDAYS.find((weekday) => weekday.value === day);
+  return (format === "short" ? candidate?.shortLabel : candidate?.label) ?? day;
+}
+
+function monthlyOrdinalLabel(ordinal: RecurrenceMonthlyOrdinal): string {
+  if (ordinal === -1) return "last";
+  const labels: Record<Exclude<RecurrenceMonthlyOrdinal, -1>, string> = {
+    1: "first",
+    2: "second",
+    3: "third",
+    4: "fourth",
+  };
+  return labels[ordinal];
 }
 
 function parsePositiveWholeNumber(raw: string | undefined, defaultValue: number | null = null): number | null {
@@ -248,6 +290,39 @@ function isValidBydayToken(token: string): boolean {
   if (!ordinal) return true;
   const value = Number.parseInt(ordinal, 10);
   return value !== 0 && value >= -53 && value <= 53;
+}
+
+function parseMonthlyOrdinalWeekday({
+  frequency,
+  byday,
+  simpleByday,
+  bymonthdays,
+  bysetpos,
+}: {
+  frequency: RecurrenceFrequency;
+  byday: readonly string[];
+  simpleByday: readonly RecurrenceWeekday[];
+  bymonthdays: readonly string[];
+  bysetpos: readonly string[];
+}): RecurrenceMonthlyOrdinalWeekday | null {
+  if (frequency !== "MONTHLY" || bymonthdays.length > 0) return null;
+  if (byday.length === 1 && bysetpos.length === 0) {
+    const ordinalByday = /^([+-]?\d+)(MO|TU|WE|TH|FR|SA|SU)$/.exec(byday[0] ?? "");
+    if (!ordinalByday) return null;
+    const ordinal = supportedMonthlyOrdinal(ordinalByday[1] ?? "");
+    const weekday = ordinalByday[2] as RecurrenceWeekday | undefined;
+    return ordinal && weekday ? { ordinal, weekday } : null;
+  }
+  if (simpleByday.length === 1 && byday.length === 1 && bysetpos.length === 1) {
+    const ordinal = supportedMonthlyOrdinal(bysetpos[0] ?? "");
+    return ordinal ? { ordinal, weekday: simpleByday[0] } : null;
+  }
+  return null;
+}
+
+function supportedMonthlyOrdinal(raw: string): RecurrenceMonthlyOrdinal | null {
+  const value = Number.parseInt(raw, 10);
+  return value === -1 || value >= 1 && value <= 4 ? value as RecurrenceMonthlyOrdinal : null;
 }
 
 function isValidMonthDay(raw: string): boolean {
@@ -316,6 +391,11 @@ function matchesRecurrence(date: Date, startDate: Date, parts: RecurrenceParts):
     return Math.floor(daysBetween(startOfWeek(startDate), date) / 7) % parts.interval === 0;
   }
   if (parts.frequency === "MONTHLY") {
+    if (parts.monthlyOrdinalWeekday) {
+      if (date.getDay() !== WEEKDAY_INDEX[parts.monthlyOrdinalWeekday.weekday]) return false;
+      if (!matchesMonthlyOrdinalWeekday(date, parts.monthlyOrdinalWeekday.ordinal)) return false;
+      return monthsBetween(startDate, date) % parts.interval === 0;
+    }
     const targetDay = parts.bymonthday ?? startDate.getDate();
     if (date.getDate() !== targetDay) return false;
     return monthsBetween(startDate, date) % parts.interval === 0;
@@ -340,6 +420,15 @@ function daysBetween(start: Date, end: Date): number {
 
 function monthsBetween(start: Date, end: Date): number {
   return (end.getFullYear() - start.getFullYear()) * 12 + end.getMonth() - start.getMonth();
+}
+
+function matchesMonthlyOrdinalWeekday(date: Date, ordinal: RecurrenceMonthlyOrdinal): boolean {
+  const forwardOrdinal = Math.floor((date.getDate() - 1) / 7) + 1;
+  const nextSameWeekday = new Date(date);
+  nextSameWeekday.setDate(date.getDate() + 7);
+  const isLast = nextSameWeekday.getMonth() !== date.getMonth();
+  if (ordinal === -1) return isLast;
+  return forwardOrdinal === ordinal;
 }
 
 const previewDateFormat = new Intl.DateTimeFormat("en-GB", {

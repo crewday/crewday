@@ -17,6 +17,10 @@ describe("recurrence helpers", () => {
     expect(buildRecurrenceRrule({ frequency: "MONTHLY", bymonthday: 1 })).toBe(
       "FREQ=MONTHLY;BYMONTHDAY=1",
     );
+    expect(buildRecurrenceRrule({
+      frequency: "MONTHLY",
+      monthlyOrdinalWeekday: { ordinal: 1, weekday: "MO" },
+    })).toBe("FREQ=MONTHLY;BYDAY=1MO");
     expect(buildRecurrenceRrule({ frequency: "YEARLY" }, { includePrefix: true })).toBe("RRULE:FREQ=YEARLY");
   });
 
@@ -43,9 +47,51 @@ describe("recurrence helpers", () => {
     });
   });
 
+  it("parses supported monthly ordinal weekday RRULE shapes", () => {
+    expect(parseRecurrenceRrule("FREQ=MONTHLY;BYDAY=1MO")).toMatchObject({
+      valid: true,
+      parts: {
+        monthlyOrdinalWeekday: { ordinal: 1, weekday: "MO" },
+        unsupported: [],
+      },
+    });
+    expect(parseRecurrenceRrule("FREQ=MONTHLY;BYDAY=FR;BYSETPOS=-1")).toMatchObject({
+      valid: true,
+      parts: {
+        byday: ["FR"],
+        monthlyOrdinalWeekday: { ordinal: -1, weekday: "FR" },
+        unsupported: [],
+      },
+    });
+    expect(parseRecurrenceRrule("FREQ=MONTHLY;BYDAY=MO;BYSETPOS=1")).toMatchObject({
+      valid: true,
+      parts: {
+        byday: ["MO"],
+        monthlyOrdinalWeekday: { ordinal: 1, weekday: "MO" },
+        unsupported: [],
+      },
+    });
+    expect(parseRecurrenceRrule("FREQ=MONTHLY;BYDAY=5MO")).toMatchObject({
+      valid: true,
+      parts: {
+        monthlyOrdinalWeekday: null,
+        unsupported: ["BYDAY"],
+      },
+    });
+    expect(parseRecurrenceRrule("FREQ=MONTHLY;BYDAY=MO")).toMatchObject({
+      valid: true,
+      parts: {
+        monthlyOrdinalWeekday: null,
+        unsupported: ["BYDAY"],
+      },
+    });
+  });
+
   it("summarizes and previews valid recurrence values", () => {
     expect(recurrenceSummary(null, { emptyLabel: "Every task" })).toBe("Every task");
     expect(recurrenceSummary("FREQ=WEEKLY;INTERVAL=2;BYDAY=MO,WE")).toBe("Every 2 weeks on Mon, Wed");
+    expect(recurrenceSummary("FREQ=MONTHLY;BYDAY=1MO")).toBe("Monthly on the first Monday");
+    expect(recurrenceSummary("FREQ=MONTHLY;BYDAY=FR;BYSETPOS=-1")).toBe("Monthly on the last Friday");
     expect(recurrencePreview("FREQ=WEEKLY;BYDAY=MO", {
       startDate: new Date(2026, 4, 30),
       count: 2,
@@ -54,6 +100,18 @@ describe("recurrence helpers", () => {
       startDate: new Date(2026, 4, 30),
       count: 4,
     })).toEqual(["Sat, 30 May 2026", "Sun, 31 May 2026"]);
+    expect(recurrencePreview("FREQ=MONTHLY;BYDAY=1MO", {
+      startDate: new Date(2026, 4, 30),
+      count: 2,
+    })).toEqual(["Mon, 1 Jun 2026", "Mon, 6 Jul 2026"]);
+    expect(recurrencePreview("FREQ=MONTHLY;BYDAY=FR;BYSETPOS=-1", {
+      startDate: new Date(2026, 4, 30),
+      count: 2,
+    })).toEqual(["Fri, 26 Jun 2026", "Fri, 31 Jul 2026"]);
+    expect(recurrencePreview("FREQ=MONTHLY;BYDAY=4FR", {
+      startDate: new Date(2026, 0, 1),
+      count: 3,
+    })).toEqual(["Fri, 23 Jan 2026", "Fri, 27 Feb 2026", "Fri, 27 Mar 2026"]);
     expect(recurrencePreview("FREQ=DAILY;BYHOUR=9", {
       startDate: new Date(2026, 4, 30),
       count: 2,

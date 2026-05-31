@@ -113,6 +113,17 @@
   min-width: 0;
 }
 
+.recurrence-picker__monthly-fields,
+.recurrence-picker__ordinal-fields {
+  display: grid;
+  gap: 14px;
+  min-width: 0;
+}
+
+.recurrence-picker__ordinal-fields {
+  grid-template-columns: minmax(0, 0.8fr) minmax(0, 1fr);
+}
+
 .recurrence-picker__select,
 .recurrence-picker__number,
 .recurrence-picker__raw {
@@ -256,5 +267,9 @@
 
   .recurrence-picker__weekday-options {
     grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+
+  .recurrence-picker__ordinal-fields {
+    grid-template-columns: minmax(0, 1fr);
   }
 }
