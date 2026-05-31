@@ -289,6 +289,7 @@ export default function InstructionsPage() {
       void queryClient.invalidateQueries({ queryKey: qk.instructions() });
       void queryClient.invalidateQueries({ queryKey: qk.instruction(instruction.id) });
       setCreateRow(newCreateRow(pid));
+      if (pid) return;
       navigate(instructionDetailPath(pathname, instruction.id, pid));
     },
     onError: () => {

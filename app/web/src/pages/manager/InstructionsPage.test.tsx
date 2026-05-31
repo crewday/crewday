@@ -163,6 +163,11 @@ function DetailRoute() {
   return <div>Instruction detail {params.iid}{location.search}</div>;
 }
 
+function LocationProbe() {
+  const location = useLocation();
+  return <div data-testid="current-location">{location.pathname}{location.search}</div>;
+}
+
 function renderInstructions(routes: FetchRoute[] = [], initial = "/w/acme/instructions") {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   const fetchEnv = installFetchRouteHandlers([
@@ -188,8 +193,14 @@ function renderInstructions(routes: FetchRoute[] = [], initial = "/w/acme/instru
       <WorkspaceProvider>
         <MemoryRouter initialEntries={[initial]}>
           <Routes>
-            <Route path="/w/:slug/instructions" element={<InstructionsPage />} />
-            <Route path="/w/:slug/property/:pid/instructions" element={<InstructionsPage />} />
+            <Route
+              path="/w/:slug/instructions"
+              element={<><InstructionsPage /><LocationProbe /></>}
+            />
+            <Route
+              path="/w/:slug/property/:pid/instructions"
+              element={<><InstructionsPage /><LocationProbe /></>}
+            />
             <Route path="/w/:slug/instructions/:iid" element={<DetailRoute />} />
           </Routes>
         </MemoryRouter>
@@ -392,12 +403,31 @@ describe("<InstructionsPage>", () => {
     ).toBe(true);
   });
 
-  it("defaults property-tab inline create to the current property and preserves detail context", async () => {
-    const { requests } = renderInstructions([
+  it("defaults property-tab inline create to the current property and stays on the property route", async () => {
+    let propertyListCalls = 0;
+    const { requests, queryClient } = renderInstructions([
       {
         path: "/w/acme/api/v1/instructions?property_id=prop_1",
         method: "GET",
-        respond: { body: instructionListPayload() },
+        respond: () => {
+          propertyListCalls += 1;
+          if (propertyListCalls === 1) return { body: instructionListPayload() };
+          return {
+            body: {
+              ...instructionListPayload(),
+              data: [
+                ...instructionListPayload().data,
+                {
+                  ...createdPropertyInstructionEnvelope().instruction,
+                  body_md: createdPropertyInstructionEnvelope().current_revision.body_md,
+                  version: 1,
+                  updated_at: createdPropertyInstructionEnvelope().instruction.created_at,
+                  area: null,
+                },
+              ],
+            },
+          };
+        },
       },
       {
         path: "/w/acme/api/v1/instructions",
@@ -405,6 +435,7 @@ describe("<InstructionsPage>", () => {
         respond: { status: 201, body: createdPropertyInstructionEnvelope() },
       },
     ], "/w/acme/property/prop_1/instructions");
+    const invalidate = vi.spyOn(queryClient, "invalidateQueries");
 
     const row = await screen.findByLabelText("New instruction");
     expect(within(row).getByLabelText(/^Instruction scope\b/)).toHaveValue("property");
@@ -420,7 +451,13 @@ describe("<InstructionsPage>", () => {
     selectTokenOption(row, /^Filter properties\b/, "Casa Azul");
     fireEvent.click(within(row).getByRole("button", { name: "Save" }));
 
-    await screen.findByText("Instruction detail ins_property?property_id=prop_1");
+    await screen.findByRole("link", { name: /Pool rules/ });
+    expect(screen.getByTestId("current-location")).toHaveTextContent(
+      "/w/acme/property/prop_1/instructions",
+    );
+    expect(screen.queryByText(/Instruction detail ins_property/)).not.toBeInTheDocument();
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: qk.instructions() });
+    expect(propertyListCalls).toBeGreaterThanOrEqual(2);
     const post = requests.find(
       (request) =>
         request.path === "/w/acme/api/v1/instructions" && request.method === "POST",
