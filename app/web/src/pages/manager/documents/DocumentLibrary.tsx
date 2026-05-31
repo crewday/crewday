@@ -313,7 +313,7 @@ export function DocumentUploadStrip({ scope, onUploaded }: DocumentUploadStripPr
   return (
     <section className="document-upload" aria-label="Upload document">
       <div className="document-upload__fields">
-        <label htmlFor={kindId}>
+        <label className="field document-upload__field" htmlFor={kindId}>
           <span>Kind</span>
           <select
             id={kindId}
@@ -326,7 +326,7 @@ export function DocumentUploadStrip({ scope, onUploaded }: DocumentUploadStripPr
             ))}
           </select>
         </label>
-        <label htmlFor={titleId}>
+        <label className="field document-upload__field" htmlFor={titleId}>
           <span>Title</span>
           <input
             id={titleId}
@@ -338,7 +338,7 @@ export function DocumentUploadStrip({ scope, onUploaded }: DocumentUploadStripPr
             disabled={upload.isPending}
           />
         </label>
-        <label htmlFor={notesId}>
+        <label className="field document-upload__field" htmlFor={notesId}>
           <span>Notes</span>
           <input
             id={notesId}
@@ -366,7 +366,7 @@ export function DocumentUploadStrip({ scope, onUploaded }: DocumentUploadStripPr
                 <strong>{row.file.name}</strong>
                 <span className="muted">{Math.max(1, Math.round(row.file.size / 1024))} KB</span>
               </span>
-              <label>
+              <label className="field document-upload__field">
                 <span>Kind</span>
                 <select
                   aria-label={`Kind for ${row.file.name}`}
@@ -379,7 +379,7 @@ export function DocumentUploadStrip({ scope, onUploaded }: DocumentUploadStripPr
                   ))}
                 </select>
               </label>
-              <label>
+              <label className="field document-upload__field">
                 <span>Title</span>
                 <input
                   type="text"
@@ -389,7 +389,7 @@ export function DocumentUploadStrip({ scope, onUploaded }: DocumentUploadStripPr
                   onChange={(event) => updateQueued(row.id, { title: event.target.value })}
                 />
               </label>
-              <label>
+              <label className="field document-upload__field">
                 <span>Notes</span>
                 <input
                   type="text"

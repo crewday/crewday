@@ -1151,10 +1151,16 @@
   display: grid; grid-template-columns: minmax(150px, 220px) minmax(220px, 1fr) minmax(220px, 1fr);
   gap: 12px;
 }
-.document-upload__fields label {
+.document-upload__field {
   display: grid; gap: 6px;
+  min-width: 0;
 }
-.document-upload__fields span {
+.document-upload__field :is(input, select) {
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+}
+.document-upload__field span {
   color: var(--ink-3); font-size: 12px; font-weight: 600;
 }
 .document-upload__queue {
@@ -1165,14 +1171,20 @@
   gap: 8px; align-items: end;
   padding: 10px; border: 1px solid var(--line); border-radius: 8px;
 }
-.document-upload__row label {
-  display: grid; gap: 4px;
+.document-upload__row .document-upload__field {
+  gap: 4px;
 }
-.document-upload__row label span {
+.document-upload__row .document-upload__field span {
   color: var(--ink-3); font-size: 11px; font-weight: 600;
 }
 .document-upload__file {
   display: grid; gap: 2px; align-self: center;
+  min-width: 0;
+}
+.document-upload__file strong,
+.document-upload__file span {
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 @media (max-width: 680px) {
   .document-upload__fields { grid-template-columns: 1fr; }
