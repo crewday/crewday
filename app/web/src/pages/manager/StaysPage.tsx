@@ -326,6 +326,18 @@ function makeStayCreateRow(form: ManualStayForm): InlineTableRow<ManualStayForm>
   };
 }
 
+function manualFormFromStay(stay: PageStay, guestName: string): ManualStayForm {
+  return {
+    propertyId: stay.property_id,
+    unitId: stay.unit_id ?? "",
+    guestName,
+    guestCount: String(stay.guests),
+    checkIn: stay.check_in,
+    checkOut: stay.check_out,
+    status: stay.status,
+  };
+}
+
 function initialIcalForm(properties: Property[], units: UnitPayload[], preferredPropertyId?: string | null): IcalForm {
   const propertyId = preferredPropertyId && properties.some((property) => property.id === preferredPropertyId)
     ? preferredPropertyId
@@ -472,6 +484,7 @@ export default function StaysPage() {
   const [createStayRow, setCreateStayRow] = useState<InlineTableRow<ManualStayForm>>(
     () => makeStayCreateRow(emptyManualForm()),
   );
+  const [stayEdits, setStayEdits] = useState<ReadonlyMap<string, InlineTableRow<ManualStayForm>>>(() => new Map());
   const [icalForm, setIcalForm] = useState<IcalForm | null>(null);
   const [icalNotice, setIcalNotice] = useState<FormNotice | null>(null);
 
@@ -548,6 +561,28 @@ export default function StaysPage() {
   // react-doctor-disable-next-line react-doctor/exhaustive-deps -- The signature tracks loaded property/unit contents; the useQueries result arrays are unstable by identity.
   }, [defaultManualFormSignature, metadataPending, propsQ.data, routePropertyId]);
 
+  const loadedStaysForEdits = useMemo(() => {
+    if (!dataQ.data) return [];
+    const loaded = normalizeStaysPayload(dataQ.data);
+    return routePropertyId
+      ? loaded.stays.filter((stay) => stay.property_id === routePropertyId)
+      : loaded.stays;
+  }, [dataQ.data, routePropertyId]);
+  const loadedStayIdsForEdits = useMemo(
+    () => new Set(loadedStaysForEdits.map((stay) => stay.id)),
+    [loadedStaysForEdits],
+  );
+
+  useEffect(() => {
+    setStayEdits((current) => {
+      const next = new Map<string, InlineTableRow<ManualStayForm>>();
+      for (const [rowId, row] of current) {
+        if (loadedStayIdsForEdits.has(rowId)) next.set(rowId, row);
+      }
+      return next.size === current.size ? current : next;
+    });
+  }, [loadedStayIdsForEdits]);
+
   const createStay = useMutation({
     mutationFn: (body: {
       property_id: string;
@@ -574,6 +609,49 @@ export default function StaysPage() {
         ...row,
         error: problemMessage(error, "The stay could not be created. Check the fields and try again."),
       }));
+    },
+  });
+
+  const updateStay = useMutation({
+    mutationFn: (variables: { id: string; body: {
+      property_id: string;
+      unit_id: string;
+      check_in_at: string;
+      check_out_at: string;
+      guest_name: string | null;
+      guest_count: number;
+      status: StayStatus;
+    } }) => fetchJson<ReservationPayload>("/api/v1/stays/" + encodeURIComponent(variables.id), {
+      method: "PATCH",
+      body: variables.body,
+    }),
+    onSuccess: async (reservation, variables) => {
+      queryClient.setQueryData<StaysPayload>(staysQueryKey, (current) => {
+        if (!current) return current;
+        const updated = mapReservation(reservation);
+        return {
+          ...current,
+          stays: current.stays.map((stay) => stay.id === updated.id ? updated : stay),
+        };
+      });
+      setStayEdits((current) => {
+        const next = new Map(current);
+        next.delete(variables.id);
+        return next;
+      });
+      await queryClient.invalidateQueries({ queryKey: qk.stays() });
+    },
+    onError: (error, variables) => {
+      setStayEdits((current) => {
+        const row = current.get(variables.id);
+        if (!row) return current;
+        const next = new Map(current);
+        next.set(row.id, {
+          ...row,
+          error: problemMessage(error, "The stay could not be updated. Check the fields and try again."),
+        });
+        return next;
+      });
     },
   });
 
@@ -671,6 +749,9 @@ export default function StaysPage() {
   function guestNameForStay(stay: PageStay): string {
     return canSeeGuestIdentity(stay.property_id) ? stay.guest_name : "Hidden guest";
   }
+  function editableGuestNameForStay(stay: PageStay): string {
+    return canSeeGuestIdentity(stay.property_id) ? stay.guest_name : "";
+  }
   const canShareCreateGuestName = createStayRow.draft.propertyId
     ? canSeeGuestIdentity(createStayRow.draft.propertyId)
     : false;
@@ -687,12 +768,16 @@ export default function StaysPage() {
   }
 
   function updateManualProperty(propertyId: string): void {
+    patchCreateStayRow(manualPropertyPatch(createStayRow.draft, propertyId));
+  }
+
+  function manualPropertyPatch(form: ManualStayForm, propertyId: string): Partial<ManualStayForm> {
     const propertyUnits = unitsByProperty.get(propertyId) ?? [];
-    patchCreateStayRow({
+    return {
       propertyId,
       unitId: propertyUnits[0]?.id ?? "",
-      guestName: canSeeGuestIdentity(propertyId) ? createStayRow.draft.guestName : "",
-    });
+      guestName: canSeeGuestIdentity(propertyId) ? form.guestName : "",
+    };
   }
 
   function updateIcalProperty(propertyId: string): void {
@@ -734,6 +819,99 @@ export default function StaysPage() {
 
   function cancelCreateStayRow(): void {
     setCreateStayRow(makeStayCreateRow(initialManualForm(pageProperties, units, routePropertyId)));
+  }
+
+  function patchStayRow(rowId: string, patch: Partial<ManualStayForm>): void {
+    if (rowId === createStayRow.id) {
+      patchCreateStayRow(patch);
+      return;
+    }
+    const stay = stays.find((entry) => entry.id === rowId);
+    if (!stay || stay.source !== "manual") return;
+    setStayEdits((current) => {
+      const existing = current.get(rowId);
+      const committedDraft = existing?.committedDraft ?? manualFormFromStay(stay, editableGuestNameForStay(stay));
+      const draft = { ...(existing?.draft ?? committedDraft), ...patch };
+      const next = new Map(current);
+      next.set(rowId, {
+        id: rowId,
+        draft,
+        committedDraft,
+        editing: true,
+        dirty: true,
+        validation: undefined,
+        error: undefined,
+        label: `${draft.guestName || "Hidden guest"} stay from ${fmtAbbrevDate(draft.checkIn)} to ${fmtAbbrevDate(draft.checkOut)}`,
+      });
+      return next;
+    });
+  }
+
+  function editStayRow(rowId: string): void {
+    const stay = stays.find((entry) => entry.id === rowId);
+    if (!stay || stay.source !== "manual") return;
+    setStayEdits((current) => {
+      const existing = current.get(rowId);
+      const draft = existing?.draft ?? manualFormFromStay(stay, editableGuestNameForStay(stay));
+      const next = new Map(current);
+      next.set(rowId, {
+        id: rowId,
+        draft,
+        committedDraft: manualFormFromStay(stay, editableGuestNameForStay(stay)),
+        editing: true,
+        dirty: existing?.dirty ?? false,
+        validation: existing?.validation,
+        error: existing?.error,
+        label: `${draft.guestName || "Hidden guest"} stay from ${fmtAbbrevDate(draft.checkIn)} to ${fmtAbbrevDate(draft.checkOut)}`,
+      });
+      return next;
+    });
+  }
+
+  function cancelStayRow(rowId: string): void {
+    if (rowId === createStayRow.id) {
+      cancelCreateStayRow();
+      return;
+    }
+    setStayEdits((current) => {
+      const next = new Map(current);
+      next.delete(rowId);
+      return next;
+    });
+  }
+
+  function saveStayRow(rowId: string): void {
+    if (rowId === createStayRow.id) {
+      saveCreateStayRow();
+      return;
+    }
+    const row = stayEdits.get(rowId);
+    if (!row) return;
+    const canShareGuestName = row.draft.propertyId ? canSeeGuestIdentity(row.draft.propertyId) : false;
+    const validation = validateManualForm(row.draft, canShareGuestName);
+    if (validation) {
+      setStayEdits((current) => {
+        const existing = current.get(rowId);
+        if (!existing) return current;
+        const next = new Map(current);
+        next.set(rowId, { ...existing, dirty: true, validation, error: undefined });
+        return next;
+      });
+      return;
+    }
+    const guestName = canShareGuestName ? row.draft.guestName.trim() : "";
+    updateStay.mutate({
+      id: rowId,
+      body: {
+        property_id: row.draft.propertyId,
+        unit_id: row.draft.unitId,
+        check_in_at: `${row.draft.checkIn}T16:00:00Z`,
+        check_out_at: `${row.draft.checkOut}T10:00:00Z`,
+        guest_name: guestName || null,
+        guest_count: Number.parseInt(row.draft.guestCount, 10),
+        status: row.draft.status,
+      },
+    });
   }
 
   function submitIcalFeed(event: FormEvent<HTMLFormElement>): void {
@@ -787,7 +965,13 @@ export default function StaysPage() {
           disabled={disabled || Boolean(routePropertyId)}
           ariaLabel="Property"
           noResultsLabel="No properties available"
-          onChange={updateManualProperty}
+          onChange={(propertyId) => {
+            if (row.id === createStayRow.id) {
+              updateManualProperty(propertyId);
+              return;
+            }
+            patchStayRow(row.id, manualPropertyPatch(row.draft, propertyId));
+          }}
         />
       ),
     },
@@ -883,16 +1067,18 @@ export default function StaysPage() {
   ];
   const stayRows: InlineTableRow<ManualStayForm>[] = stays.map((stay) => ({
     id: stay.id,
-    draft: {
-      propertyId: stay.property_id,
-      unitId: stay.unit_id ?? "",
-      guestName: guestNameForStay(stay),
-      guestCount: String(stay.guests),
-      checkIn: stay.check_in,
-      checkOut: stay.check_out,
-      status: stay.status,
-    },
+    draft: stayEdits.get(stay.id)?.draft ?? manualFormFromStay(stay, editableGuestNameForStay(stay)),
+    committedDraft: manualFormFromStay(stay, editableGuestNameForStay(stay)),
+    editing: stayEdits.get(stay.id)?.editing ?? false,
+    dirty: stayEdits.get(stay.id)?.dirty ?? false,
+    disabled: stay.source !== "manual",
+    saving: updateStay.isPending && updateStay.variables?.id === stay.id,
+    error: stayEdits.get(stay.id)?.error,
+    validation: stayEdits.get(stay.id)?.validation,
     label: `${guestNameForStay(stay)} stay from ${fmtAbbrevDate(stay.check_in)} to ${fmtAbbrevDate(stay.check_out)}`,
+    meta: stay.source !== "manual" ? (
+      <span>Imported reservation. Edit it in the source calendar.</span>
+    ) : undefined,
   }));
   const createStayMeta = createStayRow.draft.propertyId && (
     !canShareCreateGuestName ||
@@ -1054,15 +1240,10 @@ export default function StaysPage() {
           rows={stayRows}
           trailingCreateRow={activeCreateStayRow}
           saveMode="explicit"
-          onDraftChange={(rowId, patch) => {
-            if (rowId === createStayRow.id) patchCreateStayRow(patch);
-          }}
-          onCancel={(rowId) => {
-            if (rowId === createStayRow.id) cancelCreateStayRow();
-          }}
-          onSave={(rowId) => {
-            if (rowId === createStayRow.id) saveCreateStayRow();
-          }}
+          onDraftChange={patchStayRow}
+          onEdit={editStayRow}
+          onCancel={cancelStayRow}
+          onSave={saveStayRow}
           getRowLabel={(row) => row.label ?? "Stay"}
         />
       </div>

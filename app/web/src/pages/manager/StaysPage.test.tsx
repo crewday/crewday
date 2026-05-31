@@ -94,6 +94,12 @@ function isoOffset(days: number): string {
   return date.toISOString().slice(0, 10);
 }
 
+function nextIso(iso: string): string {
+  const date = new Date(iso + "T00:00:00Z");
+  date.setUTCDate(date.getUTCDate() + 1);
+  return date.toISOString().slice(0, 10);
+}
+
 function installFetch(options: {
   properties?: unknown[];
   reservations?: unknown[];
@@ -105,6 +111,7 @@ function installFetch(options: {
   membershipRole?: "owner_workspace" | "managed_workspace" | "observer_workspace";
   shareGuestIdentity?: boolean;
   createStay?: (body: unknown) => { status?: number; body?: unknown };
+  updateStay?: (id: string, body: unknown) => { status?: number; body?: unknown };
   createFeed?: (body: unknown) => { status?: number; body?: unknown };
   memberships?: Record<string, {
     membershipRole?: "owner_workspace" | "managed_workspace" | "observer_workspace";
@@ -260,6 +267,42 @@ function installFetch(options: {
           },
         };
         if ((response.status ?? 200) < 400) reservations.unshift(response.body);
+        return response;
+      },
+    },
+    {
+      path: "/w/acme/api/v1/stays/res_existing",
+      method: "PATCH",
+      respond: (request) => {
+        const id = request.path.split("/").at(-1) ?? "";
+        const existingIndex = reservations.findIndex((row) => (
+          row && typeof row === "object" && "id" in row && row.id === id
+        ));
+        const existing = existingIndex >= 0 && reservations[existingIndex] && typeof reservations[existingIndex] === "object"
+          ? reservations[existingIndex] as Record<string, unknown>
+          : existingReservation;
+        const requestBody = request.body && typeof request.body === "object"
+          ? request.body as Record<string, unknown>
+          : {};
+        const response = options.updateStay?.(id, request.body) ?? {
+          status: 200,
+          body: {
+            ...existing,
+            id,
+            property_id: requestBody.property_id ?? existing.property_id,
+            unit_id: requestBody.unit_id ?? existing.unit_id,
+            check_in: requestBody.check_in_at ?? existing.check_in,
+            check_out: requestBody.check_out_at ?? existing.check_out,
+            guest_name: requestBody.guest_name ?? existing.guest_name,
+            guest_count: requestBody.guest_count ?? existing.guest_count,
+            status: requestBody.status ?? existing.status,
+            source: "manual",
+          },
+        };
+        if ((response.status ?? 200) < 400) {
+          if (existingIndex >= 0) reservations[existingIndex] = response.body;
+          else reservations.unshift(response.body);
+        }
         return response;
       },
     },
@@ -527,23 +570,24 @@ describe("<StaysPage>", () => {
   });
 
   it("selects draft stay dates from the shared planner without saving", async () => {
-    const todayIso = isoOffset(0);
-    const tomorrowIso = isoOffset(1);
-    const checkoutIso = isoOffset(2);
     const fake = installFetch();
     try {
       render(<Harness />);
 
       const createRow = await screen.findByLabelText("New stay");
-      expect(screen.getByText("Scroll up for past weeks")).toBeInTheDocument();
-      const dayCell = (iso: string) => screen.getByLabelText(new RegExp(iso));
+      expect(await screen.findByText("Scroll up for past weeks")).toBeInTheDocument();
+      const dayCell = (iso: string) => document.querySelector(`[data-schedule-iso="${iso}"]`) as HTMLElement;
+      const [startIso, endIso] = Array.from(document.querySelectorAll<HTMLElement>("[data-schedule-iso]"))
+        .slice(0, 2)
+        .map((cell) => cell.dataset.scheduleIso ?? "");
+      const checkoutIso = nextIso(endIso);
 
-      fireEvent.pointerDown(dayCell(todayIso), { button: 0 });
-      fireEvent.pointerEnter(dayCell(tomorrowIso), { buttons: 1 });
+      fireEvent.pointerDown(dayCell(startIso), { button: 0 });
+      fireEvent.pointerEnter(dayCell(endIso), { buttons: 1 });
 
-      expect(within(createRow).getByLabelText(/^Check-in\b/)).toHaveValue(todayIso);
+      expect(within(createRow).getByLabelText(/^Check-in\b/)).toHaveValue(startIso);
       expect(within(createRow).getByLabelText(/^Check-out\b/)).toHaveValue(checkoutIso);
-      expect(within(dayCell(todayIso)).getByLabelText("Draft stay, Unsaved manual stay")).toBeInTheDocument();
+      expect(within(dayCell(startIso)).getByLabelText("Draft stay, Unsaved manual stay")).toBeInTheDocument();
       expect(fake.requests.some((request) => request.method === "POST" && request.path === "/w/acme/api/v1/stays")).toBe(false);
     } finally {
       fake.restore();
@@ -632,6 +676,146 @@ describe("<StaysPage>", () => {
           fake.requests.filter((request) => request.path === "/w/acme/api/v1/stays/reservations?limit=500").length,
         ).toBeGreaterThan(reservationFetchesBeforeCreate);
       });
+    } finally {
+      fake.restore();
+    }
+  });
+
+  it("edits a saved manual stay inline through the API and keeps imported rows read-only", async () => {
+    const importedReservation = {
+      ...existingReservation,
+      id: "res_imported",
+      external_uid: "airbnb-1",
+      ical_feed_id: "feed_1",
+      guest_name: "Imported Guest",
+      source: "airbnb",
+    };
+    const fake = installFetch({ reservations: [existingReservation, importedReservation] });
+    try {
+      render(<Harness />);
+
+      const manualRow = await screen.findByLabelText("Ada Existing stay from Sat 18 Apr to Mon 20 Apr");
+      const importedRow = screen.getByLabelText("Imported Guest stay from Sat 18 Apr to Mon 20 Apr");
+      expect(within(manualRow).getByRole("button", { name: "Edit" })).toBeEnabled();
+      expect(within(importedRow).getByRole("button", { name: "Edit" })).toBeDisabled();
+      expect(within(importedRow).getByText("Imported reservation. Edit it in the source calendar.")).toBeInTheDocument();
+
+      fireEvent.click(within(manualRow).getByRole("button", { name: "Edit" }));
+      expect(within(manualRow).getByLabelText(/^Guest name\b/)).toHaveValue("Ada Existing");
+      expect(within(manualRow).getByLabelText(/^Unit\b/)).toHaveValue("Garden Suite");
+      expect(within(manualRow).getByLabelText(/^Check-in\b/)).toHaveValue("2026-04-18");
+      expect(within(manualRow).getByLabelText(/^Check-out\b/)).toHaveValue("2026-04-20");
+      expect(within(manualRow).getByLabelText(/^Guests\b/)).toHaveValue("2");
+      expect(within(manualRow).getByLabelText(/^Status\b/)).toHaveValue("confirmed");
+
+      fireEvent.change(within(manualRow).getByLabelText(/^Guest name\b/), { target: { value: "Ada Updated" } });
+      fireEvent.change(within(manualRow).getByLabelText(/^Guests\b/), { target: { value: "4" } });
+      fireEvent.change(within(manualRow).getByLabelText(/^Check-out\b/), { target: { value: "2026-04-22" } });
+      fireEvent.click(within(manualRow).getByRole("button", { name: "Save" }));
+
+      await waitFor(() => expect(screen.getByText("Ada Updated")).toBeInTheDocument());
+      const updateRequest = fake.requests.find((request) => (
+        request.method === "PATCH" && request.path === "/w/acme/api/v1/stays/res_existing"
+      ));
+      expect(updateRequest?.body).toMatchObject({
+        property_id: "prop_1",
+        unit_id: "unit_1",
+        check_in_at: "2026-04-18T16:00:00Z",
+        check_out_at: "2026-04-22T10:00:00Z",
+        guest_name: "Ada Updated",
+        guest_count: 4,
+        status: "confirmed",
+      });
+    } finally {
+      fake.restore();
+    }
+  });
+
+  it("does not turn hidden guest placeholders into editable manual stay guest names", async () => {
+    const fake = installFetch({
+      properties: [property, secondProperty],
+      reservations: [existingReservation],
+      units: { prop_1: [unit], prop_2: [otherPropertyUnit] },
+      memberships: {
+        prop_1: { membershipRole: "managed_workspace", shareGuestIdentity: false },
+        prop_2: { membershipRole: "managed_workspace", shareGuestIdentity: true },
+      },
+    });
+    try {
+      render(<Harness />);
+
+      const manualRow = await screen.findByLabelText("Hidden guest stay from Sat 18 Apr to Mon 20 Apr");
+      fireEvent.click(within(manualRow).getByRole("button", { name: "Edit" }));
+      expect(within(manualRow).getByLabelText(/^Guest name\b/)).toBeDisabled();
+      expect(within(manualRow).getByLabelText(/^Guest name\b/)).toHaveValue("");
+
+      await chooseSearchableOption(manualRow, /^Property\b/, "Beach House");
+      expect(within(manualRow).getByLabelText(/^Guest name\b/)).toBeEnabled();
+      expect(within(manualRow).getByLabelText(/^Guest name\b/)).toHaveValue("");
+      fireEvent.click(within(manualRow).getByRole("button", { name: "Save" }));
+
+      expect(within(manualRow).getByText("Guest name is required for this property.")).toBeInTheDocument();
+      expect(fake.requests.some((request) => request.method === "PATCH")).toBe(false);
+
+      fireEvent.change(within(manualRow).getByLabelText(/^Guest name\b/), { target: { value: "Visible Guest" } });
+      fireEvent.click(within(manualRow).getByRole("button", { name: "Save" }));
+
+      await waitFor(() => {
+        const updateRequest = fake.requests.find((request) => request.method === "PATCH");
+        expect(updateRequest?.body).toMatchObject({ guest_name: "Visible Guest" });
+      });
+    } finally {
+      fake.restore();
+    }
+  });
+
+  it("cancels saved manual stay edits without calling the update endpoint", async () => {
+    const fake = installFetch({ reservations: [existingReservation] });
+    try {
+      render(<Harness />);
+
+      const manualRow = await screen.findByLabelText("Ada Existing stay from Sat 18 Apr to Mon 20 Apr");
+      fireEvent.click(within(manualRow).getByRole("button", { name: "Edit" }));
+      fireEvent.change(within(manualRow).getByLabelText(/^Guest name\b/), { target: { value: "Discard Me" } });
+      fireEvent.click(within(manualRow).getByRole("button", { name: "Cancel" }));
+
+      expect(within(manualRow).getByText("Ada Existing")).toBeInTheDocument();
+      expect(within(manualRow).queryByText("Discard Me")).toBeNull();
+      expect(fake.requests.some((request) => request.method === "PATCH")).toBe(false);
+    } finally {
+      fake.restore();
+    }
+  });
+
+  it("keeps saved manual stay API errors local to the edited row", async () => {
+    const fake = installFetch({
+      reservations: [existingReservation],
+      updateStay: () => ({
+        status: 422,
+        body: {
+          type: "validation",
+          title: "Validation failed",
+          user_message: "Server rejected the updated stay.",
+        },
+      }),
+    });
+    try {
+      render(<Harness />);
+
+      const manualRow = await screen.findByLabelText("Ada Existing stay from Sat 18 Apr to Mon 20 Apr");
+      fireEvent.click(within(manualRow).getByRole("button", { name: "Edit" }));
+      fireEvent.change(within(manualRow).getByLabelText(/^Check-out\b/), { target: { value: "2026-04-22" } });
+      fireEvent.click(within(manualRow).getByRole("button", { name: "Save" }));
+
+      expect(await within(manualRow).findByText("Server rejected the updated stay.")).toBeInTheDocument();
+      expect(within(manualRow).getByLabelText(/^Check-out\b/)).toHaveValue("2026-04-22");
+
+      fireEvent.change(within(manualRow).getByLabelText(/^Guest name\b/), { target: { value: "" } });
+      fireEvent.click(within(manualRow).getByRole("button", { name: "Save" }));
+
+      expect(within(manualRow).getByText("Guest name is required for this property.")).toBeInTheDocument();
+      expect(within(manualRow).queryByText("Server rejected the updated stay.")).toBeNull();
+      expect(fake.requests.filter((request) => request.method === "PATCH")).toHaveLength(1);
     } finally {
       fake.restore();
     }

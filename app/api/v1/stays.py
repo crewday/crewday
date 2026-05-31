@@ -118,6 +118,7 @@ __all__ = [
     "IcalPollOnceResponse",
     "IcalProbeResponse",
     "ManualStayCreateRequest",
+    "ManualStayUpdateRequest",
     "ReservationListResponse",
     "ReservationResponse",
     "StayBundleListResponse",
@@ -297,6 +298,18 @@ class ManualStayCreateRequest(BaseModel):
     guest_kind: Literal["guest"] = "guest"
     status: Literal["tentative", "confirmed"] = "confirmed"
     source: Literal["manual"] = "manual"
+
+
+class ManualStayUpdateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    property_id: str = Field(..., min_length=1, max_length=64)
+    unit_id: str = Field(..., min_length=1, max_length=64)
+    check_in_at: datetime
+    check_out_at: datetime
+    guest_name: str | None = Field(default=None, max_length=256)
+    guest_count: int = Field(..., ge=1, le=99)
+    status: Literal["tentative", "confirmed"] = "confirmed"
 
 
 class IcalFeedResponse(BaseModel):
@@ -895,6 +908,81 @@ def build_stays_router() -> APIRouter:
         _publish_manual_reservation_created(session, ctx, row=row, now=now)
         return _reservation_response(row)
 
+    @api.patch(
+        "/{reservation_id}",
+        response_model=ReservationResponse,
+        operation_id="stays.update",
+        dependencies=[manage_gate],
+    )
+    def update_stay(
+        reservation_id: _ID,
+        body: ManualStayUpdateRequest,
+        ctx: _Ctx,
+        session: _Db,
+        clock: _ClockDep,
+    ) -> ReservationResponse:
+        if body.check_out_at <= body.check_in_at:
+            raise Validation(
+                "check_out_at must be after check_in_at",
+                extra={
+                    "error": "stay_invalid_dates",
+                    "message": "check_out_at must be after check_in_at",
+                },
+            )
+        row = _load_reservation(session, ctx, reservation_id=reservation_id)
+        if row.ical_feed_id is not None or row.source != "manual":
+            raise Forbidden(
+                "Imported reservations are read-only",
+                extra={
+                    "error": "reservation_read_only",
+                    "message": "Imported reservations are read-only",
+                },
+            )
+        _ensure_property_writable(session, ctx, property_id=row.property_id)
+        before = _reservation_audit_dict(row)
+        access = _resolve_unit_access(
+            session,
+            ctx,
+            property_id=body.property_id,
+            unit_id=body.unit_id,
+        )
+        can_store_guest_name = (
+            access.membership_role == "owner_workspace" or access.share_guest_identity
+        )
+        guest_name = (
+            body.guest_name.strip()
+            if can_store_guest_name and body.guest_name is not None
+            else None
+        )
+        if guest_name == "":
+            guest_name = None
+
+        row.property_id = body.property_id
+        row.unit_id = body.unit_id
+        row.check_in = _aware_utc(body.check_in_at)
+        row.check_out = _aware_utc(body.check_out_at)
+        row.guest_name = guest_name
+        row.guest_count = body.guest_count
+        row.status = _manual_status_to_storage(body.status)
+        session.flush()
+        write_audit(
+            session,
+            ctx,
+            entity_kind="reservation",
+            entity_id=row.id,
+            action="update",
+            diff={"before": before, "after": _reservation_audit_dict(row)},
+            clock=clock,
+        )
+        _publish_manual_reservation_upserted(
+            session, ctx, row=row, now=clock.now(), change_kind="updated"
+        )
+        return _reservation_response(row)
+
+    @api.get("/guest-links", include_in_schema=False)
+    def list_guest_links_not_found() -> None:
+        raise _not_found("route_not_found")
+
     @api.get(
         "/reservations",
         response_model=ReservationListResponse,
@@ -1317,6 +1405,23 @@ def _publish_manual_reservation_created(
     row: Reservation,
     now: datetime,
 ) -> None:
+    _publish_manual_reservation_upserted(
+        session,
+        ctx,
+        row=row,
+        now=now,
+        change_kind="created",
+    )
+
+
+def _publish_manual_reservation_upserted(
+    session: Session,
+    ctx: WorkspaceContext,
+    *,
+    row: Reservation,
+    now: datetime,
+    change_kind: Literal["created", "updated"],
+) -> None:
     token = set_current(ctx)
     try:
         with bind_active_session(session):
@@ -1328,7 +1433,7 @@ def _publish_manual_reservation_created(
                     occurred_at=now,
                     reservation_id=row.id,
                     feed_id=None,
-                    change_kind="created",
+                    change_kind=change_kind,
                 )
             )
     finally:

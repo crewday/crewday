@@ -15,6 +15,7 @@ from sqlalchemy import Engine, select
 from sqlalchemy.orm import Session, sessionmaker
 from starlette.responses import JSONResponse
 
+import app.api.v1.stays as stays_api
 from app.adapters.db.authz.models import RoleGrant
 from app.adapters.db.base import Base
 from app.adapters.db.session import UnitOfWorkImpl, make_engine
@@ -301,6 +302,7 @@ def _seed_reservation(
     check_out: datetime,
     status: str = "scheduled",
     guest_name: str | None = "Ada Guest",
+    source: str = "manual",
 ) -> str:
     reservation_id = new_ulid()
     session.add(
@@ -316,7 +318,7 @@ def _seed_reservation(
             guest_name=guest_name,
             guest_count=2,
             status=status,
-            source="manual",
+            source=source,
             raw_summary=None,
             raw_description=None,
             guest_link_id=None,
@@ -796,6 +798,178 @@ def test_manual_stay_create_enforces_share_privacy_and_read_only_property_role(
             "unit_id": observer_unit_id,
         },
     )
+    assert read_only.status_code == 403
+    assert read_only.json()["error"] == "property_read_only"
+
+
+def test_manual_stay_update_persists_fields_and_enforces_share_privacy(
+    factory: sessionmaker[Session],
+    validator: FakeValidator,
+    envelope: FakeEnvelope,
+    settings: Settings,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    published: list[object] = []
+    monkeypatch.setattr(stays_api.default_event_bus, "publish", published.append)
+    with factory() as session:
+        ctx, workspace_id, _actor_id = _seed_workspace(session, slug="manual-update")
+        property_id = _seed_property(session, workspace_id=workspace_id)
+        unit_id = _seed_unit(session, property_id=property_id)
+        shared_property_id = _seed_property(
+            session,
+            workspace_id=workspace_id,
+            membership_role="managed_workspace",
+            share_guest_identity=False,
+        )
+        shared_unit_id = _seed_unit(session, property_id=shared_property_id)
+        stay_id = _seed_reservation(
+            session,
+            workspace_id=workspace_id,
+            property_id=property_id,
+            unit_id=unit_id,
+            check_in=_PINNED + timedelta(days=1),
+            check_out=_PINNED + timedelta(days=3),
+            status="confirmed",
+        )
+        session.commit()
+    client = _build_client(
+        factory=factory,
+        ctx=ctx,
+        validator=validator,
+        envelope=envelope,
+        settings=settings,
+    )
+
+    updated = client.patch(
+        f"/stays/{stay_id}",
+        json={
+            "property_id": property_id,
+            "unit_id": unit_id,
+            "check_in_at": (_PINNED + timedelta(days=2)).isoformat(),
+            "check_out_at": (_PINNED + timedelta(days=5)).isoformat(),
+            "guest_name": " Updated Guest ",
+            "guest_count": 4,
+            "status": "tentative",
+        },
+    )
+
+    assert updated.status_code == 200, updated.text
+    body = updated.json()
+    assert body["guest_name"] == "Updated Guest"
+    assert body["guest_count"] == 4
+    assert body["status"] == "tentative"
+
+    privacy_update = client.patch(
+        f"/stays/{stay_id}",
+        json={
+            "property_id": shared_property_id,
+            "unit_id": shared_unit_id,
+            "check_in_at": (_PINNED + timedelta(days=6)).isoformat(),
+            "check_out_at": (_PINNED + timedelta(days=8)).isoformat(),
+            "guest_name": "Must Not Persist",
+            "guest_count": 1,
+            "status": "confirmed",
+        },
+    )
+
+    assert privacy_update.status_code == 200, privacy_update.text
+    assert privacy_update.json()["guest_name"] is None
+    assert [getattr(event, "change_kind", None) for event in published] == [
+        "updated",
+        "updated",
+    ]
+    assert all(getattr(event, "reservation_id", None) == stay_id for event in published)
+    with factory() as session:
+        row = session.get(Reservation, stay_id)
+        assert row is not None
+        assert row.property_id == shared_property_id
+        assert row.unit_id == shared_unit_id
+        assert row.guest_name is None
+        assert row.guest_count == 1
+        assert row.status == "confirmed"
+
+
+def test_manual_stay_update_rejects_invalid_dates_scope_and_imported_rows(
+    factory: sessionmaker[Session],
+    validator: FakeValidator,
+    envelope: FakeEnvelope,
+    settings: Settings,
+) -> None:
+    with factory() as session:
+        ctx, workspace_id, _actor_id = _seed_workspace(
+            session, slug="manual-update-invalid"
+        )
+        property_id = _seed_property(session, workspace_id=workspace_id)
+        unit_id = _seed_unit(session, property_id=property_id)
+        other_property_id = _seed_property(session, workspace_id=workspace_id)
+        read_only_property_id = _seed_property(
+            session,
+            workspace_id=workspace_id,
+            membership_role="observer_workspace",
+        )
+        read_only_unit_id = _seed_unit(session, property_id=read_only_property_id)
+        stay_id = _seed_reservation(
+            session,
+            workspace_id=workspace_id,
+            property_id=property_id,
+            unit_id=unit_id,
+            check_in=_PINNED + timedelta(days=1),
+            check_out=_PINNED + timedelta(days=3),
+        )
+        imported_id = _seed_reservation(
+            session,
+            workspace_id=workspace_id,
+            property_id=property_id,
+            unit_id=unit_id,
+            check_in=_PINNED + timedelta(days=4),
+            check_out=_PINNED + timedelta(days=6),
+            source="ical",
+        )
+        read_only_stay_id = _seed_reservation(
+            session,
+            workspace_id=workspace_id,
+            property_id=read_only_property_id,
+            unit_id=read_only_unit_id,
+            check_in=_PINNED + timedelta(days=7),
+            check_out=_PINNED + timedelta(days=9),
+        )
+        session.commit()
+    client = _build_client(
+        factory=factory,
+        ctx=ctx,
+        validator=validator,
+        envelope=envelope,
+        settings=settings,
+    )
+    valid_body = {
+        "property_id": property_id,
+        "unit_id": unit_id,
+        "check_in_at": (_PINNED + timedelta(days=3)).isoformat(),
+        "check_out_at": (_PINNED + timedelta(days=6)).isoformat(),
+        "guest_name": None,
+        "guest_count": 1,
+        "status": "confirmed",
+    }
+
+    invalid_dates = client.patch(
+        f"/stays/{stay_id}",
+        json={**valid_body, "check_out_at": valid_body["check_in_at"]},
+    )
+    assert invalid_dates.status_code == 422
+    assert invalid_dates.json()["error"] == "stay_invalid_dates"
+
+    wrong_property = client.patch(
+        f"/stays/{stay_id}",
+        json={**valid_body, "property_id": other_property_id},
+    )
+    assert wrong_property.status_code == 404
+    assert wrong_property.json()["error"] == "unit_not_found"
+
+    imported = client.patch(f"/stays/{imported_id}", json=valid_body)
+    assert imported.status_code == 403
+    assert imported.json()["error"] == "reservation_read_only"
+
+    read_only = client.patch(f"/stays/{read_only_stay_id}", json=valid_body)
     assert read_only.status_code == 403
     assert read_only.json()["error"] == "property_read_only"
 
