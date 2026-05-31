@@ -19,7 +19,6 @@ import {
   settingDraftFromValue,
   settingEnumOptionLabel,
   settingOverrideScopes,
-  settingScopeLabel,
 } from "../settingsEditor";
 
 interface PropertySettingDraft {
@@ -247,7 +246,6 @@ export default function SettingsOverridePanel({
       const editedDraft = editedDrafts.get(def.key);
       const committedValue = propertySettingDraftValue(def.key, def, overrides, resolved);
       const savingThisRow = saveSetting.isPending && saveSetting.variables?.key === def.key;
-      const source = res?.source ?? "catalog";
       return {
         id: def.key,
         label: def.label,
@@ -262,7 +260,7 @@ export default function SettingsOverridePanel({
           && def.type === "int" && invalidIntegerSettingDraft(editedDraft.value)
           ? "Enter a whole number."
           : undefined,
-        isNew: source !== "property" && !hasPropertyOverride(overrides, def.key),
+        isNew: !hasPropertyOverride(overrides, def.key),
       };
     }),
     [editedDrafts, overrides, propertyScoped, resolved, rowErrors, saveSetting.isPending, saveSetting.variables],
@@ -291,7 +289,18 @@ export default function SettingsOverridePanel({
           const hasOverride = hasPropertyOverride(overrides, row.id);
           const res = resolved[row.id];
           return hasOverride ? (
-            <strong>{formatValue(res?.value)}</strong>
+            <span className="settings-override-source">
+              <strong>{formatValue(res?.value)}</strong>
+              <Chip tone="moss" size="sm">property override</Chip>
+              <button
+                type="button"
+                className="btn btn--ghost btn--sm"
+                disabled={saveSetting.isPending}
+                onClick={() => saveSetting.mutate({ key: row.id, value: null })}
+              >
+                Clear
+              </button>
+            </span>
           ) : (
             <span className="muted">Inherited</span>
           );
@@ -316,41 +325,6 @@ export default function SettingsOverridePanel({
         width: { flex: 0.9, min: 140 },
         renderRead: ({ row }) => <span>{formatValue(resolved[row.id]?.value)}</span>,
         renderEdit: ({ row }) => <span>{formatValue(resolved[row.id]?.value)}</span>,
-      },
-      {
-        key: "source",
-        header: "Source",
-        width: { flex: 1.05, min: 190 },
-        renderRead: ({ row }) => {
-          const res = resolved[row.id];
-          if (res?.source === "property" || hasPropertyOverride(overrides, row.id)) {
-            return (
-              <span className="settings-override-source">
-                <Chip tone="moss" size="sm">property override</Chip>
-                <button
-                  type="button"
-                  className="btn btn--ghost btn--sm"
-                  disabled={saveSetting.isPending}
-                  onClick={() => saveSetting.mutate({ key: row.id, value: null })}
-                >
-                  Clear
-                </button>
-              </span>
-            );
-          }
-          return <span className="muted">inherited ({res?.source ?? "catalog"})</span>;
-        },
-        renderEdit: ({ row }) => {
-          const def = definitionsByKey.get(row.id);
-          return (
-            <span className="muted">
-              {hasPropertyOverride(overrides, row.id)
-                ? "Editing property override"
-                : "Will create property override"}
-              {def ? <> · {settingScopeLabel(def.override_scope)}</> : null}
-            </span>
-          );
-        },
       },
     ],
     [definitionsByKey, overrides, resolved, saveSetting],

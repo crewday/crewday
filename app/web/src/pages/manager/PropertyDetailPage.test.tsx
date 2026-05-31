@@ -1247,6 +1247,8 @@ describe("<PropertyDetailPage>", () => {
       expect(screen.queryByText("require_photos")).not.toBeInTheDocument();
       expect(screen.queryByText("minimum_notice_hours")).not.toBeInTheDocument();
       expect(screen.queryByText("workspace_only")).not.toBeInTheDocument();
+      const settingsTable = screen.getByRole("table", { name: "Property settings overrides" });
+      expect(within(settingsTable).queryByRole("columnheader", { name: "Source" })).not.toBeInTheDocument();
 
       const evidence = settingRow("Evidence policy");
       expect(within(evidence).getByText("Evidence policy")).toHaveClass("setting-name__label");
@@ -1255,7 +1257,7 @@ describe("<PropertyDetailPage>", () => {
         "setting-name__description",
       );
       expect(within(evidence).getByText("Inherited")).toBeInTheDocument();
-      expect(within(evidence).getByText("inherited (workspace)")).toBeInTheDocument();
+      expect(within(evidence).queryByText("inherited (workspace)")).not.toBeInTheDocument();
 
       fireEvent.click(within(evidence).getByRole("button", { name: "Edit" }));
       expect(within(evidence).getByText("Evidence policy")).toHaveClass("setting-name__label");
@@ -1289,6 +1291,11 @@ describe("<PropertyDetailPage>", () => {
       render(<Harness initial="/w/acme/property/prop_1#settings" />);
 
       expect(await screen.findByRole("heading", { name: "Settings overrides" })).toBeInTheDocument();
+      expect(
+        within(screen.getByRole("table", { name: "Property settings overrides" })).queryByRole("columnheader", {
+          name: "Source",
+        }),
+      ).not.toBeInTheDocument();
       const photos = settingRow("Require photos");
       expect(within(photos).getByText("property override")).toBeInTheDocument();
       expect(within(photos).getAllByText("no")).toHaveLength(2);
@@ -1304,7 +1311,7 @@ describe("<PropertyDetailPage>", () => {
     }
   });
 
-  it("saves and clears property setting overrides without a page reload", async () => {
+  it("saves and clears property settings overrides without a page reload", async () => {
     const fake = installFetch();
     try {
       window.history.replaceState(null, "", "/w/acme/property/prop_1#settings");
@@ -1347,7 +1354,7 @@ describe("<PropertyDetailPage>", () => {
       });
       const inheritedEvidence = settingRow("Evidence policy");
       expect(await within(inheritedEvidence).findByText("Inherited")).toBeInTheDocument();
-      expect(within(inheritedEvidence).getByText("inherited (workspace)")).toBeInTheDocument();
+      expect(within(inheritedEvidence).queryByText("inherited (workspace)")).not.toBeInTheDocument();
       await waitFor(() => {
         expect(fake.calls.filter((call) => call.url === "/w/acme/api/v1/properties/prop_1/settings").length).toBeGreaterThan(1);
         expect(fake.calls.filter((call) => call.url === "/w/acme/api/v1/properties/prop_1" && call.method === "GET").length).toBeGreaterThan(1);
@@ -1371,7 +1378,7 @@ describe("<PropertyDetailPage>", () => {
       });
       const clearedEvidence = settingRow("Evidence policy");
       expect(await within(clearedEvidence).findByText("Inherited")).toBeInTheDocument();
-      expect(within(clearedEvidence).getByText("inherited (workspace)")).toBeInTheDocument();
+      expect(within(clearedEvidence).queryByText("inherited (workspace)")).not.toBeInTheDocument();
     } finally {
       fake.restore();
     }
