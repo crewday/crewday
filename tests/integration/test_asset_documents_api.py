@@ -522,6 +522,33 @@ def test_property_document_routes_are_workspace_scoped(
     assert not storage.exists(hashlib.sha256(denied_payload).hexdigest())
 
 
+def test_property_document_routes_require_active_property_membership(
+    db_session: Session,
+) -> None:
+    ctx, property_id, _owner_id, _slug = _seed_workspace(db_session)
+    junction = db_session.get(
+        PropertyWorkspace,
+        {"property_id": property_id, "workspace_id": ctx.workspace_id},
+    )
+    assert junction is not None
+    junction.status = "invited"
+    db_session.flush()
+    storage = InMemoryStorage()
+    client = _client(db_session, ctx, storage=storage, sniffed_type="application/pdf")
+    denied_payload = b"%PDF inactive membership"
+
+    listed = client.get(f"/properties/{property_id}/documents")
+    uploaded = client.post(
+        f"/properties/{property_id}/documents",
+        data={"category": "permit", "title": "Inactive permit"},
+        files={"file": ("inactive.pdf", denied_payload, "application/pdf")},
+    )
+
+    assert listed.status_code == 404
+    assert uploaded.status_code == 404
+    assert not storage.exists(hashlib.sha256(denied_payload).hexdigest())
+
+
 def test_extraction_retry_happy_path_resets_failed_row(
     db_session: Session,
 ) -> None:

@@ -100,6 +100,7 @@ from app.events.types import (
 )
 from app.tenancy.context import WorkspaceContext
 from app.util.clock import FrozenClock
+from app.util.redact import redact
 from app.util.ulid import new_ulid
 
 _PINNED = datetime(2026, 4, 19, 12, 0, 0, tzinfo=UTC)
@@ -1605,7 +1606,9 @@ class TestComplete:
             select(AuditLog).where(AuditLog.action == "task.inventory_ref_missing")
         ).one()
         assert ref_missing.entity_id == occ
-        assert ref_missing.diff["item_ref"] == other_item
+        redacted = redact({"item_ref": other_item}, scope="log")
+        assert isinstance(redacted, dict)
+        assert ref_missing.diff["item_ref"] == redacted["item_ref"]
 
     def test_inventory_unknown_sku_skipped(
         self, session: Session, clock: FrozenClock, bus: EventBus

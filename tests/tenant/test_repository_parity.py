@@ -787,6 +787,7 @@ COVERED_METHODS: frozenset[str] = frozenset(
         "app.domain.assets.documents.attach_document",
         "app.domain.assets.documents.delete_document",
         "app.domain.assets.documents.list_documents",
+        "app.domain.assets.documents.list_property_documents",
         "app.domain.assets.documents.list_workspace_documents",
         # cd-mo9e: extraction state transitions load
         # ``file_extraction`` rows by ``workspace_id`` + document id;

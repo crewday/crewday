@@ -10,7 +10,6 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.adapters.db.assets.models import AssetDocument
-from app.adapters.db.places.models import Property, PropertyWorkspace
 from app.adapters.storage.ports import Storage
 from app.audit import write_audit
 from app.domain.assets.assets import (
@@ -18,6 +17,7 @@ from app.domain.assets.assets import (
     _pending_event,
     _queue_asset_changed,
 )
+from app.domain.places.property_service import PropertyNotFound, get_property
 from app.events.bus import EventBus
 from app.events.bus import bus as default_event_bus
 from app.tenancy import WorkspaceContext, tenant_agnostic
@@ -335,21 +335,16 @@ def _load_property(
     session: Session,
     ctx: WorkspaceContext,
     property_id: str,
-) -> Property:
-    with tenant_agnostic():
-        row = session.scalars(
-            select(Property)
-            .join(PropertyWorkspace, PropertyWorkspace.property_id == Property.id)
-            .where(
-                Property.id == property_id,
-                Property.deleted_at.is_(None),
-                PropertyWorkspace.workspace_id == ctx.workspace_id,
-                PropertyWorkspace.status == "active",
-            )
-        ).one_or_none()
-    if row is None:
-        raise AssetDocumentNotFound(property_id)
-    return row
+) -> None:
+    try:
+        get_property(
+            session,
+            ctx,
+            property_id=property_id,
+            require_active_workspace=True,
+        )
+    except PropertyNotFound as exc:
+        raise AssetDocumentNotFound(property_id) from exc
 
 
 def _validate_category(category: str) -> AssetDocumentCategory:

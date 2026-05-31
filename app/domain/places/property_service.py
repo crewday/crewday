@@ -545,6 +545,7 @@ def _load_row(
     *,
     property_id: str,
     include_deleted: bool = False,
+    require_active_workspace: bool = False,
 ) -> Property:
     """Load ``property_id`` scoped to the caller's workspace.
 
@@ -570,6 +571,8 @@ def _load_row(
     )
     if not include_deleted:
         stmt = stmt.where(Property.deleted_at.is_(None))
+    if require_active_workspace:
+        stmt = stmt.where(PropertyWorkspace.status == "active")
     row = session.scalars(stmt).one_or_none()
     if row is None:
         raise PropertyNotFound(property_id)
@@ -587,6 +590,7 @@ def get_property(
     *,
     property_id: str,
     include_deleted: bool = False,
+    require_active_workspace: bool = False,
 ) -> PropertyView:
     """Return the property identified by ``property_id``.
 
@@ -595,7 +599,11 @@ def get_property(
     the caller's workspace.
     """
     row = _load_row(
-        session, ctx, property_id=property_id, include_deleted=include_deleted
+        session,
+        ctx,
+        property_id=property_id,
+        include_deleted=include_deleted,
+        require_active_workspace=require_active_workspace,
     )
     return _row_to_view(row)
 

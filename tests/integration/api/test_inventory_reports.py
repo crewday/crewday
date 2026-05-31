@@ -105,18 +105,39 @@ def test_production_and_shrinkage_reports_return_decimal_numbers(
     seeded: tuple[WorkspaceContext, str, str, str],
 ) -> None:
     ctx, _, produced_id, towels_id = seeded
+    report_at = datetime.now(UTC)
     found = _item(db_session, ctx, seeded[1], sku="FOUND", name="Found goods")
     _movement(
-        db_session, ctx, item_id=produced_id, delta=Decimal("9"), reason="produce"
+        db_session,
+        ctx,
+        item_id=produced_id,
+        delta=Decimal("9"),
+        reason="produce",
+        at=report_at,
     )
-    _movement(db_session, ctx, item_id=towels_id, delta=Decimal("-2"), reason="theft")
-    _movement(db_session, ctx, item_id=towels_id, delta=Decimal("-1.5"), reason="loss")
+    _movement(
+        db_session,
+        ctx,
+        item_id=towels_id,
+        delta=Decimal("-2"),
+        reason="theft",
+        at=report_at,
+    )
+    _movement(
+        db_session,
+        ctx,
+        item_id=towels_id,
+        delta=Decimal("-1.5"),
+        reason="loss",
+        at=report_at,
+    )
     _movement(
         db_session,
         ctx,
         item_id=towels_id,
         delta=Decimal("-0.25"),
         reason="audit_correction",
+        at=report_at,
     )
     _movement(
         db_session,
@@ -124,6 +145,7 @@ def test_production_and_shrinkage_reports_return_decimal_numbers(
         item_id=found.id,
         delta=Decimal("3"),
         reason="audit_correction",
+        at=report_at,
     )
     db_session.flush()
 
@@ -263,6 +285,7 @@ def _movement(
     delta: Decimal,
     reason: str,
     source_stocktake_id: str | None = None,
+    at: datetime = _PINNED,
 ) -> None:
     session.add(
         Movement(
@@ -275,7 +298,7 @@ def _movement(
             source_stocktake_id=source_stocktake_id,
             actor_kind="user",
             actor_id=ctx.actor_id,
-            at=_PINNED,
+            at=at,
             note=None,
         )
     )
