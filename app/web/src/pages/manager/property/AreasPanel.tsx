@@ -1,6 +1,5 @@
-import { useCallback, useMemo, useReducer, type MouseEvent, type SetStateAction } from "react";
+import { useCallback, useMemo, useReducer, type SetStateAction } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowDown, ArrowUp } from "lucide-react";
 import {
   InlineNoteDisplay,
   InlineNoteField,
@@ -9,6 +8,7 @@ import {
   InlineTableForm,
   InlineTextField,
   type InlineTableColumn,
+  type InlineTableReorder,
   type InlineTableRow,
 } from "@/components/InlineTableForm";
 import { Loading } from "@/components/common";
@@ -315,7 +315,6 @@ export default function AreasPanel({ propertyId }: { propertyId: string }) {
     }),
     [areaTree.rows, busy, editedDrafts, rowErrors, activeSavedDrafts, saveArea.isPending, saveArea.variables],
   );
-  const rowsById = useMemo(() => new Map(rows.map((row) => [row.id, row])), [rows]);
   const trailingCreateRow: InlineTableRow<AreaDraft> = {
     id: CREATE_ROW_ID,
     label: "New area",
@@ -328,27 +327,20 @@ export default function AreasPanel({ propertyId }: { propertyId: string }) {
     error: createError,
   };
 
-  const moveArea = useCallback((area: Area, direction: "previous" | "next"): void => {
+  const reorderAreaRows = useCallback(({ rowId, orderedRows }: InlineTableReorder<AreaDraft>): void => {
     if (reorderAreas.isPending) return;
-    const siblings = siblingAreasForArea(areas, area);
-    const fromIndex = siblings.findIndex((sibling) => sibling.id === area.id);
-    const toIndex = direction === "previous" ? fromIndex - 1 : fromIndex + 1;
-    if (fromIndex < 0 || toIndex < 0 || toIndex >= siblings.length) return;
-    const reorderedSiblings = [...siblings];
-    const [movedArea] = reorderedSiblings.splice(fromIndex, 1);
-    reorderedSiblings.splice(toIndex, 0, movedArea);
     const orderings: AreaReorderPatch[] = [];
-    for (const [index, sibling] of reorderedSiblings.entries()) {
-      const row = rowsById.get(sibling.id);
-      if (!row) return;
+    for (const [index, row] of orderedRows.entries()) {
+      const area = areasById.get(row.id);
+      if (!area) return;
       orderings.push({
-        area: sibling,
+        area,
         draft: row.draft,
         orderHint: index,
       });
     }
-    reorderAreas.mutate({ rowId: area.id, orderings });
-  }, [areas, reorderAreas, rowsById]);
+    reorderAreas.mutate({ rowId, orderings });
+  }, [areasById, reorderAreas]);
 
   const columns = useMemo(
     (): InlineTableColumn<AreaDraft>[] => [
@@ -398,40 +390,8 @@ export default function AreasPanel({ propertyId }: { propertyId: string }) {
           />
         ),
       },
-      {
-        key: "reorder",
-        header: "Move",
-        width: { flex: 0.45, min: 92 },
-        renderRead: ({ row }) => {
-          const area = areasById.get(row.id);
-          if (!area) return null;
-          const siblings = siblingAreasForArea(areas, area);
-          if (siblings.length < 2) return null;
-          const siblingIds = new Set(siblings.map((sibling) => sibling.id));
-          const affectedRowsLocked = rows.some((candidate) =>
-            siblingIds.has(candidate.id) && (candidate.editing || candidate.saving || candidate.disabled),
-          );
-          const siblingIndex = siblings.findIndex((sibling) => sibling.id === area.id);
-          return (
-            <AreaReorderControls
-              label={row.draft.name || row.label || "area"}
-              canMovePrevious={!affectedRowsLocked && siblingIndex > 0}
-              canMoveNext={!affectedRowsLocked && siblingIndex >= 0 && siblingIndex < siblings.length - 1}
-              onMovePrevious={(event) => {
-                event.stopPropagation();
-                moveArea(area, "previous");
-              }}
-              onMoveNext={(event) => {
-                event.stopPropagation();
-                moveArea(area, "next");
-              }}
-            />
-          );
-        },
-        renderEdit: () => null,
-      },
     ],
-    [areaTree, areas, areasById, rows, moveArea],
+    [areaTree],
   );
 
   if (areasQ.isPending) return <Loading />;
@@ -504,7 +464,20 @@ export default function AreasPanel({ propertyId }: { propertyId: string }) {
           setSavedDrafts((current) => clearMapValue(current, rowId));
           setRowErrors((current) => clearMapValue(current, rowId));
         }}
-        showReorderHandles={false}
+        onReorder={reorderAreaRows}
+        getReorderScope={({ row }) => {
+          const area = areasById.get(row.id);
+          if (!area || siblingAreasForArea(areas, area).length < 2) return null;
+          return area.parent_area_id ?? "";
+        }}
+        isReorderDisabled={({ row }) => {
+          const area = areasById.get(row.id);
+          if (!area) return true;
+          const siblingIds = new Set(siblingAreasForArea(areas, area).map((sibling) => sibling.id));
+          return rows.some((candidate) =>
+            siblingIds.has(candidate.id) && (candidate.editing || candidate.saving || candidate.disabled),
+          );
+        }}
         onDelete={(rowId) => deleteArea.mutate(rowId)}
         trailingCreateRow={trailingCreateRow}
         getRowLabel={(row) => row.draft.name || row.label || "New area"}
@@ -557,45 +530,6 @@ function parentOptions(areaTree: AreaTree, draft: AreaDraft): SearchableSelectOp
       searchText: pathLabel,
     }];
   });
-}
-
-function AreaReorderControls({
-  label,
-  canMovePrevious,
-  canMoveNext,
-  onMovePrevious,
-  onMoveNext,
-}: {
-  label: string;
-  canMovePrevious: boolean;
-  canMoveNext: boolean;
-  onMovePrevious: (event: MouseEvent<HTMLButtonElement>) => void;
-  onMoveNext: (event: MouseEvent<HTMLButtonElement>) => void;
-}) {
-  return (
-    <span className="inline-table-form__reorder-tools inline-table-form__button-group" aria-label={`Move ${label}`}>
-      <button
-        type="button"
-        className="inline-table-form__icon-btn"
-        aria-label={`Move ${label} up`}
-        title={`Move ${label} up`}
-        disabled={!canMovePrevious}
-        onClick={onMovePrevious}
-      >
-        <ArrowUp size={15} aria-hidden="true" />
-      </button>
-      <button
-        type="button"
-        className="inline-table-form__icon-btn"
-        aria-label={`Move ${label} down`}
-        title={`Move ${label} down`}
-        disabled={!canMoveNext}
-        onClick={onMoveNext}
-      >
-        <ArrowDown size={15} aria-hidden="true" />
-      </button>
-    </span>
-  );
 }
 
 function buildAreaTree(areas: readonly Area[]): AreaTree {
@@ -655,7 +589,7 @@ function siblingAreasForArea(areas: readonly Area[], area: Area): Area[] {
 }
 
 function sortAreas(areas: readonly Area[]): Area[] {
-  return areas.toSorted(
+  return Array.from(areas).sort(
     (left, right) =>
       left.order_hint - right.order_hint
       || left.name.localeCompare(right.name)

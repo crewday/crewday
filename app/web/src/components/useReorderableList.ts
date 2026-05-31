@@ -13,6 +13,7 @@ interface UseReorderableListArgs<T> {
   items: readonly T[];
   getId: (item: T) => string;
   onMove: (id: string, toIndex: number) => void;
+  canDrop?: (draggedItem: T, targetItem: T) => boolean;
   disabled?: boolean;
   defaultDropPosition?: ReorderDropPosition;
 }
@@ -57,6 +58,7 @@ export function useReorderableList<T>({
   items,
   getId,
   onMove,
+  canDrop,
   disabled = false,
   defaultDropPosition = "after",
 }: UseReorderableListArgs<T>): UseReorderableListResult {
@@ -71,6 +73,11 @@ export function useReorderableList<T>({
   function getItemProps(index: number): ReorderableItemProps {
     const item = items[index];
     const id = item ? getId(item) : "";
+    const canDropOnTarget = () => {
+      if (!canDrop || draggedId === null || !item) return true;
+      const draggedItem = items.find((candidate) => getId(candidate) === draggedId);
+      return draggedItem ? canDrop(draggedItem, item) : false;
+    };
 
     return {
       draggable: !disabled,
@@ -81,7 +88,7 @@ export function useReorderableList<T>({
         event.dataTransfer.setData("text/plain", id);
       },
       onDragOver(event) {
-        if (disabled || draggedId === null || draggedId === id || !id) return;
+        if (disabled || draggedId === null || draggedId === id || !id || !canDropOnTarget()) return;
         event.preventDefault();
         event.dataTransfer.dropEffect = "move";
         const nextTarget = { id, index, position: dropPosition(event, defaultDropPosition) };
@@ -98,7 +105,7 @@ export function useReorderableList<T>({
         setDropTarget((current) => (current?.id === id ? null : current));
       },
       onDrop(event) {
-        if (disabled || draggedId === null || !id) return;
+        if (disabled || draggedId === null || !id || !canDropOnTarget()) return;
         event.preventDefault();
         const fromIndex = items.findIndex((candidate) => getId(candidate) === draggedId);
         const target =

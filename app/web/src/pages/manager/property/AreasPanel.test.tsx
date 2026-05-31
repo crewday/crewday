@@ -40,6 +40,15 @@ function renderedRowLabels(container: HTMLElement): (string | null)[] {
   );
 }
 
+function testDataTransfer() {
+  return {
+    effectAllowed: "",
+    dropEffect: "",
+    setData: () => undefined,
+    getData: () => "",
+  };
+}
+
 function renderAreasPanel(initialAreas: TestArea[] = [], options: RenderAreasPanelOptions = {}) {
   let areas = [...initialAreas];
   const failPatchAreaIds = new Set(options.failPatchAreaIds ?? []);
@@ -186,7 +195,7 @@ describe("<AreasPanel>", () => {
     });
   });
 
-  it("renders areas as a stable pre-order tree and suppresses flat reorder dragging", async () => {
+  it("renders areas as a stable pre-order tree with scoped drag handles", async () => {
     const { container } = renderAreasPanel([
       areaFixture({
         id: "area_bath",
@@ -225,6 +234,10 @@ describe("<AreasPanel>", () => {
     const bedroomRow = screen.getByLabelText("Master bedroom");
     expect(bedroomRow).not.toHaveAttribute("draggable");
     expect(screen.queryByLabelText("Drag Master bedroom to reorder")).not.toBeInTheDocument();
+    expect(screen.getByLabelText("Drag Floor 1 to reorder")).toBeInTheDocument();
+    expect(screen.getByLabelText("Drag Patio to reorder")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /move .* up/i })).toBeNull();
+    expect(screen.queryByRole("button", { name: /move .* down/i })).toBeNull();
   });
 
   it("keeps reorder disabled while editing sibling rows in the tree table", async () => {
@@ -244,21 +257,19 @@ describe("<AreasPanel>", () => {
 
     await screen.findByText("Kitchen");
     const poolRow = screen.getByLabelText("Pool");
-    expect(poolRow).not.toHaveAttribute("draggable");
-    expect(screen.queryByLabelText("Drag Pool to reorder")).not.toBeInTheDocument();
-    expect(within(poolRow).getByRole("button", { name: "Move Pool up" })).toBeEnabled();
-    expect(within(poolRow).getByRole("button", { name: "Move Pool down" })).toBeDisabled();
+    expect(poolRow).toHaveAttribute("draggable", "true");
+    expect(within(poolRow).getByLabelText("Drag Pool to reorder")).toBeInTheDocument();
+    expect(within(poolRow).queryByRole("button", { name: /move pool/i })).toBeNull();
 
     const kitchenRow = screen.getByLabelText("Kitchen");
     fireEvent.click(within(kitchenRow).getByRole("button", { name: "Edit" }));
 
     expect(poolRow).not.toHaveAttribute("draggable");
-    expect(screen.queryByLabelText("Drag Pool to reorder")).not.toBeInTheDocument();
-    expect(within(poolRow).getByRole("button", { name: "Move Pool up" })).toBeDisabled();
+    expect(within(poolRow).getByLabelText("Drag Pool to reorder")).toBeInTheDocument();
 
     fireEvent.click(within(kitchenRow).getByRole("button", { name: "Cancel" }));
     await waitFor(() => {
-      expect(within(poolRow).getByRole("button", { name: "Move Pool up" })).toBeEnabled();
+      expect(poolRow).toHaveAttribute("draggable", "true");
     });
   });
 
@@ -288,8 +299,12 @@ describe("<AreasPanel>", () => {
       }),
     ]);
 
-    const floor2Row = await screen.findByLabelText("Floor 2");
-    fireEvent.click(within(floor2Row).getByRole("button", { name: "Move Floor 2 up" }));
+    const floor1Row = await screen.findByLabelText("Floor 1");
+    const floor2Row = screen.getByLabelText("Floor 2");
+    const dataTransfer = testDataTransfer();
+    fireEvent.dragStart(floor1Row, { dataTransfer });
+    fireEvent.dragOver(floor2Row, { dataTransfer });
+    fireEvent.drop(floor2Row, { dataTransfer });
 
     await waitFor(() => {
       expect(renderedRowLabels(container).slice(0, 4)).toEqual(["Floor 2", "Floor 1", "Bedroom", "Patio"]);
@@ -343,8 +358,12 @@ describe("<AreasPanel>", () => {
       }),
     ]);
 
-    const closetRow = await screen.findByLabelText("Closet");
-    fireEvent.click(within(closetRow).getByRole("button", { name: "Move Closet up" }));
+    const bedroomRow = await screen.findByLabelText("Bedroom");
+    const closetRow = screen.getByLabelText("Closet");
+    const dataTransfer = testDataTransfer();
+    fireEvent.dragStart(bedroomRow, { dataTransfer });
+    fireEvent.dragOver(closetRow, { dataTransfer });
+    fireEvent.drop(closetRow, { dataTransfer });
 
     await waitFor(() => {
       expect(renderedRowLabels(container).slice(0, 4)).toEqual(["Floor 1", "Closet", "Bedroom", "Patio"]);

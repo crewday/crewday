@@ -361,7 +361,8 @@ function parseMonthlyOrdinalWeekday({
   }
   if (simpleByday.length === 1 && byday.length === 1 && bysetpos.length === 1) {
     const ordinal = supportedMonthlyOrdinal(bysetpos[0] ?? "");
-    return ordinal ? { ordinal, weekday: simpleByday[0] } : null;
+    const weekday = simpleByday[0];
+    return ordinal && weekday ? { ordinal, weekday } : null;
   }
   return null;
 }

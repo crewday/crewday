@@ -1185,6 +1185,62 @@ describe("InlineTableForm", () => {
     expect(screen.getAllByRole("columnheader").map((header) => header.textContent)).toEqual(["Title", "Owner", ""]);
   });
 
+  it("allows tree rows to reorder within caller-provided scopes", () => {
+    const onReorder = vi.fn();
+    const dataTransfer = {
+      effectAllowed: "",
+      dropEffect: "",
+      setData: vi.fn(),
+      getData: vi.fn(),
+    };
+    render(
+      <InlineTableForm
+        ariaLabel="Scoped tree reorder rows"
+        columns={columns}
+        rows={[
+          { ...rowWithTitle("area-parent", "Parent"), tree: { depth: 0, hasChildren: true } },
+          { ...rowWithTitle("area-first", "First child"), tree: { depth: 1, parentId: "area-parent" } },
+          { ...rowWithTitle("area-second", "Second child"), tree: { depth: 1, parentId: "area-parent" } },
+          { ...rowWithTitle("area-other", "Other root"), tree: { depth: 0 } },
+        ]}
+        saveMode="explicit"
+        onDraftChange={vi.fn()}
+        onSave={vi.fn()}
+        onCancel={vi.fn()}
+        onReorder={onReorder}
+        getReorderScope={({ row }) => row.tree?.parentId ?? "root"}
+        getRowLabel={(row) => row.draft.title}
+      />,
+    );
+
+    const firstChild = screen.getByLabelText("First child");
+    const secondChild = screen.getByLabelText("Second child");
+    const otherRoot = screen.getByLabelText("Other root");
+
+    expect(firstChild).toHaveAttribute("draggable", "true");
+    expect(within(firstChild).getByLabelText("Drag First child to reorder")).toBeInTheDocument();
+
+    fireEvent.dragStart(firstChild, { dataTransfer });
+    fireEvent.dragOver(otherRoot, { dataTransfer });
+    fireEvent.drop(otherRoot, { dataTransfer });
+    expect(onReorder).not.toHaveBeenCalled();
+
+    fireEvent.dragStart(firstChild, { dataTransfer });
+    fireEvent.dragOver(secondChild, { dataTransfer });
+    fireEvent.drop(secondChild, { dataTransfer });
+
+    expect(onReorder).toHaveBeenCalledWith({
+      rowId: "area-first",
+      fromIndex: 0,
+      toIndex: 1,
+      orderedRowIds: ["area-second", "area-first"],
+      orderedRows: [
+        expect.objectContaining({ id: "area-second" }),
+        expect.objectContaining({ id: "area-first" }),
+      ],
+    });
+  });
+
   it("keeps non-tree rows free of hierarchy wrappers and uses the original column grid", () => {
     const { container } = render(
       <InlineTableForm

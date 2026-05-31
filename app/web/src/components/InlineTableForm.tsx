@@ -122,6 +122,12 @@ export interface InlineTableReorder<TDraft> {
   orderedRows: readonly InlineTableRow<TDraft>[];
 }
 
+export interface InlineTableReorderContext<TDraft> {
+  row: InlineTableRow<TDraft>;
+  index: number;
+  rows: readonly InlineTableRow<TDraft>[];
+}
+
 export interface InlineTableBatchContext<TDraft> {
   rows: readonly InlineTableRow<TDraft>[];
   dirtyRows: readonly InlineTableRow<TDraft>[];
@@ -222,6 +228,13 @@ interface InlineTableFormBaseProps<TDraft> {
   onDelete?: (rowId: string) => void;
   /** Opt-in row reordering for read-mode rows. Caller owns persisting the returned order. */
   onReorder?: (reorder: InlineTableReorder<TDraft>) => void;
+  /**
+   * Opt-in scoped reordering for tree rows. Rows only drag over rows with the
+   * same scope; return null to suppress a row's handle.
+   */
+  getReorderScope?: (context: InlineTableReorderContext<TDraft>) => string | null | undefined;
+  /** Optional per-row lock for reorder-only affordances. Handles stay visible, but rows stop dragging. */
+  isReorderDisabled?: (context: InlineTableReorderContext<TDraft>) => boolean;
   /** Keeps the leading reorder affordance visible while a caller temporarily disables onReorder. */
   showReorderHandles?: boolean;
   /** Defaults to icons for dense sheets; use text when a page needs extra action clarity. */
@@ -296,6 +309,8 @@ export function InlineTableForm<TDraft>({
   onEdit,
   onDelete,
   onReorder,
+  getReorderScope,
+  isReorderDisabled,
   showReorderHandles = false,
   actionDisplay = "icons",
   activationMode = "singleClick",
@@ -348,7 +363,8 @@ export function InlineTableForm<TDraft>({
   const activeTrailingCreateRow = trailingCreateRow ?? factoryCreateRow ?? undefined;
   const renderedRows = activeTrailingCreateRow ? [...rows, activeTrailingCreateRow] : rows;
   const hasTreeRows = renderedRows.some((row) => Boolean(row.tree));
-  const hasReorderColumn = (Boolean(onReorder) || showReorderHandles) && !hasTreeRows;
+  const supportsTreeReorder = Boolean(getReorderScope);
+  const hasReorderColumn = (Boolean(onReorder) || showReorderHandles) && (!hasTreeRows || supportsTreeReorder);
   const templateColumns = [
     ...(hasReorderColumn ? ["42px"] : []),
     ...columns.map((column) => columnTemplate(column.width)),
@@ -364,19 +380,28 @@ export function InlineTableForm<TDraft>({
   const batchActions = saveMode === "batch" && renderBatchActions
     ? renderBatchActions(makeBatchContext(rows, onBatchCancel))
     : null;
-  const reorderableRows = onReorder && !hasTreeRows
-    ? rows.filter((row) => !row.tree && !isRowEditing(row) && !isRowDisabled(row))
+  const reorderableRows = onReorder && hasReorderColumn
+    ? rows.filter((row, index) => (
+        canShowRowReorderHandle(row, index)
+        && !isRowEditing(row)
+        && !isRowDisabled(row)
+        && !reorderDisabled(row, index)
+      ))
     : [];
 
   const reorderRow = (rowId: string, toMovableIndex: number) => {
     if (!onReorder) return;
     const movingRow = rows.find((row) => row.id === rowId);
-    if (!movingRow || isRowEditing(movingRow) || isRowDisabled(movingRow)) return;
-    const fromIndex = rows.findIndex((row) => row.id === rowId);
+    const fromRowIndex = rows.findIndex((row) => row.id === rowId);
+    if (!movingRow || fromRowIndex < 0 || isRowEditing(movingRow) || isRowDisabled(movingRow)) return;
     const targetRow = reorderableRows[toMovableIndex];
-    const toIndex = targetRow ? rows.findIndex((row) => row.id === targetRow.id) : -1;
+    if (!targetRow) return;
+    const movingScope = reorderScope(movingRow, fromRowIndex);
+    const scopedRows = rows.filter((row, index) => reorderScope(row, index) === movingScope);
+    const fromIndex = scopedRows.findIndex((row) => row.id === rowId);
+    const toIndex = scopedRows.findIndex((row) => row.id === targetRow.id);
     if (fromIndex < 0 || toIndex < 0 || fromIndex === toIndex) return;
-    const orderedRows = moveRow(rows, fromIndex, toIndex);
+    const orderedRows = moveRow(scopedRows, fromIndex, toIndex);
     clearDeleteArm();
     selectRow(rowId, true);
     onReorder({
@@ -392,6 +417,12 @@ export function InlineTableForm<TDraft>({
     items: reorderableRows,
     getId: (row) => row.id,
     onMove: reorderRow,
+    canDrop: (draggedRow, targetRow) => {
+      const draggedIndex = rows.findIndex((row) => row.id === draggedRow.id);
+      const targetIndex = rows.findIndex((row) => row.id === targetRow.id);
+      if (draggedIndex < 0 || targetIndex < 0) return false;
+      return reorderScope(draggedRow, draggedIndex) === reorderScope(targetRow, targetIndex);
+    },
     disabled: !onReorder || reorderableRows.length < 2,
   });
   const reorderListProps = reorderable.getListProps();
@@ -678,6 +709,22 @@ export function InlineTableForm<TDraft>({
     selectRow(nextRowId, true);
   };
 
+  function reorderScope(row: InlineTableRow<TDraft>, index: number): string | null {
+    if (getReorderScope) return getReorderScope({ row, index, rows }) ?? null;
+    return row.tree ? null : "";
+  }
+
+  function canShowRowReorderHandle(row: InlineTableRow<TDraft>, index: number): boolean {
+    return hasReorderColumn
+      && reorderScope(row, index) !== null
+      && !row.disabled
+      && row.id !== activeTrailingCreateRow?.id;
+  }
+
+  function reorderDisabled(row: InlineTableRow<TDraft>, index: number): boolean {
+    return Boolean(isReorderDisabled?.({ row, index, rows }));
+  }
+
   const deleteConfirmationRow = deleteConfirmationRowId
     ? renderedRows.find((row) => row.id === deleteConfirmationRowId)
     : undefined;
@@ -794,8 +841,12 @@ export function InlineTableForm<TDraft>({
             const deleteArmed = deleteArmedRowId === row.id && selected;
             const movableIndex = reorderableRows.findIndex((candidate) => candidate.id === row.id);
             const tree = normalizeTreeRow(row.tree);
-            const canShowReorderHandle = hasReorderColumn && !tree && !row.disabled && !isTrailingCreate;
-            const canReorderRow = canShowReorderHandle && !editing && !row.saving && movableIndex >= 0;
+            const canShowReorderHandle = canShowRowReorderHandle(row, index);
+            const canReorderRow = canShowReorderHandle
+              && !editing
+              && !row.saving
+              && !reorderDisabled(row, index)
+              && movableIndex >= 0;
             const reorderItemProps = canReorderRow ? reorderable.getItemProps(movableIndex) : null;
             const dropPosition = reorderable.dropTarget?.id === row.id
               ? reorderable.dropTarget.position
