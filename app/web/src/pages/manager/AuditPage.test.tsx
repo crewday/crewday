@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { MemoryRouter, useNavigate } from "react-router-dom";
 import { WorkspaceProvider } from "@/context/WorkspaceContext";
@@ -167,12 +167,39 @@ describe("<AuditPage>", () => {
       render(<Harness initial="/audit?actor=usr_1&action=asset.updated&entity=asset%3Aasset_1" />);
 
       expect(await screen.findByText("asset.updated")).toBeInTheDocument();
-      expect(screen.getByText("asset:asset_1")).toBeInTheDocument();
+      expect(screen.getByLabelText("asset:asset_1")).toBeInTheDocument();
       const auditCall = fake.calls.find((call) => call.startsWith("/w/acme/api/v1/audit?"));
       expect(auditCall).toContain("actor=usr_1");
       expect(auditCall).toContain("action=asset.updated");
       expect(auditCall).toContain("entity=asset%3Aasset_1");
       expect(auditCall).toContain("limit=50");
+    } finally {
+      fake.restore();
+    }
+  });
+
+  it("renders labelled filters and mobile-readable audit row cells", async () => {
+    const fake = installFetch();
+    try {
+      const { container } = render(<Harness initial="/audit?actor=usr_1" />);
+
+      expect(await screen.findByText("asset.updated")).toBeInTheDocument();
+
+      const filterForm = screen.getByRole("search");
+      expect(filterForm).toHaveClass("audit-filters");
+      for (const label of ["Actor", "Action", "Entity", "Since", "Until"]) {
+        expect(within(filterForm).getByLabelText(label)).toBeInTheDocument();
+      }
+
+      const table = container.querySelector("table.admin-audit-table");
+      expect(table).not.toBeNull();
+      const labels = Array.from(
+        table?.querySelectorAll("tbody td[data-label]") ?? [],
+        (cell) => cell.getAttribute("data-label"),
+      );
+      expect(labels).toEqual(["When", "Actor", "Action", "Target", "Via", "Reason"]);
+      expect(screen.getByLabelText("asset:asset_1")).toBeInTheDocument();
+      expect(screen.getByText("because")).toBeInTheDocument();
     } finally {
       fake.restore();
     }

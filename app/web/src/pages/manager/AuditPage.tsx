@@ -4,9 +4,8 @@ import { useSearchParams } from "react-router-dom";
 import { fetchJson, openApiDownload } from "@/lib/api";
 import { qk } from "@/lib/queryKeys";
 import DeskPage from "@/components/DeskPage";
-import DateTime from "@/components/DateTime";
-import { Chip, Loading } from "@/components/common";
-import { ACTOR_KIND_TONE, GRANT_ROLE_TONE } from "@/lib/tones";
+import { Loading } from "@/components/common";
+import { AdminAuditRow } from "@/pages/admin/AdminAuditRow";
 import type { AuditEntry, AuditListResponse } from "@/types/api";
 
 const FILTER_KEYS = ["actor", "action", "entity", "since", "until"] as const;
@@ -72,6 +71,7 @@ export default function AuditPage() {
   const countByGrant = (role: NonNullable<AuditEntry["actor_grant_role"]>): number =>
     entries.filter((e) => e.actor_grant_role === role).length;
   const governanceCount = entries.filter((e) => e.actor_was_owner_member).length;
+  const filtersActive = FILTER_KEYS.some((key) => filters[key]);
 
   function applyFilters(event: FormEvent<HTMLFormElement>): void {
     event.preventDefault();
@@ -87,13 +87,62 @@ export default function AuditPage() {
   return (
     <DeskPage title="Audit log" sub={sub} overflow={overflow}>
       <section className="panel">
-        <form key={filterSig} className="desk-filters" role="search" onSubmit={applyFilters}>
-          <input name="actor" aria-label="Actor" placeholder="Actor" defaultValue={filters.actor} />
-          <input name="action" aria-label="Action" placeholder="Action" defaultValue={filters.action} />
-          <input name="entity" aria-label="Entity" placeholder="Entity" defaultValue={filters.entity} />
-          <input name="since" aria-label="Since" placeholder="Since" defaultValue={filters.since} />
-          <input name="until" aria-label="Until" placeholder="Until" defaultValue={filters.until} />
+        <form key={filterSig} className="audit-filters" role="search" onSubmit={applyFilters}>
+          <label className="field">
+            <span>Actor</span>
+            <input
+              name="actor"
+              aria-label="Actor"
+              placeholder="usr_1"
+              defaultValue={filters.actor}
+            />
+          </label>
+          <label className="field field--grow">
+            <span>Action</span>
+            <input
+              name="action"
+              aria-label="Action"
+              placeholder="asset.updated"
+              defaultValue={filters.action}
+            />
+          </label>
+          <label className="field field--grow">
+            <span>Entity</span>
+            <input
+              name="entity"
+              aria-label="Entity"
+              placeholder="asset:asset_1"
+              defaultValue={filters.entity}
+            />
+          </label>
+          <label className="field">
+            <span>Since</span>
+            <input
+              name="since"
+              aria-label="Since"
+              placeholder="2026-04-01T00:00:00Z"
+              defaultValue={filters.since}
+            />
+          </label>
+          <label className="field">
+            <span>Until</span>
+            <input
+              name="until"
+              aria-label="Until"
+              placeholder="2026-04-30T23:59:59Z"
+              defaultValue={filters.until}
+            />
+          </label>
           <button className="btn btn--ghost" type="submit">Filter</button>
+          {filtersActive ? (
+            <button
+              type="button"
+              className="link audit-filters__clear"
+              onClick={() => setSearchParams(new URLSearchParams())}
+            >
+              Clear filters
+            </button>
+          ) : null}
         </form>
         <div className="desk-filters">
           <span className="chip chip--ghost chip--sm chip--active">All</span>
@@ -105,7 +154,7 @@ export default function AuditPage() {
           <span className="chip chip--ghost chip--sm">Client · {countByGrant("client")}</span>
           <span className="chip chip--ghost chip--sm">Governance · {governanceCount}</span>
         </div>
-        <table className="table">
+        <table className="table table--roomy admin-audit-table">
           <thead>
             <tr>
               <th>When</th><th>Actor</th><th>Action</th><th>Target</th><th>Via</th><th>Reason</th>
@@ -113,27 +162,11 @@ export default function AuditPage() {
           </thead>
           <tbody>
             {entries.map((e, idx) => (
-              <tr key={e.correlation_id ? `${e.correlation_id}:${idx}` : idx}>
-                <td><DateTime value={e.at} showTime className="mono" /></td>
-                <td>
-                  <Chip tone={ACTOR_KIND_TONE[e.actor_kind]} size="sm">{e.actor_kind}</Chip>{" "}
-                  {e.actor_grant_role ? (
-                    <>
-                      <Chip tone={GRANT_ROLE_TONE[e.actor_grant_role]} size="sm">{e.actor_grant_role}</Chip>{" "}
-                    </>
-                  ) : null}
-                  {e.actor_was_owner_member ? (
-                    <>
-                      <Chip tone="moss" size="sm">owners</Chip>{" "}
-                    </>
-                  ) : null}
-                  {e.actor}
-                </td>
-                <td className="mono">{e.action}</td>
-                <td className="mono muted">{e.target}</td>
-                <td><Chip tone="ghost" size="sm">{e.via}</Chip></td>
-                <td className="table__sub">{e.reason ?? ""}</td>
-              </tr>
+              <AdminAuditRow
+                key={e.correlation_id ? `${e.correlation_id}:${idx}` : idx}
+                row={e}
+                showVia
+              />
             ))}
           </tbody>
         </table>

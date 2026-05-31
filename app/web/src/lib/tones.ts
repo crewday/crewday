@@ -7,7 +7,6 @@ import type {
   ApprovalRequest,
   AssetCondition,
   AssetStatus,
-  AuditEntry,
   ExpenseStatus,
   Instruction,
   Issue,
@@ -73,20 +72,6 @@ export const ISSUE_STATUS_TONE: Record<Issue["status"], "sand" | "sky" | "moss" 
   in_progress: "sky",
   resolved: "moss",
   wont_fix: "ghost",
-};
-
-export const ACTOR_KIND_TONE: Record<AuditEntry["actor_kind"], "moss" | "sky" | "ghost"> = {
-  user: "moss",
-  agent: "sky",
-  system: "ghost",
-};
-
-export const GRANT_ROLE_TONE: Record<NonNullable<AuditEntry["actor_grant_role"]>, "moss" | "sand" | "sky" | "ghost" | "rust"> = {
-  manager: "moss",
-  worker: "sand",
-  client: "sky",
-  guest: "ghost",
-  admin: "rust",
 };
 
 export const INSTRUCTION_SCOPE_TONE: Record<Instruction["scope"], "sky" | "moss" | "sand"> = {

@@ -49,6 +49,7 @@ function readableRole(role: AuditEntry["actor_grant_role"]): string | null {
 
 function AdminAuditActorCell({ row }: { row: AuditEntry }) {
   const role = readableRole(row.actor_grant_role);
+  const actorId = row.actor_id ?? row.actor;
   return (
     <div className="admin-audit-cell admin-audit-actor">
       <div className="admin-audit-cell__primary">
@@ -60,9 +61,9 @@ function AdminAuditActorCell({ row }: { row: AuditEntry }) {
           <Chip tone="sand" size="sm">Owner</Chip>
         ) : null}
       </div>
-      {row.actor_id ? (
+      {actorId ? (
         <div className="admin-audit-cell__secondary admin-audit-cell__secondary--mono">
-          {row.actor_id}
+          {actorId}
         </div>
       ) : null}
     </div>
@@ -83,10 +84,15 @@ function AdminAuditActionCell({ row }: { row: AuditEntry }) {
 function AdminAuditTargetCell({ row }: { row: AuditEntry }) {
   const kind = row.entity_kind ?? "";
   const id = row.entity_id ?? row.target;
+  const target = row.target || id;
   return (
     <div className="admin-audit-cell admin-audit-target">
       <div className="admin-audit-cell__primary">{readableEntityKind(kind)}</div>
-      <div className="admin-audit-cell__secondary admin-audit-cell__secondary--mono">
+      <div
+        className="admin-audit-cell__secondary admin-audit-cell__secondary--mono"
+        title={target}
+        aria-label={target}
+      >
         {id}
       </div>
     </div>
@@ -107,7 +113,7 @@ export function AdminAuditRow({
       <td data-label="Action"><AdminAuditActionCell row={row} /></td>
       <td data-label="Target"><AdminAuditTargetCell row={row} /></td>
       {showVia ? <td data-label="Via" className="muted admin-audit-via">{row.via}</td> : null}
-      <td data-label="Reason" className="muted admin-audit-reason">{row.reason ?? ","}</td>
+      <td data-label="Reason" className="muted admin-audit-reason">{row.reason ?? ""}</td>
     </tr>
   );
 }
