@@ -199,6 +199,8 @@ describe("<AreasPanel>", () => {
     const poolRow = screen.getByLabelText("Pool");
     expect(poolRow).toHaveAttribute("draggable", "true");
     expect(screen.getByLabelText("Drag Pool to reorder")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /move .* up/i })).toBeNull();
+    expect(screen.queryByRole("button", { name: /move .* down/i })).toBeNull();
 
     const createRow = screen.getByLabelText("New area");
     fireEvent.change(within(createRow).getByLabelText("Name"), {

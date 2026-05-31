@@ -389,38 +389,18 @@ describe("<TemplatesPage> checklist reorder", () => {
     }
   });
 
-  it("supports keyboard reorder via the move-up/down buttons", async () => {
+  it("renders checklist reorder controls as drag-only handles", async () => {
     const harness = installFetch();
     const client = makeClient();
     try {
       render(<Harness client={client} />);
       await screen.findByText("First step");
 
-      const moveDown = screen.getByRole("button", {
-        name: "Move First step down",
-      });
-      fireEvent.click(moveDown);
-
-      expect(
-        client
-          .getQueryData<{ data: TaskTemplate[] }>(qk.taskTemplates())
-          ?.data[0]?.checklist_template_json.map((c) => c.key),
-      ).toEqual(["second", "first", "third"]);
-
-      await act(async () => {
-        await vi.advanceTimersByTimeAsync(500);
-      });
-      await waitFor(() => {
-        expect(patchCalls(harness.calls)).toHaveLength(1);
-      });
-      expect(patchedChecklistKeys(patchCalls(harness.calls)[0]!)).toEqual([
-        "second",
-        "first",
-        "third",
-      ]);
-      expect(screen.getByRole("status")).toHaveTextContent(
-        'Moved "First step" to position 2 of 3.',
-      );
+      const first = checklistRow("First step");
+      expect(first).toHaveAttribute("draggable", "true");
+      expect(within(first).getByLabelText("Drag First step to reorder")).toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: /move .* up/i })).toBeNull();
+      expect(screen.queryByRole("button", { name: /move .* down/i })).toBeNull();
     } finally {
       harness.restore();
     }

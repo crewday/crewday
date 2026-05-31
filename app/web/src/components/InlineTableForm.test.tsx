@@ -1123,8 +1123,8 @@ describe("InlineTableForm", () => {
     expect(first).toHaveAttribute("draggable", "true");
     expect(dragCell).toHaveClass("inline-table-form__td--reorder");
     expect(within(dragCell).getByLabelText("Drag First to reorder")).toBeInTheDocument();
-    expect(screen.getAllByRole("button", { name: /move .* up/i })).toHaveLength(3);
-    expect(screen.getAllByRole("button", { name: /move .* down/i })).toHaveLength(3);
+    expect(screen.queryByRole("button", { name: /move .* up/i })).toBeNull();
+    expect(screen.queryByRole("button", { name: /move .* down/i })).toBeNull();
     fireEvent.dragStart(first, { dataTransfer });
     fireEvent.dragOver(third, { dataTransfer, clientY: 20 });
     fireEvent.drop(third, { dataTransfer, clientY: 20 });
@@ -2939,6 +2939,7 @@ describe("InlineTableForm", () => {
   });
 
   it("moves selected rows with ArrowUp and ArrowDown, skipping disabled and editing rows", () => {
+    const onReorder = vi.fn();
     const rows: InlineTableRow<Draft>[] = [
       { ...editableRow(), id: "r-1", editing: false, dirty: false },
       { ...editableRow(), id: "r-2", editing: false, dirty: false },
@@ -2956,6 +2957,7 @@ describe("InlineTableForm", () => {
         onDraftChange={vi.fn()}
         onSave={vi.fn()}
         onCancel={vi.fn()}
+        onReorder={onReorder}
         activationMode="doubleClick"
         getRowLabel={(_, index) => `Row ${index + 1}`}
       />,
@@ -2979,6 +2981,7 @@ describe("InlineTableForm", () => {
     fireEvent.keyDown(fifthRow, { key: "ArrowUp" });
     expect(secondRow).toHaveClass("is-selected");
     expect(secondRow).toHaveFocus();
+    expect(onReorder).not.toHaveBeenCalled();
   });
 
   it("clears the delete warning when the dd shortcut window expires", () => {
