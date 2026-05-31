@@ -47,12 +47,28 @@ const MONTHLY_ORDINAL_OPTIONS: readonly { value: RecurrenceMonthlyOrdinal; label
   { value: -1, label: "Last" },
 ];
 
+const MONTH_OPTIONS: readonly { value: number; label: string }[] = [
+  { value: 1, label: "January" },
+  { value: 2, label: "February" },
+  { value: 3, label: "March" },
+  { value: 4, label: "April" },
+  { value: 5, label: "May" },
+  { value: 6, label: "June" },
+  { value: 7, label: "July" },
+  { value: 8, label: "August" },
+  { value: 9, label: "September" },
+  { value: 10, label: "October" },
+  { value: 11, label: "November" },
+  { value: 12, label: "December" },
+];
+
 type RecurrenceEditorState = {
   panel: RecurrencePickerPanel;
   mode: FriendlyMode;
   weekdays: RecurrenceWeekday[];
   interval: number;
   monthlyPattern: MonthlyPattern;
+  annualMonth: number;
   monthDay: number;
   monthlyOrdinal: RecurrenceMonthlyOrdinal;
   monthlyWeekday: RecurrenceWeekday;
@@ -68,6 +84,7 @@ function recurrenceEditorState(value: string | null): RecurrenceEditorState {
     weekdays: parsed.parts?.byday.length ? parsed.parts.byday : ["MO"],
     interval: parsed.parts?.interval ?? 1,
     monthlyPattern: parsed.parts?.monthlyOrdinalWeekday ? "ordinal" : "monthday",
+    annualMonth: parsed.parts?.bymonth ?? 1,
     monthDay: parsed.parts?.bymonthday ?? 1,
     monthlyOrdinal: parsed.parts?.monthlyOrdinalWeekday?.ordinal ?? 1,
     monthlyWeekday: parsed.parts?.monthlyOrdinalWeekday?.weekday ?? "MO",
@@ -87,7 +104,7 @@ export default function RecurrencePicker({
 }: RecurrencePickerProps) {
   const [open, setOpen] = useState(false);
   const [editor, setEditor] = useState<RecurrenceEditorState>(() => recurrenceEditorState(value));
-  const { panel, mode, weekdays, interval, monthlyPattern, monthDay, monthlyOrdinal, monthlyWeekday, advanced } = editor;
+  const { panel, mode, weekdays, interval, monthlyPattern, annualMonth, monthDay, monthlyOrdinal, monthlyWeekday, advanced } = editor;
 
   const updateEditor = (patch: Partial<RecurrenceEditorState>) => {
     setEditor((current) => ({ ...current, ...patch }));
@@ -104,12 +121,13 @@ export default function RecurrencePicker({
       frequency: mode.toUpperCase() as RecurrenceFrequency,
       interval: mode === "weekly" ? interval : 1,
       byday: mode === "weekly" ? weekdays : undefined,
-      bymonthday: mode === "monthly" && monthlyPattern === "monthday" ? monthDay : null,
-      monthlyOrdinalWeekday: mode === "monthly" && monthlyPattern === "ordinal"
+      bymonth: mode === "yearly" ? annualMonth : null,
+      bymonthday: (mode === "monthly" || mode === "yearly") && monthlyPattern === "monthday" ? monthDay : null,
+      monthlyOrdinalWeekday: (mode === "monthly" || mode === "yearly") && monthlyPattern === "ordinal"
         ? { ordinal: monthlyOrdinal, weekday: monthlyWeekday }
         : null,
     }, { includePrefix });
-  }, [includePrefix, interval, mode, monthDay, monthlyOrdinal, monthlyPattern, monthlyWeekday, weekdays]);
+  }, [annualMonth, includePrefix, interval, mode, monthDay, monthlyOrdinal, monthlyPattern, monthlyWeekday, weekdays]);
 
   const activeValue = panel === "friendly" ? friendlyValue : advanced;
   const parsedActive = parseRecurrenceRrule(activeValue);
@@ -190,6 +208,7 @@ export default function RecurrencePicker({
             weekdays={weekdays}
             interval={interval}
             monthlyPattern={monthlyPattern}
+            annualMonth={annualMonth}
             monthDay={monthDay}
             monthlyOrdinal={monthlyOrdinal}
             monthlyWeekday={monthlyWeekday}
@@ -198,6 +217,10 @@ export default function RecurrencePicker({
             onWeekdaysChange={(nextWeekdays) => updateEditor({ weekdays: nextWeekdays })}
             onIntervalChange={(nextInterval) => updateEditor({ interval: nextInterval })}
             onMonthlyPatternChange={(nextMonthlyPattern) => updateEditor({ monthlyPattern: nextMonthlyPattern })}
+            onAnnualMonthChange={(nextAnnualMonth) => updateEditor({
+              annualMonth: nextAnnualMonth,
+              monthDay: Math.min(monthDay, daysInMonth(nextAnnualMonth)),
+            })}
             onMonthDayChange={(nextMonthDay) => updateEditor({ monthDay: nextMonthDay })}
             onMonthlyOrdinalChange={(nextMonthlyOrdinal) => updateEditor({ monthlyOrdinal: nextMonthlyOrdinal })}
             onMonthlyWeekdayChange={(nextMonthlyWeekday) => updateEditor({ monthlyWeekday: nextMonthlyWeekday })}
@@ -227,6 +250,7 @@ function FriendlyRecurrenceFields({
   weekdays,
   interval,
   monthlyPattern,
+  annualMonth,
   monthDay,
   monthlyOrdinal,
   monthlyWeekday,
@@ -235,6 +259,7 @@ function FriendlyRecurrenceFields({
   onWeekdaysChange,
   onIntervalChange,
   onMonthlyPatternChange,
+  onAnnualMonthChange,
   onMonthDayChange,
   onMonthlyOrdinalChange,
   onMonthlyWeekdayChange,
@@ -244,6 +269,7 @@ function FriendlyRecurrenceFields({
   weekdays: RecurrenceWeekday[];
   interval: number;
   monthlyPattern: MonthlyPattern;
+  annualMonth: number;
   monthDay: number;
   monthlyOrdinal: RecurrenceMonthlyOrdinal;
   monthlyWeekday: RecurrenceWeekday;
@@ -252,11 +278,13 @@ function FriendlyRecurrenceFields({
   onWeekdaysChange: (value: RecurrenceWeekday[]) => void;
   onIntervalChange: (value: number) => void;
   onMonthlyPatternChange: (value: MonthlyPattern) => void;
+  onAnnualMonthChange: (value: number) => void;
   onMonthDayChange: (value: number) => void;
   onMonthlyOrdinalChange: (value: RecurrenceMonthlyOrdinal) => void;
   onMonthlyWeekdayChange: (value: RecurrenceWeekday) => void;
 }) {
   const options = allowNone ? FRIENDLY_OPTIONS : FRIENDLY_OPTIONS.filter((option) => option.value !== "none");
+  const yearlyDayMax = daysInMonth(annualMonth);
   return (
     <section className="recurrence-picker__section" aria-label="Friendly recurrence">
       <FormModalGrid>
@@ -338,6 +366,76 @@ function FriendlyRecurrenceFields({
                 value={monthDay}
                 aria-label="Day of month"
                 onChange={(event) => onMonthDayChange(clampNumber(event.currentTarget.value, 1, 31))}
+              />
+            </FormField>
+          ) : (
+            <div className="recurrence-picker__ordinal-fields">
+              <FormField label="Position" requirement="required" className="form-modal__field recurrence-picker__field">
+                <select
+                  className="input recurrence-picker__select"
+                  aria-label="Position"
+                  value={monthlyOrdinal}
+                  onChange={(event) => onMonthlyOrdinalChange(parseMonthlyOrdinal(event.currentTarget.value))}
+                >
+                  {MONTHLY_ORDINAL_OPTIONS.map((option) => (
+                    <option key={option.value} value={option.value}>{option.label}</option>
+                  ))}
+                </select>
+              </FormField>
+              <FormField label="Weekday" requirement="required" className="form-modal__field recurrence-picker__field">
+                <select
+                  className="input recurrence-picker__select"
+                  aria-label="Weekday"
+                  value={monthlyWeekday}
+                  onChange={(event) => onMonthlyWeekdayChange(event.currentTarget.value as RecurrenceWeekday)}
+                >
+                  {RECURRENCE_WEEKDAYS.map((day) => (
+                    <option key={day.value} value={day.value}>{day.label}</option>
+                  ))}
+                </select>
+              </FormField>
+            </div>
+          )}
+        </div>
+      ) : null}
+
+      {mode === "yearly" ? (
+        <div className="recurrence-picker__monthly-fields">
+          <FormField label="Yearly pattern" requirement="required" className="form-modal__field recurrence-picker__field">
+            <select
+              className="input recurrence-picker__select"
+              aria-label="Yearly pattern"
+              value={monthlyPattern}
+              onChange={(event) => onMonthlyPatternChange(event.currentTarget.value as MonthlyPattern)}
+            >
+              <option value="monthday">Month and day</option>
+              <option value="ordinal">Weekday position</option>
+            </select>
+          </FormField>
+
+          <FormField label="Month" requirement="required" className="form-modal__field recurrence-picker__field">
+            <select
+              className="input recurrence-picker__select"
+              aria-label="Month"
+              value={annualMonth}
+              onChange={(event) => onAnnualMonthChange(clampNumber(event.currentTarget.value, 1, 12))}
+            >
+              {MONTH_OPTIONS.map((option) => (
+                <option key={option.value} value={option.value}>{option.label}</option>
+              ))}
+            </select>
+          </FormField>
+
+          {monthlyPattern === "monthday" ? (
+            <FormField label="Day of month" requirement="required" className="form-modal__field recurrence-picker__field">
+              <input
+                className="input recurrence-picker__number"
+                type="number"
+                min={1}
+                max={yearlyDayMax}
+                value={monthDay}
+                aria-label="Day of month"
+                onChange={(event) => onMonthDayChange(clampNumber(event.currentTarget.value, 1, yearlyDayMax))}
               />
             </FormField>
           ) : (
@@ -461,4 +559,9 @@ function clampNumber(value: string, min: number, max: number): number {
 function parseMonthlyOrdinal(value: string): RecurrenceMonthlyOrdinal {
   const parsed = Number.parseInt(value, 10);
   return parsed === -1 || parsed >= 1 && parsed <= 4 ? parsed as RecurrenceMonthlyOrdinal : 1;
+}
+
+function daysInMonth(month: number): number {
+  const monthLengths = [31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+  return monthLengths[month - 1] ?? 31;
 }

@@ -109,8 +109,11 @@ every N weeks / monthly / …") that compiles to an RRULE, and
 preview). Monthly simple rules support both fixed day-of-month
 patterns (`BYMONTHDAY`, e.g. day 1) and ordinal weekday patterns
 for first, second, third, fourth, or last weekday of the month
-(`BYDAY`, e.g. first Monday / last Friday). Behaviour is identical;
-both write the same RRULE string.
+(`BYDAY`, e.g. first Monday / last Friday). Yearly simple rules
+support explicit annual dates (`BYMONTH` + `BYMONTHDAY`, e.g.
+January 15) and ordinal weekday-in-month annual patterns (`BYMONTH`
++ `BYDAY`, e.g. first Monday in September / last Friday in
+November). Behaviour is identical; both write the same RRULE string.
 
 ## Schedule
 
@@ -141,9 +144,11 @@ these times". Stored as RFC 5545 RRULE plus a property-local timezone.
 
 Manager UI shows two panels:
 
-- **Simple:** frequency (weekly/daily/monthly), days of week, monthly
-  fixed day-of-month or first/second/third/fourth/last weekday
-  patterns, time, duration. Generates an RRULE under the hood.
+- **Simple:** frequency (weekly/daily/monthly/yearly), days of week,
+  monthly fixed day-of-month or first/second/third/fourth/last
+  weekday patterns, yearly explicit month/day or
+  first/second/third/fourth/last weekday-in-month annual patterns,
+  time, duration. Generates an RRULE under the hood.
 - **Advanced:** raw RRULE field (with live "next 5 occurrences"
   preview) + RDATE/EXDATE editors.
 

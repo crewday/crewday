@@ -93,6 +93,113 @@ describe("<RecurrencePicker>", () => {
     expect(within(dialog).getByText("Next occurrences")).toBeInTheDocument();
   });
 
+  it("builds yearly date RRULEs from friendly mode", () => {
+    const onChange = vi.fn();
+    render(<RecurrencePicker value={null} onChange={onChange} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Recurrence" }));
+    const dialog = screen.getByRole("dialog", { name: "Recurrence" });
+    fireEvent.change(within(dialog).getByLabelText(/^Repeats\b/), {
+      target: { value: "yearly" },
+    });
+    fireEvent.change(within(dialog).getByLabelText("Month"), {
+      target: { value: "1" },
+    });
+    fireEvent.change(within(dialog).getByLabelText("Day of month"), {
+      target: { value: "15" },
+    });
+
+    expect(within(dialog).getByText("Next occurrences")).toBeInTheDocument();
+    fireEvent.click(within(dialog).getByRole("button", { name: "Apply" }));
+
+    expect(onChange).toHaveBeenCalledWith("FREQ=YEARLY;BYMONTH=1;BYMONTHDAY=15");
+  });
+
+  it("clamps yearly date choices to the selected month", () => {
+    const onChange = vi.fn();
+    render(<RecurrencePicker value={null} onChange={onChange} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Recurrence" }));
+    const dialog = screen.getByRole("dialog", { name: "Recurrence" });
+    fireEvent.change(within(dialog).getByLabelText(/^Repeats\b/), {
+      target: { value: "yearly" },
+    });
+    fireEvent.change(within(dialog).getByLabelText("Day of month"), {
+      target: { value: "31" },
+    });
+    fireEvent.change(within(dialog).getByLabelText("Month"), {
+      target: { value: "2" },
+    });
+
+    expect(within(dialog).getByLabelText("Day of month")).toHaveValue(29);
+    fireEvent.click(within(dialog).getByRole("button", { name: "Apply" }));
+
+    expect(onChange).toHaveBeenCalledWith("FREQ=YEARLY;BYMONTH=2;BYMONTHDAY=29");
+  });
+
+  it("builds yearly ordinal weekday RRULEs from friendly mode", () => {
+    const onChange = vi.fn();
+    render(<RecurrencePicker value={null} onChange={onChange} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Recurrence" }));
+    const dialog = screen.getByRole("dialog", { name: "Recurrence" });
+    fireEvent.change(within(dialog).getByLabelText(/^Repeats\b/), {
+      target: { value: "yearly" },
+    });
+    fireEvent.change(within(dialog).getByLabelText("Yearly pattern"), {
+      target: { value: "ordinal" },
+    });
+    fireEvent.change(within(dialog).getByLabelText("Month"), {
+      target: { value: "9" },
+    });
+    fireEvent.change(within(dialog).getByLabelText("Position"), {
+      target: { value: "1" },
+    });
+    fireEvent.change(within(dialog).getByLabelText("Weekday"), {
+      target: { value: "MO" },
+    });
+
+    expect(within(dialog).getByText("Next occurrences")).toBeInTheDocument();
+    fireEvent.click(within(dialog).getByRole("button", { name: "Apply" }));
+
+    expect(onChange).toHaveBeenCalledWith("FREQ=YEARLY;BYMONTH=9;BYDAY=1MO");
+  });
+
+  it("loads supported yearly RRULEs into the friendly editor", () => {
+    render(<Harness initial="FREQ=YEARLY;BYMONTH=9;BYDAY=MO;BYSETPOS=-1" />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Recurrence" }));
+    const dialog = screen.getByRole("dialog", { name: "Recurrence" });
+
+    expect(within(dialog).getByRole("button", { name: /Friendly/ })).toHaveAttribute("aria-pressed", "true");
+    expect(within(dialog).getByLabelText(/^Repeats\b/)).toHaveValue("yearly");
+    expect(within(dialog).getByLabelText("Yearly pattern")).toHaveValue("ordinal");
+    expect(within(dialog).getByLabelText("Month")).toHaveValue("9");
+    expect(within(dialog).getByLabelText("Position")).toHaveValue("-1");
+    expect(within(dialog).getByLabelText("Weekday")).toHaveValue("MO");
+    expect(within(dialog).getByText("Next occurrences")).toBeInTheDocument();
+  });
+
+  it("keeps bare yearly RRULEs in advanced mode", () => {
+    render(<Harness initial="FREQ=YEARLY" />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Recurrence" }));
+    const dialog = screen.getByRole("dialog", { name: "Recurrence" });
+
+    expect(within(dialog).getByRole("button", { name: /Advanced/ })).toHaveAttribute("aria-pressed", "true");
+    expect(within(dialog).getByLabelText("Raw RRULE")).toHaveValue("FREQ=YEARLY");
+  });
+
+  it("keeps impossible yearly month-day RRULEs in advanced mode", () => {
+    render(<Harness initial="FREQ=YEARLY;BYMONTH=2;BYMONTHDAY=31" />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Recurrence" }));
+    const dialog = screen.getByRole("dialog", { name: "Recurrence" });
+
+    expect(within(dialog).getByRole("button", { name: /Advanced/ })).toHaveAttribute("aria-pressed", "true");
+    expect(within(dialog).getByLabelText("Raw RRULE")).toHaveValue("FREQ=YEARLY;BYMONTH=2;BYMONTHDAY=31");
+  });
+
   it("keeps unsupported monthly BYDAY-only RRULEs in advanced mode", () => {
     render(<Harness initial="FREQ=MONTHLY;BYDAY=MO" />);
 
