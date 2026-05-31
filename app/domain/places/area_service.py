@@ -68,7 +68,7 @@ class AreaNotFound(LookupError):
 
 
 class AreaNestingTooDeep(ValueError):
-    """A create, update, or move would make an area tree deeper than one level."""
+    """A create, update, or move would create an invalid area parent chain."""
 
 
 class _AreaBody(BaseModel):
@@ -241,12 +241,66 @@ def _load_parent_area(
     return parent
 
 
-def _has_live_children(session: Session, *, area_id: str) -> bool:
-    stmt = select(func.count(Area.id)).where(
-        Area.parent_area_id == area_id,
-        Area.deleted_at.is_(None),
+def _load_children(
+    session: Session, *, property_id: str, area_ids: Sequence[str]
+) -> Sequence[Area]:
+    if not area_ids:
+        return []
+    stmt = (
+        select(Area)
+        .where(
+            Area.property_id == property_id,
+            Area.parent_area_id.in_(area_ids),
+        )
+        .order_by(Area.ordering.asc(), Area.id.asc())
     )
-    return int(session.scalars(stmt).one()) > 0
+    return session.scalars(stmt).all()
+
+
+def _load_live_descendants(
+    session: Session, *, property_id: str, area_id: str
+) -> Sequence[Area]:
+    descendants: list[Area] = []
+    seen = {area_id}
+    frontier = [area_id]
+    while frontier:
+        next_frontier: list[str] = []
+        for child in _load_children(
+            session, property_id=property_id, area_ids=frontier
+        ):
+            if child.id in seen:
+                continue
+            seen.add(child.id)
+            if child.deleted_at is None:
+                descendants.append(child)
+            next_frontier.append(child.id)
+        frontier = next_frontier
+    return descendants
+
+
+def _assert_parent_chain_has_no_cycle(
+    session: Session,
+    *,
+    property_id: str,
+    area_id: str,
+    parent: Area,
+) -> None:
+    seen = {parent.id}
+    parent_id = parent.parent_area_id
+    while parent_id is not None:
+        if parent_id == area_id:
+            raise AreaNestingTooDeep(
+                "moving an area under one of its descendants would create a cycle"
+            )
+        if parent_id in seen:
+            raise AreaNestingTooDeep("area parent chain already contains a cycle")
+        seen.add(parent_id)
+        row = session.scalars(
+            select(Area).where(Area.id == parent_id, Area.property_id == property_id)
+        ).one_or_none()
+        if row is None:
+            return
+        parent_id = row.parent_area_id
 
 
 def _validate_parent(
@@ -263,10 +317,13 @@ def _validate_parent(
     )
     if parent is None:
         return
-    if parent.parent_area_id is not None:
-        raise AreaNestingTooDeep("areas cannot be nested more than one level deep")
-    if area_id is not None and _has_live_children(session, area_id=area_id):
-        raise AreaNestingTooDeep("moving an area with children would exceed depth 1")
+    if area_id is not None:
+        _assert_parent_chain_has_no_cycle(
+            session,
+            property_id=property_id,
+            area_id=area_id,
+            parent=parent,
+        )
 
 
 def get_area(
@@ -398,15 +455,12 @@ def delete_area(
     row = _load_area_row(session, ctx, area_id=area_id)
     before = _row_to_view(row)
 
-    children = session.scalars(
-        select(Area).where(
-            Area.parent_area_id == row.id,
-            Area.deleted_at.is_(None),
-        )
-    ).all()
-    for child in children:
-        child.deleted_at = now
-        child.updated_at = now
+    descendants = _load_live_descendants(
+        session, property_id=row.property_id, area_id=row.id
+    )
+    for descendant in descendants:
+        descendant.deleted_at = now
+        descendant.updated_at = now
     row.deleted_at = now
     row.updated_at = now
     session.flush()
@@ -421,7 +475,7 @@ def delete_area(
         diff={
             "before": _view_to_diff_dict(before),
             "after": _view_to_diff_dict(after),
-            "deleted_child_ids": [child.id for child in children],
+            "deleted_child_ids": [descendant.id for descendant in descendants],
         },
         clock=resolved_clock,
     )

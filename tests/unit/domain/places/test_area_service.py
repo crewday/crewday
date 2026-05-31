@@ -41,6 +41,7 @@ from app.util.clock import FrozenClock
 from app.util.ulid import new_ulid
 
 _PINNED = datetime(2026, 4, 29, 12, 0, 0, tzinfo=UTC)
+_EARLIER = datetime(2026, 4, 28, 12, 0, 0, tzinfo=UTC)
 
 
 def _load_all_models() -> None:
@@ -249,7 +250,7 @@ class TestAreaCrud:
         assert row.label == "Chef Kitchen"
         assert row.name == "Chef Kitchen"
 
-    def test_delete_soft_deletes_area_and_children(
+    def test_delete_soft_deletes_area_and_descendants(
         self, session_area: Session, frozen_clock: FrozenClock
     ) -> None:
         ws = _make_workspace(session_area, slug="area-delete")
@@ -274,6 +275,15 @@ class TestAreaCrud:
             parent_area_id=parent_id,
             clock=frozen_clock,
         )
+        grandchild_id = _create_area(
+            session_area,
+            ctx,
+            property_id=prop.id,
+            name="Shower",
+            order_hint=3,
+            parent_area_id=child_id,
+            clock=frozen_clock,
+        )
 
         deleted = delete_area(session_area, ctx, area_id=parent_id, clock=frozen_clock)
 
@@ -287,9 +297,69 @@ class TestAreaCrud:
         child = session_area.get(Area, child_id)
         assert child is not None
         assert child.deleted_at == _PINNED
+        grandchild = session_area.get(Area, grandchild_id)
+        assert grandchild is not None
+        assert grandchild.deleted_at == _PINNED
         audits = _area_audits(session_area, action="delete")
         assert len(audits) == 1
-        assert audits[0].diff["deleted_child_ids"] == [child_id]
+        assert audits[0].diff["deleted_child_ids"] == [child_id, grandchild_id]
+
+    def test_delete_reaches_live_descendants_below_deleted_intermediate(
+        self, session_area: Session, frozen_clock: FrozenClock
+    ) -> None:
+        ws = _make_workspace(session_area, slug="area-delete-deleted-ancestor")
+        ctx = _ctx(workspace_id=ws, slug="area-delete-deleted-ancestor")
+        prop = _create_property(
+            session_area,
+            workspace_id=ws,
+            slug="area-delete-deleted-ancestor",
+            clock=frozen_clock,
+        )
+        parent_id = _create_area(
+            session_area,
+            ctx,
+            property_id=prop.id,
+            name="Suite",
+            order_hint=1,
+            clock=frozen_clock,
+        )
+        child_id = _create_area(
+            session_area,
+            ctx,
+            property_id=prop.id,
+            name="Bath",
+            order_hint=2,
+            parent_area_id=parent_id,
+            clock=frozen_clock,
+        )
+        grandchild_id = _create_area(
+            session_area,
+            ctx,
+            property_id=prop.id,
+            name="Shower",
+            order_hint=3,
+            parent_area_id=child_id,
+            clock=frozen_clock,
+        )
+        child = session_area.get(Area, child_id)
+        assert child is not None
+        child.deleted_at = _EARLIER
+        child.updated_at = _EARLIER
+        session_area.flush()
+
+        delete_area(session_area, ctx, area_id=parent_id, clock=frozen_clock)
+
+        deleted_child = session_area.get(Area, child_id)
+        assert deleted_child is not None
+        assert deleted_child.deleted_at == _EARLIER
+        assert deleted_child.updated_at == _EARLIER
+        grandchild = session_area.get(Area, grandchild_id)
+        assert grandchild is not None
+        assert grandchild.deleted_at == _PINNED
+        assert list_areas(session_area, ctx, property_id=prop.id) == []
+        audits = _area_audits(session_area, action="delete")
+        assert len(audits) == 1
+        assert audits[0].diff["deleted_child_ids"] == [grandchild_id]
 
     def test_reorder_is_atomic_and_writes_one_audit(
         self, session_area: Session, frozen_clock: FrozenClock
@@ -358,55 +428,157 @@ class TestAreaCrud:
         assert audits[0].diff["summary"] == "reordered 2 areas"
 
 
-class TestAreaDepthLimit:
-    def test_rejects_grandchild(
+class TestAreaHierarchy:
+    def test_allows_multi_level_parent_chains_and_rejects_cycles(
         self, session_area: Session, frozen_clock: FrozenClock
     ) -> None:
-        ws = _make_workspace(session_area, slug="area-depth")
-        ctx = _ctx(workspace_id=ws, slug="area-depth")
+        ws = _make_workspace(session_area, slug="area-hierarchy")
+        ctx = _ctx(workspace_id=ws, slug="area-hierarchy")
         prop = _create_property(
-            session_area, workspace_id=ws, slug="area-depth", clock=frozen_clock
+            session_area, workspace_id=ws, slug="area-hierarchy", clock=frozen_clock
         )
-        suite = _create_area(
+        floor = _create_area(
             session_area,
             ctx,
             property_id=prop.id,
-            name="Suite",
+            name="Floor 1",
             order_hint=1,
             clock=frozen_clock,
         )
-        bath = _create_area(
+        bedroom = _create_area(
             session_area,
             ctx,
             property_id=prop.id,
-            name="Bath",
+            name="Master Bedroom",
             order_hint=2,
-            parent_area_id=suite,
+            parent_area_id=floor,
+            clock=frozen_clock,
+        )
+        bathroom = create_area(
+            session_area,
+            ctx,
+            property_id=prop.id,
+            body=AreaCreate.model_validate(
+                {
+                    "name": "Master Bathroom",
+                    "kind": "indoor_room",
+                    "order_hint": 3,
+                    "parent_area_id": bedroom,
+                }
+            ),
             clock=frozen_clock,
         )
 
-        with pytest.raises(AreaNestingTooDeep):
-            create_area(
+        assert bathroom.parent_area_id == bedroom
+
+        closet_id = _create_area(
+            session_area,
+            ctx,
+            property_id=prop.id,
+            name="Closet",
+            order_hint=4,
+            clock=frozen_clock,
+        )
+        updated = update_area(
+            session_area,
+            ctx,
+            area_id=closet_id,
+            body=AreaUpdate.model_validate(
+                {
+                    "name": "Closet",
+                    "kind": "indoor_room",
+                    "order_hint": 4,
+                    "parent_area_id": bathroom.id,
+                }
+            ),
+            clock=frozen_clock,
+        )
+        assert updated.parent_area_id == bathroom.id
+
+        with pytest.raises(
+            AreaNestingTooDeep,
+            match="moving an area under one of its descendants would create a cycle",
+        ):
+            move_area(
                 session_area,
                 ctx,
-                property_id=prop.id,
-                body=AreaCreate.model_validate(
+                area_id=floor,
+                parent_area_id=bathroom.id,
+                clock=frozen_clock,
+            )
+
+        with pytest.raises(
+            AreaNestingTooDeep,
+            match="moving an area under one of its descendants would create a cycle",
+        ):
+            update_area(
+                session_area,
+                ctx,
+                area_id=bedroom,
+                body=AreaUpdate.model_validate(
                     {
-                        "name": "Shower",
+                        "name": "Master Bedroom",
                         "kind": "indoor_room",
-                        "order_hint": 3,
-                        "parent_area_id": bath,
+                        "order_hint": 2,
+                        "parent_area_id": closet_id,
                     }
                 ),
                 clock=frozen_clock,
             )
 
-        with pytest.raises(AreaNestingTooDeep):
+        with pytest.raises(
+            AreaNestingTooDeep, match="an area cannot be its own parent"
+        ):
             move_area(
                 session_area,
                 ctx,
-                area_id=suite,
-                parent_area_id=bath,
+                area_id=bedroom,
+                parent_area_id=bedroom,
+                clock=frozen_clock,
+            )
+
+    def test_rejects_parent_from_another_property(
+        self, session_area: Session, frozen_clock: FrozenClock
+    ) -> None:
+        ws = _make_workspace(session_area, slug="area-cross-property")
+        ctx = _ctx(workspace_id=ws, slug="area-cross-property")
+        prop_a = _create_property(
+            session_area,
+            workspace_id=ws,
+            slug="area-cross-property",
+            name="Villa A",
+            clock=frozen_clock,
+        )
+        prop_b = _create_property(
+            session_area,
+            workspace_id=ws,
+            slug="area-cross-property",
+            name="Villa B",
+            clock=frozen_clock,
+        )
+        area_a = _create_area(
+            session_area,
+            ctx,
+            property_id=prop_a.id,
+            name="Kitchen",
+            order_hint=1,
+            clock=frozen_clock,
+        )
+        area_b = _create_area(
+            session_area,
+            ctx,
+            property_id=prop_b.id,
+            name="Pool",
+            order_hint=1,
+            clock=frozen_clock,
+        )
+
+        with pytest.raises(AreaNotFound):
+            move_area(
+                session_area,
+                ctx,
+                area_id=area_a,
+                parent_area_id=area_b,
                 clock=frozen_clock,
             )
 

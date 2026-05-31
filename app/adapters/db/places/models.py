@@ -437,8 +437,8 @@ class Area(Base):
     * ``kind`` — ``indoor_room | outdoor | service``.
     * ``ordering`` — existing integer walk-order column, surfaced by
       the domain service as ``order_hint``.
-    * ``parent_area_id`` — optional self-FK. The service enforces the
-      one-level nesting invariant.
+    * ``parent_area_id`` — optional self-FK. The service enforces
+      same-property, no-self-parent, and no-cycle invariants.
     * ``notes_md`` / ``updated_at`` / ``deleted_at`` — internal notes
       and mutation/soft-delete timestamps.
     """

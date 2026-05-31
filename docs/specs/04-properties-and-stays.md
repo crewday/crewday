@@ -225,11 +225,13 @@ inventory can be scoped tightly.
 | name         | text      |                                    |
 | kind         | enum      | `indoor_room | outdoor | service | ` ... |
 | order_hint   | int       | for ordered UIs (walk order)       |
-| parent_area  | ULID FK?  | optional sub-area (e.g. "Master suite" → "Master bath") |
+| parent_area  | ULID FK?  | optional parent area (e.g. "Floor 1" → "Master suite" → "Master bath") |
 | notes_md     | text      |                                    |
 
-Areas nest **one level deep**; two levels are enough for every house
-tested and deeper trees hurt the UI. Move operations enforce this.
+Areas may form multi-level parent chains within one property. Write paths
+enforce that a parent area belongs to the same property, an area cannot be
+its own parent, and moves cannot create cycles. Deleting an area soft-deletes
+its live descendant areas as part of the same cascade.
 
 ### Auto-seeded areas
 
