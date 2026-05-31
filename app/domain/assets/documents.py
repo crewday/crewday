@@ -341,7 +341,6 @@ def _load_property(
             session,
             ctx,
             property_id=property_id,
-            require_active_workspace=True,
         )
     except PropertyNotFound as exc:
         raise AssetDocumentNotFound(property_id) from exc

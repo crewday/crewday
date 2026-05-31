@@ -26,6 +26,7 @@ from app.api.deps import (
 from app.api.errors import CONTENT_TYPE_PROBLEM_JSON, add_exception_handlers
 from app.api.v1.assets import documents_router
 from app.api.v1.assets import router as assets_router
+from app.api.v1.places import build_properties_router
 from app.domain.assets.assets import create_asset
 from app.domain.assets.documents import AssetDocumentValidationError, attach_document
 from app.tenancy.context import ActorGrantRole, WorkspaceContext
@@ -99,6 +100,33 @@ def _client(
     return TestClient(app)
 
 
+def _scoped_client(
+    session: Session,
+    ctx: WorkspaceContext,
+    *,
+    storage: InMemoryStorage,
+) -> TestClient:
+    app = FastAPI()
+    prefix = "/w/{slug}/api/v1"
+    app.include_router(build_properties_router(), prefix=prefix)
+    app.include_router(documents_router, prefix=prefix)
+    add_exception_handlers(app)
+
+    def override_ctx() -> WorkspaceContext:
+        return ctx
+
+    def override_db() -> Iterator[Session]:
+        yield session
+
+    app.dependency_overrides[current_workspace_context] = override_ctx
+    app.dependency_overrides[db_session] = override_db
+    app.dependency_overrides[get_storage] = lambda: storage
+    app.dependency_overrides[get_mime_sniffer] = lambda: _StaticMimeSniffer(
+        "application/pdf"
+    )
+    return TestClient(app, raise_server_exceptions=False)
+
+
 def _seed_workspace(
     session: Session,
 ) -> tuple[WorkspaceContext, str, str, str]:
@@ -149,6 +177,29 @@ def _seed_workspace(
         owner.id,
         workspace.slug,
     )
+
+
+def test_property_documents_mount_at_bare_scoped_api_path_for_visible_property(
+    db_session: Session,
+) -> None:
+    ctx, property_id, _, slug = _seed_workspace(db_session)
+    property_workspace = db_session.get(
+        PropertyWorkspace,
+        (property_id, ctx.workspace_id),
+    )
+    assert property_workspace is not None
+    property_workspace.status = "invited"
+    db_session.flush()
+
+    client = _scoped_client(db_session, ctx, storage=InMemoryStorage())
+
+    property_response = client.get(f"/w/{slug}/api/v1/properties/{property_id}")
+    assert property_response.status_code == 200, property_response.text
+
+    documents = client.get(f"/w/{slug}/api/v1/properties/{property_id}/documents")
+
+    assert documents.status_code == 200, documents.text
+    assert documents.json() == {"data": []}
 
 
 def test_document_upload_stores_sniffed_blob_and_lists_document(
@@ -522,7 +573,7 @@ def test_property_document_routes_are_workspace_scoped(
     assert not storage.exists(hashlib.sha256(denied_payload).hexdigest())
 
 
-def test_property_document_routes_require_active_property_membership(
+def test_property_document_routes_accept_visible_property_membership(
     db_session: Session,
 ) -> None:
     ctx, property_id, _owner_id, _slug = _seed_workspace(db_session)
@@ -535,18 +586,19 @@ def test_property_document_routes_require_active_property_membership(
     db_session.flush()
     storage = InMemoryStorage()
     client = _client(db_session, ctx, storage=storage, sniffed_type="application/pdf")
-    denied_payload = b"%PDF inactive membership"
+    payload = b"%PDF visible membership"
 
     listed = client.get(f"/properties/{property_id}/documents")
     uploaded = client.post(
         f"/properties/{property_id}/documents",
         data={"category": "permit", "title": "Inactive permit"},
-        files={"file": ("inactive.pdf", denied_payload, "application/pdf")},
+        files={"file": ("inactive.pdf", payload, "application/pdf")},
     )
 
-    assert listed.status_code == 404
-    assert uploaded.status_code == 404
-    assert not storage.exists(hashlib.sha256(denied_payload).hexdigest())
+    assert listed.status_code == 200
+    assert listed.json() == {"data": []}
+    assert uploaded.status_code == 201
+    assert storage.exists(hashlib.sha256(payload).hexdigest())
 
 
 def test_extraction_retry_happy_path_resets_failed_row(
