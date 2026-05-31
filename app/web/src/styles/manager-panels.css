@@ -1028,6 +1028,98 @@
 .asset-name-link { display: inline-flex; align-items: center; gap: 6px; }
 .asset-type-line { display: inline-flex; align-items: center; gap: 6px; }
 
+.asset-default-actions {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+
+.asset-default-actions__empty {
+  margin: 0;
+}
+
+.asset-default-actions__row {
+  display: grid;
+  grid-template-columns: minmax(88px, 0.8fr) minmax(150px, 1.4fr) minmax(76px, 0.7fr) minmax(76px, 0.7fr) 32px;
+  align-items: end;
+  gap: 6px;
+  min-width: 0;
+}
+
+.asset-default-actions__field {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+  color: var(--ink-3);
+  font-size: 12px;
+}
+
+.asset-default-actions__field input,
+.asset-default-actions__field select {
+  width: 100%;
+  min-width: 0;
+  height: 34px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--paper);
+  color: var(--ink);
+  font: inherit;
+  font-size: 14px;
+}
+
+.asset-default-actions__field input {
+  padding: 0 9px;
+}
+
+.asset-default-actions__field select {
+  padding: 0 26px 0 9px;
+}
+
+.asset-default-actions__remove,
+.asset-default-actions__add {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--paper);
+  color: var(--ink-2);
+}
+
+.asset-default-actions__remove {
+  width: 32px;
+  height: 34px;
+}
+
+.asset-default-actions__add {
+  justify-self: start;
+  gap: 6px;
+  min-height: 34px;
+  padding: 0 10px;
+}
+
+.asset-default-actions__remove:hover:not(:disabled),
+.asset-default-actions__add:hover:not(:disabled) {
+  border-color: var(--moss);
+  color: var(--ink);
+}
+
+.asset-default-actions__remove:disabled,
+.asset-default-actions__add:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+@media (max-width: 860px) {
+  .asset-default-actions__row {
+    grid-template-columns: minmax(100px, 1fr) minmax(150px, 1.4fr) 32px;
+  }
+
+  .asset-default-actions__field--label {
+    grid-column: span 2;
+  }
+}
+
 .action-row {
   display: grid; grid-template-columns: 1fr auto auto auto;
   gap: 12px; align-items: center;

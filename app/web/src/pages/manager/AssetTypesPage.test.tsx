@@ -229,6 +229,7 @@ describe("<AssetTypesPage>", () => {
     const systemRow = within(catalog).getByLabelText("Fire extinguisher");
     expect(within(systemRow).getByRole("button", { name: "Edit" })).toBeDisabled();
     expect(within(systemRow).getByRole("button", { name: "Archive" })).toBeDisabled();
+    expect(within(systemRow).queryByRole("button", { name: "Add action" })).not.toBeInTheDocument();
     expect(within(systemRow).getByLabelText("Locked")).toBeInTheDocument();
     const consoleText = consoleError.mock.calls.flat().join("\n");
     expect(consoleText).not.toContain('Each child in a list should have a unique "key" prop');
@@ -239,9 +240,11 @@ describe("<AssetTypesPage>", () => {
 
     const catalog = await findCatalog();
     expect(within(catalog).getByText("Smart lock")).toBeInTheDocument();
+    expect(within(catalog).getAllByText("Battery check")).toHaveLength(2);
     expect(within(catalog).queryByLabelText("New asset type")).not.toBeInTheDocument();
     expect(within(catalog).queryByRole("button", { name: "Edit" })).not.toBeInTheDocument();
     expect(within(catalog).queryByRole("button", { name: "Archive" })).not.toBeInTheDocument();
+    expect(within(catalog).queryByRole("button", { name: "Add action" })).not.toBeInTheDocument();
     expect(within(catalog).getByText(/do not have permission to manage asset types/i)).toBeInTheDocument();
   });
 
@@ -298,7 +301,7 @@ describe("<AssetTypesPage>", () => {
     expect(qc.getQueryState(qk.assets())?.isInvalidated).toBe(true);
   });
 
-  it("edits supported fields on a workspace-custom row without dropping default actions", async () => {
+  it("edits supported fields on a workspace-custom row while preserving default actions", async () => {
     const { requests, types } = renderAssetTypes([
       {
         path: "/w/acme/api/v1/asset_types/type_lock",
@@ -329,8 +332,133 @@ describe("<AssetTypesPage>", () => {
       description_md: "Updated locks.",
       default_lifespan_years: 6,
     });
-    expect(JSON.stringify(patchRequest?.body)).not.toContain("default_actions");
+    expect(patchRequest?.body).not.toHaveProperty("default_actions");
     expect(screen.getAllByText("Battery check")).toHaveLength(2);
+  });
+
+  it("adds edits and removes default action templates inline for workspace-custom rows", async () => {
+    const { requests, types } = renderAssetTypes([
+      {
+        path: "/w/acme/api/v1/asset_types/type_lock",
+        method: "PATCH",
+        respond: ({ body }) => {
+          types[1] = { ...types[1]!, ...(body as Partial<AssetType>) };
+          return { body: types[1] };
+        },
+      },
+    ]);
+
+    const catalog = await findCatalog();
+    const row = within(catalog).getByLabelText("Smart lock");
+    fireEvent.click(within(row).getByRole("button", { name: "Edit" }));
+    fireEvent.change(within(row).getByLabelText("Default action 1 kind"), {
+      target: { value: "service" },
+    });
+    fireEvent.change(within(row).getByLabelText("Default action 1 label"), {
+      target: { value: "Replace batteries" },
+    });
+    fireEvent.change(within(row).getByLabelText("Default action 1 interval days"), {
+      target: { value: "90" },
+    });
+    fireEvent.change(within(row).getByLabelText("Default action 1 warn before days"), {
+      target: { value: "14" },
+    });
+    fireEvent.click(within(row).getByRole("button", { name: "Remove default action 2" }));
+    fireEvent.click(within(row).getByRole("button", { name: "Add action" }));
+    fireEvent.change(within(row).getByLabelText("Default action 2 kind"), {
+      target: { value: "replace" },
+    });
+    fireEvent.change(within(row).getByLabelText("Default action 2 label"), {
+      target: { value: "Replace keypad" },
+    });
+    fireEvent.change(within(row).getByLabelText("Default action 2 interval days"), {
+      target: { value: "365" },
+    });
+    fireEvent.change(within(row).getByLabelText("Default action 2 warn before days"), {
+      target: { value: "30" },
+    });
+    fireEvent.click(within(row).getByRole("button", { name: "Save" }));
+
+    expect(await screen.findByText("Replace batteries")).toBeInTheDocument();
+    const patchRequest = requests.find((request) => request.method === "PATCH");
+    expect(patchRequest?.body).toMatchObject({
+      key: "lock",
+      name: "Smart lock",
+      category: "security",
+      icon_name: "Lock",
+      description_md: "Connected entry locks.",
+      default_lifespan_years: 5,
+      default_actions: [
+        {
+          kind: "service",
+          label: "Replace batteries",
+          interval_days: 90,
+          warn_before_days: 14,
+        },
+        {
+          kind: "replace",
+          label: "Replace keypad",
+          interval_days: 365,
+          warn_before_days: 30,
+        },
+      ],
+    });
+    expect(screen.getByText("Replace keypad")).toBeInTheDocument();
+  });
+
+  it("keeps invalid default action drafts inline until managers fix them", async () => {
+    const { requests } = renderAssetTypes();
+
+    const catalog = await findCatalog();
+    const row = within(catalog).getByLabelText("Smart lock");
+    fireEvent.click(within(row).getByRole("button", { name: "Edit" }));
+    fireEvent.change(within(row).getByLabelText("Default action 1 label"), {
+      target: { value: "" },
+    });
+    fireEvent.click(within(row).getByRole("button", { name: "Save" }));
+
+    expect(await within(row).findByText("Default action 1: enter a label.")).toBeInTheDocument();
+    expect(within(row).getByLabelText("Default action 1 label")).toHaveValue("");
+    expect(requests.some((request) => request.method === "PATCH")).toBe(false);
+  });
+
+  it("renders backend default action validation errors without losing the edited draft", async () => {
+    renderAssetTypes([
+      {
+        path: "/w/acme/api/v1/asset_types/type_lock",
+        method: "PATCH",
+        respond: {
+          status: 422,
+          body: {
+            type: "https://crewday.dev/errors/validation",
+            title: "Validation error",
+            status: 422,
+            detail: "Invalid asset type",
+            errors: [
+              {
+                loc: ["body", "default_actions", 0, "interval_days"],
+                msg: "interval_days must be less than 3650",
+                type: "value_error",
+              },
+            ],
+          },
+        },
+      },
+    ]);
+
+    const catalog = await findCatalog();
+    const row = within(catalog).getByLabelText("Smart lock");
+    fireEvent.click(within(row).getByRole("button", { name: "Edit" }));
+    fireEvent.change(within(row).getByLabelText("Default action 1 label"), {
+      target: { value: "Backend rejected action" },
+    });
+    fireEvent.click(within(row).getByRole("button", { name: "Save" }));
+
+    expect(await within(row).findByRole("alert")).toHaveTextContent(
+      "Could not save asset type. interval_days must be less than 3650",
+    );
+    expect(within(row).getByText("interval_days must be less than 3650")).toBeInTheDocument();
+    expect(within(row).getByLabelText("Default action 1 label")).toHaveValue("Backend rejected action");
   });
 
   it("confirms archive behavior before deleting a workspace-custom row", async () => {

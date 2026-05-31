@@ -509,8 +509,8 @@ interface MockViewport {
 }
 
 interface MockRects {
-  input: DOMRect;
-  table: DOMRect;
+  input: RectValues;
+  table: RectValues;
 }
 
 function mockViewport({ width, height }: MockViewport) {
@@ -519,9 +519,11 @@ function mockViewport({ width, height }: MockViewport) {
 }
 
 function mockRects({ input, table }: MockRects) {
-  vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function getBoundingClientRect() {
-    if (this.classList.contains("inline-table-form__table")) return table;
-    if (this.getAttribute("role") === "combobox") return input;
+  vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function getBoundingClientRect(
+    this: HTMLElement,
+  ) {
+    if (this.classList.contains("inline-table-form__table")) return rect(table);
+    if (this.getAttribute("role") === "combobox") return rect(input);
     return rect({ top: 0, bottom: 0, left: 0, right: 0, width: 0, height: 0 });
   });
 }
@@ -544,6 +546,6 @@ function rect(values: RectValues): DOMRect {
   } as DOMRect;
 }
 
-function mutableRect(values: RectValues): DOMRect {
-  return values as DOMRect;
+function mutableRect(values: RectValues): RectValues {
+  return values;
 }

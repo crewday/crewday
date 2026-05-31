@@ -11,7 +11,6 @@ import DocumentLibraryTable from "./documents/DocumentLibrary";
 import { fetchDocumentList } from "./documents/DocumentLibrary.lib";
 import type {
   Asset,
-  AssetDocument,
   DocumentKind,
   Property,
 } from "@/types/api";

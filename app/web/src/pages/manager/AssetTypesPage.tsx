@@ -1,5 +1,6 @@
 import { useMemo } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { Plus, Trash2 } from "lucide-react";
 import {
   InlineIconField,
   InlineNumberField,
@@ -29,14 +30,25 @@ interface AssetTypeDraft {
   icon_name: string;
   description_md: string;
   default_lifespan_years: string;
+  default_actions: DefaultAssetActionDraft[];
 }
 
 type AssetTypeField = keyof AssetTypeDraft;
 type AssetTypeFieldErrors = Partial<Record<AssetTypeField, string>>;
+type DefaultAssetActionKind = DefaultAssetAction["kind"];
+
+interface DefaultAssetActionDraft {
+  draft_id: string;
+  kind: DefaultAssetActionKind;
+  label: string;
+  interval_days: string;
+  warn_before_days: string;
+}
 
 interface AssetTypeMutationVariables {
   rowId: string;
   draft: AssetTypeDraft;
+  includeDefaultActions: boolean;
 }
 
 interface AssetTypeWriteRequest {
@@ -72,6 +84,13 @@ const ASSET_TYPE_CATEGORIES: readonly { value: AssetCategory; label: string }[] 
   { value: "vehicle", label: "Vehicle" },
   { value: "other", label: "Other" },
 ];
+const DEFAULT_ACTION_KINDS: readonly { value: DefaultAssetActionKind; label: string }[] = [
+  { value: "service", label: "Service" },
+  { value: "repair", label: "Repair" },
+  { value: "replace", label: "Replace" },
+  { value: "inspect", label: "Inspect" },
+  { value: "read", label: "Read" },
+];
 const EMPTY_ASSET_TYPE_DRAFT: AssetTypeDraft = {
   key: "",
   name: "",
@@ -79,7 +98,9 @@ const EMPTY_ASSET_TYPE_DRAFT: AssetTypeDraft = {
   icon_name: "",
   description_md: "",
   default_lifespan_years: "",
+  default_actions: [],
 };
+let defaultActionDraftCounter = 0;
 
 function unwrapList<T>(payload: T[] | ListEnvelope<T>): T[] {
   return Array.isArray(payload) ? payload : payload.data;
@@ -98,7 +119,14 @@ async function fetchManageTypesPermission(activeWsId: string): Promise<ResolvedP
   return fetchJson<ResolvedPermission>("/api/v1/permissions/resolved/self?" + params);
 }
 
-function defaultActionKeyBase(action: DefaultAssetAction): string {
+interface DefaultActionKeyInput {
+  kind: DefaultAssetActionKind;
+  label: string;
+  interval_days: string | number;
+  warn_before_days: string | number;
+}
+
+function defaultActionKeyBase(action: DefaultActionKeyInput): string {
   return [
     action.kind,
     action.label,
@@ -108,9 +136,9 @@ function defaultActionKeyBase(action: DefaultAssetAction): string {
 }
 
 function defaultActionKey(
-  action: DefaultAssetAction,
+  action: DefaultActionKeyInput,
   index: number,
-  actions: readonly DefaultAssetAction[],
+  actions: readonly DefaultActionKeyInput[],
 ): string {
   const base = defaultActionKeyBase(action);
   const firstMatchingIndex = actions.findIndex(
@@ -176,12 +204,12 @@ export default function AssetTypesPage() {
   };
 
   const saveType = useMutation({
-    mutationFn: ({ rowId, draft }: AssetTypeMutationVariables) => {
-      const payload = assetTypeWritePayload(draft);
+    mutationFn: ({ rowId, draft, includeDefaultActions }: AssetTypeMutationVariables) => {
+      const payload = assetTypeWritePayload(draft, { includeDefaultActions });
       if (rowId === CREATE_ASSET_TYPE_ROW_ID) {
         return fetchJson<AssetType>("/api/v1/asset_types", {
           method: "POST",
-          body: { ...payload, default_actions: [] },
+          body: payload,
         });
       }
       return fetchJson<AssetType>("/api/v1/asset_types/" + encodeURIComponent(rowId), {
@@ -459,12 +487,23 @@ export default function AssetTypesPage() {
       {
         key: "actions",
         header: "Default actions",
-        width: { flex: 1.2, min: 180 },
-        renderRead: ({ row }) => defaultActionsSummary(typesById.get(row.id)?.default_actions ?? []),
-        renderEdit: ({ row }) => defaultActionsSummary(typesById.get(row.id)?.default_actions ?? []),
+        width: { flex: 1.8, min: 340 },
+        renderRead: ({ row }) => defaultActionsSummary(row.draft.default_actions),
+        renderEdit: ({ row, update, disabled }) => {
+          const fieldErrors = fieldErrorsForAssetTypeRow(row.id, rowFieldErrors, createFieldErrors);
+          return (
+            <DefaultActionsEditor
+              actions={row.draft.default_actions}
+              disabled={disabled}
+              error={fieldErrors.default_actions}
+              errorId={assetTypeFieldErrorId(row.id, "default_actions")}
+              onChange={(default_actions) => update({ default_actions })}
+            />
+          );
+        },
       },
     ],
-    [createFieldErrors, rowFieldErrors, typesById],
+    [createFieldErrors, rowFieldErrors],
   );
 
   function resetCreateRow(): void {
@@ -504,7 +543,10 @@ export default function AssetTypesPage() {
         rowErrors: clearMapValue(current.rowErrors, rowId),
       }));
     }
-    saveType.mutate({ rowId, draft });
+    const includeDefaultActions = rowId === CREATE_ASSET_TYPE_ROW_ID
+      ? true
+      : defaultActionDraftsChanged(draft.default_actions, typesById.get(rowId)?.default_actions ?? []);
+    saveType.mutate({ rowId, draft, includeDefaultActions });
   }
 
   function cancelRow(rowId: string): void {
@@ -525,7 +567,7 @@ export default function AssetTypesPage() {
     const type = typesById.get(rowId);
     if (!type || isSystemAssetType(type)) return;
     setCatalogState((current) => ({
-        ...current,
+      ...current,
       editedDrafts: setMapValue(current.editedDrafts, rowId, draftFromAssetType(type)),
       rowFieldErrors: clearMapValue(current.rowFieldErrors, rowId),
       rowErrors: clearMapValue(current.rowErrors, rowId),
@@ -568,7 +610,7 @@ export default function AssetTypesPage() {
           onDraftChange={(rowId, patch) => {
             if (rowId === CREATE_ASSET_TYPE_ROW_ID) {
               setCatalogState((current) => ({
-        ...current,
+                ...current,
                 createDraft: { ...current.createDraft, ...patch },
                 createDirty: true,
                 createFieldErrors: clearPatchedAssetTypeFieldErrors(current.createFieldErrors, patch),
@@ -622,12 +664,16 @@ function draftFromAssetType(type: AssetType): AssetTypeDraft {
     icon_name: type.icon_name ?? "",
     description_md: type.description_md ?? "",
     default_lifespan_years: type.default_lifespan_years == null ? "" : String(type.default_lifespan_years),
+    default_actions: (type.default_actions ?? type.default_actions_json ?? []).map(defaultActionDraftFromAction),
   };
 }
 
-function assetTypeWritePayload(draft: AssetTypeDraft): AssetTypeWriteRequest {
+function assetTypeWritePayload(
+  draft: AssetTypeDraft,
+  { includeDefaultActions }: { includeDefaultActions: boolean },
+): AssetTypeWriteRequest {
   const lifespan = draft.default_lifespan_years.trim();
-  return {
+  const payload: AssetTypeWriteRequest = {
     key: draft.key.trim(),
     name: draft.name.trim(),
     category: draft.category,
@@ -635,6 +681,10 @@ function assetTypeWritePayload(draft: AssetTypeDraft): AssetTypeWriteRequest {
     description_md: draft.description_md.trim() || null,
     default_lifespan_years: lifespan ? Number(lifespan) : null,
   };
+  if (includeDefaultActions) {
+    payload.default_actions = draft.default_actions.map(defaultActionFromDraft);
+  }
+  return payload;
 }
 
 function validateAssetTypeDraft(draft: AssetTypeDraft): AssetTypeFieldErrors {
@@ -648,6 +698,8 @@ function validateAssetTypeDraft(draft: AssetTypeDraft): AssetTypeFieldErrors {
   if (lifespan && (!Number.isInteger(Number(lifespan)) || Number(lifespan) < 1)) {
     errors.default_lifespan_years = "Enter a whole number of years.";
   }
+  const defaultActionError = validateDefaultActionDrafts(draft.default_actions);
+  if (defaultActionError) errors.default_actions = defaultActionError;
   return errors;
 }
 
@@ -713,10 +765,12 @@ function assetTypeFieldFromLoc(loc: readonly (string | number)[] | undefined): A
     field === "category" ||
     field === "icon_name" ||
     field === "description_md" ||
-    field === "default_lifespan_years"
+    field === "default_lifespan_years" ||
+    field === "default_actions"
   ) {
     return field;
   }
+  if (loc?.includes("default_actions")) return "default_actions";
   return null;
 }
 
@@ -774,7 +828,7 @@ function categoryLabel(category: AssetCategory): string {
   return ASSET_TYPE_CATEGORIES.find((option) => option.value === category)?.label ?? category;
 }
 
-function defaultActionsSummary(actions: readonly DefaultAssetAction[]) {
+function defaultActionsSummary(actions: readonly DefaultAssetActionDraft[]) {
   if (actions.length === 0) return <span className="muted">No default actions</span>;
   return (
     <ul className="inline-table-form__list">
@@ -784,8 +838,193 @@ function defaultActionsSummary(actions: readonly DefaultAssetAction[]) {
           {action.interval_days != null ? (
             <span className="muted"> every {action.interval_days}d</span>
           ) : null}
+          {action.warn_before_days ? (
+            <span className="muted">, warn {action.warn_before_days}d ahead</span>
+          ) : null}
         </li>
       ))}
     </ul>
   );
+}
+
+function DefaultActionsEditor({
+  actions,
+  disabled,
+  error,
+  errorId,
+  onChange,
+}: {
+  actions: readonly DefaultAssetActionDraft[];
+  disabled: boolean;
+  error?: string;
+  errorId: string;
+  onChange: (actions: DefaultAssetActionDraft[]) => void;
+}) {
+  const updateAction = (index: number, patch: Partial<DefaultAssetActionDraft>) => {
+    onChange(actions.map((action, candidateIndex) => (
+      candidateIndex === index ? { ...action, ...patch } : action
+    )));
+  };
+  const removeAction = (index: number) => {
+    onChange(actions.filter((_action, candidateIndex) => candidateIndex !== index));
+  };
+  return (
+    <div className="asset-default-actions">
+      {actions.length === 0 ? (
+        <p className="asset-default-actions__empty muted">No default actions</p>
+      ) : null}
+      {actions.map((action, index) => (
+        <div className="asset-default-actions__row" key={action.draft_id}>
+          <label className="asset-default-actions__field">
+            <span>Kind</span>
+            <select
+              aria-label={`Default action ${index + 1} kind`}
+              value={action.kind}
+              disabled={disabled}
+              onChange={(event) => updateAction(index, { kind: event.target.value as DefaultAssetActionKind })}
+            >
+              {DEFAULT_ACTION_KINDS.map((option) => (
+                <option key={option.value} value={option.value}>{option.label}</option>
+              ))}
+            </select>
+          </label>
+          <label className="asset-default-actions__field asset-default-actions__field--label">
+            <span>Label</span>
+            <input
+              type="text"
+              aria-label={`Default action ${index + 1} label`}
+              value={action.label}
+              disabled={disabled}
+              aria-invalid={Boolean(error)}
+              aria-describedby={error ? errorId : undefined}
+              onChange={(event) => updateAction(index, { label: event.target.value })}
+            />
+          </label>
+          <label className="asset-default-actions__field">
+            <span>Every</span>
+            <input
+              type="number"
+              min={1}
+              step={1}
+              aria-label={`Default action ${index + 1} interval days`}
+              value={action.interval_days}
+              disabled={disabled}
+              aria-invalid={Boolean(error)}
+              aria-describedby={error ? errorId : undefined}
+              onChange={(event) => updateAction(index, { interval_days: event.target.value })}
+            />
+          </label>
+          <label className="asset-default-actions__field">
+            <span>Warn</span>
+            <input
+              type="number"
+              min={0}
+              step={1}
+              aria-label={`Default action ${index + 1} warn before days`}
+              value={action.warn_before_days}
+              disabled={disabled}
+              aria-invalid={Boolean(error)}
+              aria-describedby={error ? errorId : undefined}
+              onChange={(event) => updateAction(index, { warn_before_days: event.target.value })}
+            />
+          </label>
+          <button
+            type="button"
+            className="asset-default-actions__remove"
+            disabled={disabled}
+            aria-label={`Remove default action ${index + 1}`}
+            title="Remove default action"
+            onClick={() => removeAction(index)}
+          >
+            <Trash2 size={14} aria-hidden="true" />
+          </button>
+        </div>
+      ))}
+      <button
+        type="button"
+        className="asset-default-actions__add"
+        disabled={disabled}
+        onClick={() => onChange([...actions, emptyDefaultActionDraft()])}
+      >
+        <Plus size={14} aria-hidden="true" />
+        Add action
+      </button>
+      {error ? (
+        <span id={errorId} className="form-field-error">
+          {error}
+        </span>
+      ) : null}
+    </div>
+  );
+}
+
+function defaultActionDraftFromAction(action: DefaultAssetAction, index: number): DefaultAssetActionDraft {
+  return {
+    draft_id: `${defaultActionKeyBase(action)}:${index}`,
+    kind: action.kind,
+    label: action.label,
+    interval_days: String(action.interval_days),
+    warn_before_days: String(action.warn_before_days),
+  };
+}
+
+function emptyDefaultActionDraft(): DefaultAssetActionDraft {
+  defaultActionDraftCounter += 1;
+  return {
+    draft_id: `new-default-action-${defaultActionDraftCounter}`,
+    kind: "service",
+    label: "",
+    interval_days: "",
+    warn_before_days: "",
+  };
+}
+
+function defaultActionFromDraft(action: DefaultAssetActionDraft): DefaultAssetAction {
+  return {
+    kind: action.kind,
+    label: action.label.trim(),
+    interval_days: Number(action.interval_days),
+    warn_before_days: Number(action.warn_before_days),
+  };
+}
+
+function defaultActionDraftsChanged(
+  drafts: readonly DefaultAssetActionDraft[],
+  committed: readonly DefaultAssetAction[],
+): boolean {
+  if (drafts.length !== committed.length) return true;
+  return drafts.some((draft, index) => {
+    const action = committed[index];
+    if (!action) return true;
+    return (
+      draft.kind !== action.kind ||
+      draft.label.trim() !== action.label ||
+      Number(draft.interval_days) !== action.interval_days ||
+      Number(draft.warn_before_days) !== action.warn_before_days
+    );
+  });
+}
+
+function validateDefaultActionDrafts(actions: readonly DefaultAssetActionDraft[]): string | null {
+  for (const [index, action] of actions.entries()) {
+    const actionLabel = `Default action ${index + 1}`;
+    if (!DEFAULT_ACTION_KINDS.some((option) => option.value === action.kind)) {
+      return `${actionLabel}: choose a kind.`;
+    }
+    if (!action.label.trim()) {
+      return `${actionLabel}: enter a label.`;
+    }
+    const interval = Number(action.interval_days);
+    if (!Number.isInteger(interval) || interval < 1) {
+      return `${actionLabel}: enter a positive interval.`;
+    }
+    const warnBefore = Number(action.warn_before_days);
+    if (!Number.isInteger(warnBefore) || warnBefore < 0) {
+      return `${actionLabel}: enter a warning window of zero days or more.`;
+    }
+    if (warnBefore > interval) {
+      return `${actionLabel}: warning days cannot exceed the interval.`;
+    }
+  }
+  return null;
 }
