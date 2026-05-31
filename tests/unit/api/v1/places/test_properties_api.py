@@ -189,14 +189,17 @@ def _seed_area(
     label: str,
     ordering: int = 0,
     icon: str | None = None,
+    parent_area_id: str | None = None,
 ) -> str:
     with factory() as s:
         row = Area(
             id=new_ulid(),
             property_id=property_id,
             label=label,
+            name=label,
             icon=icon,
             ordering=ordering,
+            parent_area_id=parent_area_id,
             created_at=_PINNED,
         )
         s.add(row)
@@ -461,6 +464,49 @@ class TestAreas:
         client = _client(ctx, factory)
         row = client.get("/properties").json()[0]
         assert row["areas"] == []
+
+    def test_create_allows_grandchild_area(
+        self,
+        owner_ctx: tuple[WorkspaceContext, sessionmaker[Session], str],
+    ) -> None:
+        ctx, factory, ws_id = owner_ctx
+        prop_id = _seed_property(factory, workspace_id=ws_id, name="Villa Nested")
+        floor_id = _seed_area(
+            factory,
+            property_id=prop_id,
+            label="Floor 1",
+            ordering=1,
+        )
+        suite_id = _seed_area(
+            factory,
+            property_id=prop_id,
+            label="Suite",
+            ordering=2,
+            parent_area_id=floor_id,
+        )
+
+        client = _client(ctx, factory)
+        response = client.post(
+            f"/properties/{prop_id}/areas",
+            json={
+                "name": "Bathroom",
+                "kind": "indoor_room",
+                "order_hint": 3,
+                "parent_area_id": suite_id,
+            },
+        )
+
+        assert response.status_code == 201, response.text
+        body = response.json()
+        assert body["property_id"] == prop_id
+        assert body["parent_area_id"] == suite_id
+        assert body["name"] == "Bathroom"
+
+        listed = client.get(f"/properties/{prop_id}/areas")
+        assert listed.status_code == 200, listed.text
+        listed_rows = {row["id"]: row for row in listed.json()["data"]}
+        assert listed_rows[body["id"]]["parent_area_id"] == suite_id
+        assert listed_rows[body["id"]]["name"] == "Bathroom"
 
 
 # ---------------------------------------------------------------------------

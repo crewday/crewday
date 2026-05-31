@@ -56,6 +56,16 @@ run_curl() {
   cookie="$(cat "$cookie_file")"
   local args=(-sS -o /tmp/agent-curl-body.$$ -w '%{http_code}\t%{content_type}'
               -X "$method" -b "$cookie" "$base_url$path")
+  case "$method" in
+    GET|HEAD|OPTIONS|TRACE) ;;
+    *)
+      local csrf
+      csrf="$(od -An -N24 -tx1 /dev/urandom | tr -d ' \n')"
+      args=(-sS -o /tmp/agent-curl-body.$$ -w '%{http_code}\t%{content_type}'
+            -X "$method" -b "$cookie; crewday_csrf=$csrf" -H "X-CSRF: $csrf"
+            "$base_url$path")
+      ;;
+  esac
   if [[ -n "$body" ]]; then
     args+=(-H 'Content-Type: application/json' --data-raw "$body")
   fi
