@@ -669,6 +669,70 @@
   color: var(--ink-3);
 }
 
+.inline-table-form__td--tree {
+  --inline-table-tree-indent: 0px;
+}
+
+.inline-table-form__tree-cell {
+  display: grid;
+  grid-template-columns: calc(var(--inline-table-tree-indent) + 18px) minmax(0, 1fr);
+  align-items: center;
+  width: 100%;
+  min-width: 0;
+}
+
+.inline-table-form__tree-spacer {
+  position: relative;
+  align-self: stretch;
+  min-height: 34px;
+}
+
+.inline-table-form__tree-rail,
+.inline-table-form__tree-node {
+  position: absolute;
+  pointer-events: none;
+}
+
+.inline-table-form__tree-rail {
+  top: -9px;
+  bottom: -9px;
+  left: calc(var(--inline-table-tree-indent) + 8px);
+  width: 1px;
+  background: var(--line);
+}
+
+.inline-table-form__tree-cell--root .inline-table-form__tree-rail {
+  display: none;
+}
+
+.inline-table-form__tree-cell--last .inline-table-form__tree-rail {
+  bottom: 50%;
+}
+
+.inline-table-form__tree-node {
+  top: 50%;
+  left: calc(var(--inline-table-tree-indent) + 4px);
+  width: 9px;
+  height: 9px;
+  border: 1px solid var(--line-strong);
+  border-radius: 999px;
+  background: var(--card);
+  transform: translateY(-50%);
+}
+
+.inline-table-form__tree-cell--parent .inline-table-form__tree-node {
+  border-color: color-mix(in srgb, var(--moss) 45%, var(--line-strong));
+  background: var(--moss-soft);
+}
+
+.inline-table-form__tree-content {
+  min-width: 0;
+}
+
+.inline-table-form__tree-content > :where(.inline-table-form__read, span, p) {
+  min-width: 0;
+}
+
 .inline-table-form__field {
   display: grid;
   gap: 6px;

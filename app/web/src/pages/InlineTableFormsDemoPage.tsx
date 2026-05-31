@@ -52,6 +52,12 @@ interface DefaultDraft {
   state: string;
 }
 
+interface AreaDraft {
+  name: string;
+  scope: string;
+  owner: string;
+}
+
 interface WorkspaceRecord {
   id: string;
   name: string;
@@ -114,6 +120,7 @@ interface InlineTableFormsDemoState {
   checklist: InlineTableRow<ChecklistDraft>[];
   assignments: InlineTableRow<AssignmentDraft>[];
   defaultRows: InlineTableRow<DefaultDraft>[];
+  areas: InlineTableRow<AreaDraft>[];
   workspacePages: WorkspacePage[];
   workspaceLoading: boolean;
   workspaceLoadError: ReactNode;
@@ -165,6 +172,7 @@ export default function InlineTableFormsDemoPage() {
     checklist: initialChecklist,
     assignments: initialAssignments,
     defaultRows: initialDefaultRows,
+    areas: initialAreaRows,
     workspacePages: [workspaceCursorPages[0]!],
     workspaceLoading: false,
     workspaceLoadError: null,
@@ -176,6 +184,7 @@ export default function InlineTableFormsDemoPage() {
     checklist,
     assignments,
     defaultRows,
+    areas,
     workspacePages,
     workspaceLoading,
     workspaceLoadError,
@@ -204,6 +213,12 @@ export default function InlineTableFormsDemoPage() {
     setDemoState((current) => ({
       ...current,
       defaultRows: typeof update === "function" ? update(current.defaultRows) : update,
+    }));
+  };
+  const setAreas: Dispatch<SetStateAction<InlineTableRow<AreaDraft>[]>> = (update) => {
+    setDemoState((current) => ({
+      ...current,
+      areas: typeof update === "function" ? update(current.areas) : update,
     }));
   };
   const assignmentSaveTimers = useRef<number[]>([]);
@@ -494,6 +509,50 @@ export default function InlineTableFormsDemoPage() {
       ),
     },
   ], []);
+  const areaColumns = useMemo<InlineTableColumn<AreaDraft>[]>(() => [
+    {
+      key: "name",
+      header: "Area",
+      width: { flex: 1.6, min: 220 },
+      renderRead: ({ row }) => <ReadText value={row.draft.name} />,
+      renderEdit: ({ row, update, disabled }) => (
+        <InlineTextField
+          value={row.draft.name}
+          disabled={disabled}
+          ariaLabel="Area name"
+          onChange={(name) => update({ name })}
+        />
+      ),
+    },
+    {
+      key: "scope",
+      header: "Scope",
+      width: { min: 150 },
+      renderRead: ({ row }) => <ReadText value={row.draft.scope} />,
+      renderEdit: ({ row, update, disabled }) => (
+        <InlineTextField
+          value={row.draft.scope}
+          disabled={disabled}
+          ariaLabel="Area scope"
+          onChange={(scope) => update({ scope })}
+        />
+      ),
+    },
+    {
+      key: "owner",
+      header: "Owner",
+      width: { min: 140 },
+      renderRead: ({ row }) => <ReadText value={row.draft.owner} />,
+      renderEdit: ({ row, update, disabled }) => (
+        <InlineTextField
+          value={row.draft.owner}
+          disabled={disabled}
+          ariaLabel="Area owner"
+          onChange={(owner) => update({ owner })}
+        />
+      ),
+    },
+  ], []);
   const workspaceColumns = useMemo<InlineTableColumn<WorkspaceDraft>[]>(() => [
     {
       key: "name",
@@ -758,6 +817,22 @@ export default function InlineTableFormsDemoPage() {
             onDelete={(id) => deleteRow(setDefaultRows, id)}
             onCancel={(id) => cancelSimple(setDefaultRows, id)}
             onSave={(id) => saveSimple(setDefaultRows, id)}
+          />
+        </DemoPanel>
+
+        <DemoPanel title="Nested area tree" copy="Opt-in row tree metadata keeps hierarchy visible without changing table columns or enabling nested drag reorder." tag="tree">
+          <InlineTableForm
+            compact
+            ariaLabel="Nested area inline table"
+            columns={areaColumns}
+            rows={areas}
+            saveMode="explicit"
+            onDraftChange={(id, patch) => patchRows(setAreas, id, patch)}
+            onEdit={(id) => setRowsEditing(setAreas, id, true)}
+            onDelete={(id) => deleteRow(setAreas, id)}
+            onCancel={(id) => cancelSimple(setAreas, id)}
+            onSave={(id) => saveSimple(setAreas, id)}
+            getRowLabel={(row) => row.draft.name}
           />
         </DemoPanel>
 
@@ -1153,5 +1228,32 @@ const initialDefaultRows: InlineTableRow<DefaultDraft>[] = [
     id: "d-2",
     draft: { item: "Assign weekend backup", owner: "enzo", due: "2026-05-22", state: "active" },
     committedDraft: { item: "Assign weekend backup", owner: "enzo", due: "2026-05-22", state: "active" },
+  },
+];
+
+const initialAreaRows: InlineTableRow<AreaDraft>[] = [
+  {
+    id: "area-1",
+    draft: { name: "Villa Sud", scope: "Property", owner: "Maria" },
+    committedDraft: { name: "Villa Sud", scope: "Property", owner: "Maria" },
+    tree: { depth: 0, hasChildren: true },
+  },
+  {
+    id: "area-2",
+    draft: { name: "Guest floor", scope: "Level", owner: "Enzo" },
+    committedDraft: { name: "Guest floor", scope: "Level", owner: "Enzo" },
+    tree: { depth: 1, parentId: "area-1", hasChildren: true },
+  },
+  {
+    id: "area-3",
+    draft: { name: "Laundry closet", scope: "Room", owner: "Sora" },
+    committedDraft: { name: "Laundry closet", scope: "Room", owner: "Sora" },
+    tree: { depth: 2, parentId: "area-2", isLastChild: true },
+  },
+  {
+    id: "area-4",
+    draft: { name: "Garden", scope: "Outdoor", owner: "Priya" },
+    committedDraft: { name: "Garden", scope: "Outdoor", owner: "Priya" },
+    tree: { depth: 1, parentId: "area-1", isLastChild: true },
   },
 ];

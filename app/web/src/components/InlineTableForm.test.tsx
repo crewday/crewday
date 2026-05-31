@@ -1088,6 +1088,117 @@ describe("InlineTableForm", () => {
     expect(screen.queryByRole("button", { name: /move .* up/i })).toBeNull();
   });
 
+  it("renders opt-in tree rows with stable three-level hierarchy markers", () => {
+    const onEdit = vi.fn();
+    const { container } = render(
+      <InlineTableForm
+        ariaLabel="Area hierarchy rows"
+        columns={columns}
+        rows={[
+          { ...rowWithTitle("area-1", "Property"), tree: { depth: 0, hasChildren: true } },
+          { ...rowWithTitle("area-2", "First floor"), tree: { depth: 1, parentId: "area-1", hasChildren: true } },
+          { ...rowWithTitle("area-3", "Laundry closet"), tree: { depth: 2, parentId: "area-2", isLastChild: true } },
+        ]}
+        saveMode="explicit"
+        onDraftChange={vi.fn()}
+        onSave={vi.fn()}
+        onCancel={vi.fn()}
+        onEdit={onEdit}
+        activationMode="doubleClick"
+        getRowLabel={(row) => row.draft.title}
+      />,
+    );
+
+    const property = screen.getByLabelText("Property");
+    const firstFloor = screen.getByLabelText("First floor");
+    const laundry = screen.getByLabelText("Laundry closet");
+    const treeCells = container.querySelectorAll(".inline-table-form__td--tree");
+
+    expect(treeCells).toHaveLength(3);
+    expect(treeCells[0]).toHaveAttribute("data-inline-table-tree-depth", "0");
+    expect(treeCells[1]).toHaveAttribute("data-inline-table-tree-depth", "1");
+    expect(treeCells[2]).toHaveAttribute("data-inline-table-tree-depth", "2");
+    expect(within(property).getByText("Level 1, has child rows")).toHaveClass("sr-only");
+    expect(within(firstFloor).getByText("Level 2, has child rows")).toHaveClass("sr-only");
+    expect(within(laundry).getByText("Level 3, last child")).toHaveClass("sr-only");
+    expect(within(laundry).getByText("Laundry closet").closest(".inline-table-form__tree-content")).toBeInTheDocument();
+    expect(property).not.toHaveAttribute("draggable");
+
+    fireEvent.click(firstFloor);
+    fireEvent.keyDown(firstFloor, { key: "Enter" });
+    expect(onEdit).toHaveBeenCalledWith("area-2");
+  });
+
+  it("normalizes invalid tree depths before exposing hierarchy markers", () => {
+    const { container } = render(
+      <InlineTableForm
+        ariaLabel="Invalid tree rows"
+        columns={columns}
+        rows={[
+          { ...rowWithTitle("area-1", "Invalid depth"), tree: { depth: Number.NaN, hasChildren: true } },
+        ]}
+        saveMode="explicit"
+        onDraftChange={vi.fn()}
+        onSave={vi.fn()}
+        onCancel={vi.fn()}
+        getRowLabel={(row) => row.draft.title}
+      />,
+    );
+
+    const treeCell = container.querySelector(".inline-table-form__td--tree");
+
+    expect(treeCell).toHaveAttribute("data-inline-table-tree-depth", "0");
+    expect(treeCell).toHaveStyle({ "--inline-table-tree-indent": "0px" });
+    expect(screen.getByText("Level 1, has child rows")).toHaveClass("sr-only");
+  });
+
+  it("suppresses table-level reorder affordances when any rendered row is a tree row", () => {
+    const onReorder = vi.fn();
+    render(
+      <InlineTableForm
+        ariaLabel="Mixed tree reorder rows"
+        columns={columns}
+        rows={[
+          { ...rowWithTitle("area-1", "Property"), tree: { depth: 0, hasChildren: true } },
+          rowWithTitle("area-2", "Flat sibling"),
+          rowWithTitle("area-3", "Another sibling"),
+        ]}
+        saveMode="explicit"
+        onDraftChange={vi.fn()}
+        onSave={vi.fn()}
+        onCancel={vi.fn()}
+        onReorder={onReorder}
+        getRowLabel={(row) => row.draft.title}
+      />,
+    );
+
+    expect(screen.getByLabelText("Flat sibling")).not.toHaveAttribute("draggable");
+    expect(screen.queryByLabelText("Drag Flat sibling to reorder")).toBeNull();
+    expect(screen.queryByLabelText("Drag Another sibling to reorder")).toBeNull();
+    expect(screen.getAllByRole("columnheader").map((header) => header.textContent)).toEqual(["Title", "Owner", ""]);
+  });
+
+  it("keeps non-tree rows free of hierarchy wrappers and uses the original column grid", () => {
+    const { container } = render(
+      <InlineTableForm
+        ariaLabel="Flat rows"
+        columns={columns}
+        rows={[rowWithTitle("r-1", "Flat row")]}
+        saveMode="explicit"
+        onDraftChange={vi.fn()}
+        onSave={vi.fn()}
+        onCancel={vi.fn()}
+        onEdit={vi.fn()}
+      />,
+    );
+
+    expect(container.querySelector(".inline-table-form__td--tree")).toBeNull();
+    expect(container.querySelector(".inline-table-form__tree-cell")).toBeNull();
+    expect(container.querySelector(".inline-table-form")).toHaveStyle({
+      "--inline-table-columns": "minmax(180px, 1fr) minmax(120px, 1fr) max-content",
+    });
+  });
+
   it("reports pointer drag reorders with movement and ordered ids", () => {
     const onReorder = vi.fn();
     const dataTransfer = {

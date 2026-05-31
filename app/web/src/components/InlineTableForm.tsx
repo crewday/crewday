@@ -33,8 +33,20 @@ export type InlineTableColumnWidth =
   | { px: number }
   | { flex?: number; min?: number | string; max?: number | string };
 
+export interface InlineTableTreeRow {
+  /** Zero-based visual depth. `0` is a top-level row. */
+  depth: number;
+  /** Optional caller-owned parent identifier for tests, analytics, or downstream tree consumers. */
+  parentId?: string | null;
+  /** Shows a parent branch marker without making the row expandable. Expansion stays caller-owned. */
+  hasChildren?: boolean;
+  /** Trims the connector rail after the row when this is the last child in its sibling group. */
+  isLastChild?: boolean;
+}
+
 const DELETE_KEY_WINDOW_MS = 650;
 const DETAIL_COLUMN_KEY = "__detail";
+const TREE_INDENT_PX = 18;
 const TABLE_ROLE = "table";
 const ROWGROUP_ROLE = "rowgroup";
 const ROW_ROLE = "row";
@@ -68,6 +80,13 @@ export interface InlineTableRow<TDraft> {
   id: string;
   draft: TDraft;
   label?: string;
+  /**
+   * Opt-in visual tree metadata. InlineTableForm renders hierarchy only; it
+   * does not perform tree-aware drag reordering, so table-level reorder
+   * affordances are suppressed when any rendered row has tree metadata. Callers
+   * should persist parent/position changes in their own tree UI.
+   */
+  tree?: InlineTableTreeRow;
   /** Optional caller-owned baseline used by save/cancel flows; the component only passes it through. */
   committedDraft?: TDraft;
   editing?: boolean;
@@ -323,7 +342,10 @@ export function InlineTableForm<TDraft>({
       typeof update === "function" ? update(current ?? defaultFactoryCreateRow) : update
     ));
   };
-  const hasReorderColumn = Boolean(onReorder) || showReorderHandles;
+  const activeTrailingCreateRow = trailingCreateRow ?? factoryCreateRow ?? undefined;
+  const renderedRows = activeTrailingCreateRow ? [...rows, activeTrailingCreateRow] : rows;
+  const hasTreeRows = renderedRows.some((row) => Boolean(row.tree));
+  const hasReorderColumn = (Boolean(onReorder) || showReorderHandles) && !hasTreeRows;
   const templateColumns = [
     ...(hasReorderColumn ? ["42px"] : []),
     ...columns.map((column) => columnTemplate(column.width)),
@@ -335,14 +357,12 @@ export function InlineTableForm<TDraft>({
     compact ? "inline-table-form--compact" : null,
     className,
   ].filter(Boolean).join(" ");
-  const activeTrailingCreateRow = trailingCreateRow ?? factoryCreateRow ?? undefined;
-  const renderedRows = activeTrailingCreateRow ? [...rows, activeTrailingCreateRow] : rows;
   const hasActiveSearch = search ? search.value.trim().length > 0 || Boolean(search.isFiltered) : false;
   const batchActions = saveMode === "batch" && renderBatchActions
     ? renderBatchActions(makeBatchContext(rows, onBatchCancel))
     : null;
-  const reorderableRows = onReorder
-    ? rows.filter((row) => !isRowEditing(row) && !isRowDisabled(row))
+  const reorderableRows = onReorder && !hasTreeRows
+    ? rows.filter((row) => !row.tree && !isRowEditing(row) && !isRowDisabled(row))
     : [];
 
   const reorderRow = (rowId: string, toMovableIndex: number) => {
@@ -770,7 +790,8 @@ export function InlineTableForm<TDraft>({
             const selected = effectiveSelectedRowId === row.id && !selectionDisabled && (!renderEditing || isTrailingCreate);
             const deleteArmed = deleteArmedRowId === row.id && selected;
             const movableIndex = reorderableRows.findIndex((candidate) => candidate.id === row.id);
-            const canShowReorderHandle = hasReorderColumn && !row.disabled && !isTrailingCreate;
+            const tree = normalizeTreeRow(row.tree);
+            const canShowReorderHandle = hasReorderColumn && !tree && !row.disabled && !isTrailingCreate;
             const canReorderRow = canShowReorderHandle && !editing && !row.saving && movableIndex >= 0;
             const reorderItemProps = canReorderRow ? reorderable.getItemProps(movableIndex) : null;
             const dropPosition = reorderable.dropTarget?.id === row.id
@@ -891,14 +912,20 @@ export function InlineTableForm<TDraft>({
                       ) : null}
                     </div>
                   ) : null}
-                  {columns.map((column) => (
+                  {columns.map((column, columnIndex) => (
                     <div
                       key={column.key}
-                      className={cellClasses(column, "inline-table-form__td")}
+                      className={cellClasses(column, "inline-table-form__td", {
+                        tree: Boolean(tree && columnIndex === 0),
+                      })}
                       role={CELL_ROLE}
                       data-label={plainLabel(column.mobileLabel ?? column.header)}
                       data-inline-table-row={row.id}
                       data-inline-table-column={column.key}
+                      data-inline-table-tree-depth={tree && columnIndex === 0 ? tree.depth : undefined}
+                      style={tree && columnIndex === 0
+                        ? { "--inline-table-tree-indent": `${tree.depth * TREE_INDENT_PX}px` } as CSSProperties
+                        : undefined}
                       ref={(node) => {
                         if (!node) return;
                         node.onclick = (event) => {
@@ -918,7 +945,11 @@ export function InlineTableForm<TDraft>({
                       <span className="inline-table-form__mobile-label">
                         {column.mobileLabel ?? column.header}
                       </span>
-                      {renderEditing ? column.renderEdit(context) : column.renderRead(context)}
+                      {tree && columnIndex === 0 ? (
+                        <InlineTableTreeCell tree={tree}>
+                          {renderEditing ? column.renderEdit(context) : column.renderRead(context)}
+                        </InlineTableTreeCell>
+                      ) : renderEditing ? column.renderEdit(context) : column.renderRead(context)}
                     </div>
                   ))}
                   <div
@@ -1040,6 +1071,40 @@ export function InlineTableForm<TDraft>({
         </>
       </ConfirmationModal>
     </section>
+  );
+}
+
+function InlineTableTreeCell({
+  tree,
+  children,
+}: {
+  tree: Required<Pick<InlineTableTreeRow, "depth" | "hasChildren" | "isLastChild">>;
+  children: ReactNode;
+}) {
+  const level = tree.depth + 1;
+  const description = [
+    `Level ${level}`,
+    tree.hasChildren ? "has child rows" : null,
+    tree.isLastChild ? "last child" : null,
+  ].filter(Boolean).join(", ");
+  return (
+    <span
+      className={[
+        "inline-table-form__tree-cell",
+        tree.depth === 0 ? "inline-table-form__tree-cell--root" : null,
+        tree.hasChildren ? "inline-table-form__tree-cell--parent" : null,
+        tree.isLastChild ? "inline-table-form__tree-cell--last" : null,
+      ].filter(Boolean).join(" ")}
+    >
+      <span className="inline-table-form__tree-spacer" aria-hidden="true">
+        <span className="inline-table-form__tree-rail" />
+        <span className="inline-table-form__tree-node" />
+      </span>
+      <span className="sr-only">{description}</span>
+      <span className="inline-table-form__tree-content">
+        {children}
+      </span>
+    </span>
   );
 }
 
@@ -2043,12 +2108,28 @@ function handleTagOptionKeyDown(
   toggle();
 }
 
-function cellClasses<TDraft>(column: InlineTableColumn<TDraft>, base: string) {
+function cellClasses<TDraft>(
+  column: InlineTableColumn<TDraft>,
+  base: string,
+  options?: { tree?: boolean },
+) {
   return [
     base,
     column.className,
     column.align ? `${base}--${column.align}` : null,
+    options?.tree ? `${base}--tree` : null,
   ].filter(Boolean).join(" ");
+}
+
+function normalizeTreeRow(tree: InlineTableTreeRow | undefined) {
+  if (!tree) return null;
+  const truncatedDepth = Math.trunc(tree.depth);
+  const depth = Number.isFinite(truncatedDepth) ? Math.max(0, truncatedDepth) : 0;
+  return {
+    depth,
+    hasChildren: Boolean(tree.hasChildren),
+    isLastChild: Boolean(tree.isLastChild),
+  };
 }
 
 function columnTemplate(width: InlineTableColumnWidth | undefined) {
