@@ -10,6 +10,16 @@ inventories, timesheets, payslips — all accessible to both humans (via a
 mobile-first web app) and LLM agents (via a documented REST API and a thin CLI
 that wraps it).
 
+## Product screenshots
+
+![Manager dashboard with task, approval, issue, and leave overview](docs/screenshots/dashboard.png)
+
+![Weekly schedule and availability grid](docs/screenshots/schedule.png)
+
+![Agent and integration API token management](docs/screenshots/api-tokens.png)
+
+![Mobile passkey sign-in](docs/screenshots/passkey-login.png)
+
 > **Status as of 2026-05-09:** active implementation. The original spec
 > tree is still the source of truth, but the repo now contains the production
 > FastAPI service, React SPA, CLI, migrations, tests, high-fidelity mocks, and
