@@ -75,10 +75,16 @@ jobs:
       - name: Regenerate in-repo blocklist
         run: uv run python scripts/refresh_disposable_domains.py /tmp/upstream.conf
 
-      - name: Verify freshness pin parses
-        # Re-runs the unit gate so a malformed pin or truncated file
-        # fails the workflow before a PR is opened.
-        run: uv run pytest tests/unit/abuse/test_disposable_domains.py -x -q
+      - name: Verify freshness gate
+        # Re-runs the abuse blocklist gate so a malformed pin, truncated
+        # file, or stale date fails the workflow before a PR is opened.
+        # The wall-clock staleness assertion is tagged ``freshness`` and
+        # deselected from the default offline unit run (see
+        # pyproject.toml ``addopts``); ``-m "freshness or not freshness"``
+        # overrides that so this scheduled job — the owner of the
+        # freshness gate — runs every test in the module, pin-shape and
+        # staleness alike.
+        run: uv run pytest tests/unit/abuse/test_disposable_domains.py -x -q -m "freshness or not freshness"
 
       - name: Detect changes
         id: diff

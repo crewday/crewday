@@ -313,12 +313,13 @@ asyncio_mode = "auto"
 # (per-worker SQLite file / Postgres testcontainer). To debug a single
 # test serially, override the worker count: ``uv run pytest -n0 <path>``
 # (xdist itself accepts ``-n0`` and skips the worker fork).
-addopts = "--import-mode=importlib -n auto --dist worksteal -m \"not schemathesis\""
+addopts = "--import-mode=importlib -n auto --dist worksteal -m \"not schemathesis and not freshness\""
 pythonpath = ["."]
 markers = [
     "integration: marks tests as integration (deselect with '-m \"not integration\"')",
     "pg_only: test requires Postgres (skipped when CREWDAY_TEST_DB=sqlite)",
     "schemathesis: API-contract tests that drive the schemathesis CLI as a subprocess (cd-3j25). Excluded from the default unit/integration runs via ``addopts = -m 'not schemathesis'`` — opt in with ``pytest -m schemathesis``.",
+    "freshness: wall-clock freshness gates that time-bomb on calendar drift (e.g. the disposable-domain blocklist staleness check). Deselected from the default offline unit run via ``addopts = -m 'not freshness'`` so local/PR runs can't fail purely from the date; the scheduled ``refresh-disposable-domains.yml`` CI job owns them — opt in with ``pytest -m freshness``.",
 ]
 
 [tool.coverage.run]

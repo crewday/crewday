@@ -1,4 +1,4 @@
-# generated 2026-05-28
+# generated 2026-07-03
 # crew.day disposable-email-domain blocklist.
 #
 # The first line is the machine-read freshness pin: the CI unit gate
