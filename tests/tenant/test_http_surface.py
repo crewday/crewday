@@ -76,6 +76,19 @@ pytestmark = pytest.mark.integration
 _VERBS: tuple[str, ...] = ("GET", "POST", "PATCH", "DELETE")
 
 
+# The SSE stream is a scoped surface but is verified by the focused
+# ``test_events_cross_tenant_returns_404_not_stream`` probe rather than
+# the header-parity matrix below: the rate limiter only stamps
+# ``X-RateLimit-*`` on ``/w/{slug}/api/*`` paths, so the stream's
+# cross-tenant 404 legitimately carries a smaller header-set than the
+# ``/api/*`` baseline this matrix compares against. That difference is
+# benign (between ``/events`` and ``/api/*``, not between the two
+# cross-tenant branches of ``/events``), so the focused probe asserts
+# the 404 problem+json envelope body directly. See the note next to
+# ``/w/{slug}/events`` in :mod:`tests.tenant._optouts`.
+_SSE_STREAM_PATH: str = "/w/{slug}/events"
+
+
 # ---------------------------------------------------------------------------
 # Surface enumeration
 # ---------------------------------------------------------------------------
@@ -99,6 +112,10 @@ def _enumerate_scoped_routes(app: FastAPI) -> list[tuple[str, frozenset[str]]]:
         if not path.startswith("/w/{slug}/"):
             continue
         if path in HTTP_PATH_OPTOUTS:
+            continue
+        if path == _SSE_STREAM_PATH:
+            # Covered by the focused body-only probe, not this
+            # header-parity walk (see ``_SSE_STREAM_PATH``).
             continue
         methods = frozenset(route.methods or ())
         out.append((path, methods))
@@ -412,6 +429,49 @@ class TestHttpCrossTenantMatrix:
         assert _assert_canonical_envelope(
             baseline, target_path
         ) == _assert_canonical_envelope(token_probe, target_path)
+
+    def test_events_cross_tenant_returns_404_not_stream(
+        self,
+        client: TestClient,
+        tenant_a: TenantSeed,
+        tenant_b: TenantSeed,
+    ) -> None:
+        """A workspace-``A`` session hitting ``B``'s SSE stream gets a 404.
+
+        Spec §17 "Cross-tenant regression test" case (c) requires
+        event subscriptions to be tenant-isolated. The generic matrix
+        above already probes ``/w/{slug}/events`` for the canonical
+        404 envelope + header-set parity (it is no longer opted out in
+        :mod:`tests.tenant._optouts`), because
+        :class:`~app.tenancy.middleware.WorkspaceContextMiddleware`
+        rejects the membership miss BEFORE the streaming handler runs.
+
+        This focused probe pins the SSE-specific invariant the matrix
+        can't express: the reject is a ``application/problem+json``
+        404 envelope, NOT a ``text/event-stream`` response. A
+        regression that let a non-member open the peer's stream would
+        flip the ``Content-Type`` here (and, in the worst case, hang
+        the client on a never-closing stream) — this asserts the
+        membership miss short-circuits to the shared 404 seam.
+        """
+        client.cookies.set(SESSION_COOKIE_NAME, tenant_a.owner_session_cookie)
+        events_path = f"/w/{tenant_b.slug}/events"
+
+        response = client.get(events_path)
+
+        assert response.status_code == 404, (
+            f"GET {events_path} from a non-member session returned "
+            f"{response.status_code}; the SSE stream must reject a "
+            f"cross-tenant probe with 404 (§15, §17 case (c))"
+        )
+        content_type = response.headers.get("content-type", "")
+        assert content_type.startswith("application/problem+json"), (
+            f"GET {events_path} returned Content-Type {content_type!r}; "
+            f"a cross-tenant probe must yield the problem+json 404 "
+            f"envelope, never an open text/event-stream"
+        )
+        assert "text/event-stream" not in content_type
+        _assert_canonical_envelope(response, events_path)
 
     @pytest.mark.skipif(
         os.environ.get("CREWDAY_SKIP_TIMING_TEST") == "1",

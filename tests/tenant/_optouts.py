@@ -58,20 +58,25 @@ HTTP_PATH_OPTOUTS: frozenset[str] = frozenset(
         # intentionally handles every non-API GET that didn't match a
         # real route (§14 "SPA fallback") and is not a tenant surface.
         "/{full_path:path}",
-        # justification: SSE event stream is a long-lived workspace
-        # connection, not a per-request API call. The cross-tenant
-        # behaviour is enforced upstream by the same middleware that
-        # produces the 404 envelope, but the response carries no
-        # ``X-RateLimit-*`` headers because :func:`api_route_class`
-        # only classifies ``/w/{slug}/api/*`` paths. Listed here so
-        # the envelope-equality probe stays focused on the API
-        # surface (§16 "Realtime").
-        # TODO(cd-sse-cross-tenant): add a focused probe that asserts
-        # ``/w/{other-slug}/events`` returns the canonical 404 envelope
-        # body (without requiring header-set parity) so the SSE branch
-        # of the membership-miss check is auto-validated, not just
-        # trusted-by-construction.
-        "/w/{slug}/events",
+        # NB: ``/w/{slug}/events`` (the SSE stream) is a tenant-scoped
+        # surface and therefore NOT opted out here — an opt-out asserts
+        # a surface is genuinely tenant-agnostic (deployment- or
+        # identity-scope), which the workspace stream is not. Its
+        # cross-tenant 404 is produced by
+        # :class:`~app.tenancy.middleware.WorkspaceContextMiddleware`
+        # before the streaming handler runs, so a non-member never
+        # opens the peer's stream. It rides the generic 404-envelope
+        # coverage through the focused
+        # :meth:`TestHttpCrossTenantMatrix.
+        # test_events_cross_tenant_returns_404_not_stream` probe rather
+        # than the header-parity matrix: the rate limiter only stamps
+        # ``X-RateLimit-*`` on ``/w/{slug}/api/*`` paths, so the SSE
+        # reject legitimately carries a smaller header-set than the
+        # ``/api/*`` baseline. That difference is benign — it is
+        # between ``/events`` and ``/api/*`` (a URL the caller already
+        # chose), not between the two cross-tenant branches of
+        # ``/events`` — so it carries no tenant-existence signal (§16
+        # "Realtime", §17 case (c) "event subscriptions").
     }
 )
 
