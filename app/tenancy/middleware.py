@@ -262,6 +262,32 @@ def _is_scoped_sse_path(path: str) -> bool:
     return len(segments) == 3 and segments[0] == "w" and segments[2] == "events"
 
 
+def _is_me_scoped_path(path: str) -> bool:
+    """Return ``True`` for the ``/w/<slug>/api/<ver>/me`` self-service subtree.
+
+    Personal access tokens (§03 "Personal access tokens") are confined to
+    this subtree by :meth:`WorkspaceContextMiddleware.dispatch`. Every route
+    under it keys its reads and writes on ``ctx.actor_id`` — which equals the
+    token's ``subject_user_id`` for a PAT (mint sets ``user_id ==
+    subject_user_id``) — so the §03 "me:* filter applied at query time
+    regardless of scope string" invariant holds structurally: a PAT can only
+    ever touch the subject's own rows.
+
+    Matches the bare ``/me`` profile probe and every ``/me/...`` child. The
+    match is an exact per-segment compare, so a sibling segment such as
+    ``messaging`` or ``me_tokens`` (which is bare-host anyway) does not slip
+    through. The API version segment (``v1``) is not pinned — any future
+    version's ``/me`` subtree stays confined without a code change here.
+    """
+    segments = [segment for segment in path.split("/") if segment]
+    return (
+        len(segments) >= 5
+        and segments[0] == "w"
+        and segments[2] == "api"
+        and segments[4] == "me"
+    )
+
+
 def _should_skip_dev_spa_path(path: str, method: str, settings: Settings) -> bool:
     if settings.profile != "dev":
         return False
@@ -339,6 +365,36 @@ def _archived_user_401(request: Request, error_code: str) -> JSONResponse:
         status=401,
         type_name=error_code,
         title="Unauthorized",
+    )
+
+
+def _personal_token_confined_403(request: Request) -> JSONResponse:
+    """Return the 403 ``insufficient_scope`` problem for a PAT off the ``/me`` subtree.
+
+    §03 "Personal access tokens" confines a personal access token (PAT) to
+    the ``/me`` self-service route set — "a PAT can only read/write the
+    subject's own rows". A PAT that reaches any other workspace route is out
+    of scope: its ``me:*`` scope family "implies nothing outside ``me:*``"
+    (§03 "Scopes"), so no workspace resource is reachable. We refuse with the
+    same ``insufficient_scope`` envelope §03 "Usage" pins for a scoped token
+    missing a scope — a 403 problem+json plus the RFC 6750
+    ``WWW-Authenticate: error="insufficient_scope"`` challenge.
+
+    This is deliberately **not** the constant-time 404 the tenancy rejections
+    use. That 404 is the §15 enumeration shield ("unknown slug" vs "not a
+    member"); this branch only fires once a live :class:`WorkspaceContext`
+    exists, i.e. the token's subject **is** a resolved member of the
+    workspace. Revealing "you are a member but your credential's scope cannot
+    reach this route" leaks nothing an enumerator could not already infer,
+    and it gives the agent the precise, actionable signal §03 intends.
+    """
+    return problem_response(
+        request,
+        status=403,
+        type_name="insufficient_scope",
+        title="Insufficient scope",
+        extra={"error": "insufficient_scope"},
+        extra_headers={"WWW-Authenticate": 'error="insufficient_scope"'},
     )
 
 
@@ -1094,6 +1150,46 @@ class WorkspaceContextMiddleware(BaseHTTPMiddleware):
                 correlation_id=correlation_id,
             )
             return not_found_response
+
+        # Personal-access-token route confinement (§03 "Personal access
+        # tokens"). ``ctx`` is now a live context, so the token's subject IS
+        # a resolved member of this workspace. A PAT (``token_kind ==
+        # "personal"``) may only reach the ``/me`` self-service subtree —
+        # every such route keys on ``ctx.actor_id`` (== the token's
+        # ``subject_user_id``), which is what makes the §03 subject-row
+        # filter structural. Any other route is out of the PAT's ``me:*``
+        # scope: refuse with 403 ``insufficient_scope`` (§03 "Usage") rather
+        # than dispatch to a handler that would authorise on the subject's
+        # full role grants. Only personal tokens trip this; scoped /
+        # delegated tokens, sessions, demo, and system principals fall
+        # through unchanged (``token_kind`` is ``None`` for all of them).
+        if (
+            actor is not None
+            and actor.token_kind == "personal"
+            and not _is_me_scoped_path(path)
+        ):
+            _log_tenancy_event(
+                slug=ctx.workspace_slug,
+                workspace_id=ctx.workspace_id,
+                actor_id=ctx.actor_id,
+                actor_kind=ctx.actor_kind,
+                token_id=actor.token_id,
+                session_id=None,
+                correlation_id=correlation_id,
+                skip_path=False,
+                outcome="personal_token_out_of_scope",
+            )
+            confined_response: Response = _personal_token_confined_403(request)
+            confined_response.headers[CORRELATION_ID_HEADER] = correlation_id
+            await asyncio.to_thread(
+                _record_token_request,
+                request,
+                actor=actor,
+                settings=settings,
+                response=confined_response,
+                correlation_id=correlation_id,
+            )
+            return confined_response
 
         _log_tenancy_event(
             slug=ctx.workspace_slug,

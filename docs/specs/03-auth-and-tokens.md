@@ -854,7 +854,14 @@ Key properties:
   distinct: a PAT can only read/write the subject's own rows (the
   `me:*` filter is applied at query time regardless of scope
   string), while a delegated token inherits *all* the subject's
-  `role_grants`.
+  `role_grants`. This confinement is enforced centrally in the
+  tenancy middleware: a PAT is admitted only on the workspace `/me`
+  self-service subtree (`/w/<slug>/api/v1/me/...`), where every route
+  keys on the subject's `ctx.actor_id`; a PAT that reaches any other
+  workspace route is refused **before the handler runs** with `403`
+  `error = "insufficient_scope"` (plus the `WWW-Authenticate:
+  error="insufficient_scope"` challenge of the "Usage" section) — the
+  subject's role grants never authorize a PAT off the `/me` subtree.
 - `scopes`: **must** be drawn from the `me:*` family. Mixing
   `me:*` with workspace scopes on the same token is a 422
   `error = "me_scope_conflict"`. An empty scope list is a 422
