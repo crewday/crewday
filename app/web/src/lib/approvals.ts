@@ -1,10 +1,17 @@
 import { fetchJson } from "@/lib/api";
 import type {
+  AgentAction,
   ApprovalRequest,
   ApprovalRequestPayload,
   ApprovalsListResponse,
   GateSource,
 } from "@/types/api";
+
+/** Inline chat channels that render a pending-approval card in a chat
+ *  surface (§11 "Inline approval UX"). `web_owner_sidebar` feeds the
+ *  owner/manager rail + phone chat; `web_worker_chat` feeds the worker
+ *  rail + phone chat. */
+export type InlineApprovalChannel = "web_owner_sidebar" | "web_worker_chat";
 
 type ApprovalRisk = ApprovalRequest["risk"];
 
@@ -70,6 +77,31 @@ export function approvalRequestFromPayload(payload: ApprovalRequestPayload): App
     for_user_id: payload.for_user_id,
     resolved_user_mode: payload.resolved_user_mode,
   };
+}
+
+/** Fetch the pending-approval queue and project the rows destined for a
+ *  single inline chat channel into the `AgentAction` card shape the chat
+ *  surfaces render. Keyed by the stable approval id so decide buttons can
+ *  post to `/approvals/{id}/{decision}` (§11 "Inline approval UX"). */
+export async function inlineApprovalsForChannel(
+  channel: InlineApprovalChannel,
+): Promise<AgentAction[]> {
+  const approvals = await fetchApprovals();
+  const cards: AgentAction[] = [];
+  for (const approval of approvals) {
+    if (approval.inline_channel !== channel) continue;
+    cards.push({
+      id: approval.id,
+      title: approval.action,
+      detail: approval.reason,
+      risk: approval.risk,
+      card_summary: approval.card_summary,
+      card_fields: approval.card_fields,
+      gate_source: approval.gate_source,
+      inline_channel: channel,
+    });
+  }
+  return cards;
 }
 
 export async function fetchApprovals(): Promise<ApprovalRequest[]> {

@@ -5,11 +5,8 @@ import ChatMessageBody from "@/components/chat/ChatMessageBody";
 import type { AgentActivityState } from "@/lib/sse";
 import type { AgentMessage } from "@/types/api";
 
-type ActionDecision = "approve" | "details";
-
 export interface ChatLogProps {
   messages: AgentMessage[] | undefined;
-  onDecideAction?: (idx: number, decision: ActionDecision) => void;
   /** Applied to the outer `.chat-log`. `chat-log--inline` removes the
    *  flex:1 scroll-box behaviour so the log flows inside a regular page. */
   variant?: "screen" | "inline";
@@ -23,7 +20,6 @@ export interface ChatLogProps {
 export default function ChatLog(props: ChatLogProps) {
   const {
     messages,
-    onDecideAction,
     variant = "screen",
     ariaLabel,
     typing = false,
@@ -54,39 +50,25 @@ export default function ChatLog(props: ChatLogProps) {
           !typing &&
           m.kind === "agent" &&
           idx === messages.length - 1;
+        // No stable id on chat messages (§ agent log payload), so key on
+        // the message's own content — stable across the optimistic-append /
+        // server-replace swap in a way the array index never was.
+        const key = m.at + "|" + m.kind + "|" + m.body;
         if (m.kind === "action") {
           return (
-            <Fragment key={idx}>
+            <Fragment key={key}>
               {showCompletedActivity && (
                 <ActivityLine label={completedActivityLabel} />
               )}
               <div className="chat-msg chat-msg--action">
                 <span className="chat-msg__body">{m.body}</span>
-                {onDecideAction && (
-                  <div className="chat-msg__ctas">
-                    <button
-                      className="btn btn--moss btn--sm"
-                      type="button"
-                      onClick={() => onDecideAction(idx, "approve")}
-                    >
-                      Approve
-                    </button>
-                    <button
-                      className="btn btn--ghost btn--sm"
-                      type="button"
-                      onClick={() => onDecideAction(idx, "details")}
-                    >
-                      Details
-                    </button>
-                  </div>
-                )}
                 <DateTime value={m.at} showTime className="chat-msg__time" />
               </div>
             </Fragment>
           );
         }
         return (
-          <Fragment key={idx}>
+          <Fragment key={key}>
             {showCompletedActivity && (
               <ActivityLine label={completedActivityLabel} />
             )}

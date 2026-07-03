@@ -2,15 +2,17 @@ import { Fragment, useCallback, useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useLocation, useParams } from "react-router-dom";
 import { ChevronDown } from "lucide-react";
-import { fetchJson } from "@/lib/api";
-import { fetchApprovals } from "@/lib/approvals";
+import { fetchJson, toDisplayError } from "@/lib/api";
+import { inlineApprovalsForChannel } from "@/lib/approvals";
 import { qk } from "@/lib/queryKeys";
 import { initialAgentCollapsed, persistAgentCollapsed } from "@/lib/preferences";
 import { useAgentActivity } from "@/lib/agentTyping";
+import AgentActionCards from "@/components/chat/AgentActionCards";
 import AgentMessageLinks from "@/components/chat/AgentMessageLinks";
 import ChatComposer from "@/components/chat/ChatComposer";
 import ChatMessageBody from "@/components/chat/ChatMessageBody";
 import DateTime from "@/components/DateTime";
+import InlineErrorAlert from "@/components/InlineErrorAlert";
 import type { AgentAction, AgentMessage, AgentTurnScope, Role } from "@/types/api";
 
 // CRITICAL: AgentSidebar MUST mount as a SIBLING of <Outlet /> in
@@ -71,25 +73,10 @@ export default function AgentSidebar({ agentRole: role }: AgentSidebarProps) {
   });
   const actions = useQuery({
     queryKey: actionsKey,
-    queryFn: async (): Promise<AgentAction[]> => {
-      if (isAdmin) return fetchJson<AgentAction[]>(actionsUrl);
-      const approvals = await fetchApprovals();
-      const sidebarApprovals: AgentAction[] = [];
-      for (const approval of approvals) {
-        if (approval.inline_channel !== "web_owner_sidebar") continue;
-        sidebarApprovals.push({
-          id: approval.id,
-          title: approval.action,
-          detail: approval.reason,
-          risk: approval.risk,
-          card_summary: approval.card_summary,
-          card_fields: approval.card_fields,
-          gate_source: approval.gate_source,
-          inline_channel: "web_owner_sidebar",
-        });
-      }
-      return sidebarApprovals;
-    },
+    queryFn: (): Promise<AgentAction[]> =>
+      isAdmin
+        ? fetchJson<AgentAction[]>(actionsUrl)
+        : inlineApprovalsForChannel("web_owner_sidebar"),
     enabled: showActions,
   });
 
@@ -181,6 +168,9 @@ export default function AgentSidebar({ agentRole: role }: AgentSidebarProps) {
 
       <div className="desk__agent-body" id="agent-body">
         <div className="agent-log" ref={logRef} role="log" aria-live="polite">
+          {log.isError && (
+            <InlineErrorAlert error={toDisplayError(log.error)} />
+          )}
           {log.data?.map((msg, i) => {
             const completedActivityLabel = activity.label;
             const showCompletedActivity =
@@ -189,7 +179,7 @@ export default function AgentSidebar({ agentRole: role }: AgentSidebarProps) {
               msg.kind === "agent" &&
               i === log.data.length - 1;
             return (
-              <Fragment key={i}>
+              <Fragment key={msg.at + "|" + msg.kind + "|" + msg.body}>
                 {showCompletedActivity && (
                   <AgentActivityLine label={completedActivityLabel} />
                 )}
@@ -224,41 +214,16 @@ export default function AgentSidebar({ agentRole: role }: AgentSidebarProps) {
           )}
         </div>
 
-        {showActions && actions.data && actions.data.length > 0 && (
+        {showActions && actions.isError && (
           <div className="agent-actions" aria-label="Pending agent actions">
-            <div className="agent-actions__title">
-              <span>Pending approvals</span>
-              <span className="agent-actions__count">{actions.data.length}</span>
-            </div>
-            <div className="agent-actions__list">
-              {actions.data.map((a) => (
-                <div key={a.id} className={"agent-action agent-action--" + a.risk}>
-                  <div className="agent-action__title">{a.card_summary || a.title}</div>
-                  {a.card_fields.length > 0 && (
-                    <dl className="agent-action__fields">
-                      {a.card_fields.map(([k, v]) => (
-                        <div key={k} className="agent-action__field">
-                          <dt>{k}</dt>
-                          <dd>{v}</dd>
-                        </div>
-                      ))}
-                    </dl>
-                  )}
-                  <div className="agent-action__detail">{a.detail}</div>
-                  <div className="agent-action__ctas">
-                    <button type="button" className="btn btn--approve"
-                            onClick={() => decideAction.mutate({ id: a.id, decision: "approve" })}>
-                      Confirm
-                    </button>
-                    <button type="button" className="btn btn--deny"
-                            onClick={() => decideAction.mutate({ id: a.id, decision: "deny" })}>
-                      Reject
-                    </button>
-                  </div>
-                </div>
-              ))}
-            </div>
+            <InlineErrorAlert error={toDisplayError(actions.error)} />
           </div>
+        )}
+        {showActions && actions.data && (
+          <AgentActionCards
+            actions={actions.data}
+            onDecide={(id, decision) => decideAction.mutate({ id, decision })}
+          />
         )}
 
         <ChatComposer

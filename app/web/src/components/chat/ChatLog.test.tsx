@@ -213,9 +213,12 @@ describe("ChatLog", () => {
     expect(screen.queryByRole("navigation", { name: "Agent suggested links" })).toBeNull();
   });
 
-  it("keeps approval actions separate from navigation links", () => {
-    const decisions: Array<[number, "approve" | "details"]> = [];
-    render(
+  it("renders an action message as a distinct card without decide buttons or nav links", () => {
+    // Decide moved off the chat log onto the approvals-backed
+    // `<AgentActionCards>` (§11 HITL); the log only *displays* an
+    // action-kind message, it never carries decide buttons or the
+    // agent navigation links.
+    const { container } = render(
       <ChatLog
         messages={[
           {
@@ -231,14 +234,13 @@ describe("ChatLog", () => {
             ],
           },
         ]}
-        onDecideAction={(idx, decision) => decisions.push([idx, decision])}
       />,
     );
 
-    fireEvent.click(screen.getByRole("button", { name: "Approve" }));
-
-    expect(decisions).toEqual([[0, "approve"]]);
-    expect(screen.getByRole("button", { name: "Details" })).toBeInTheDocument();
+    expect(screen.getByText("Create stay at Oak House?")).toBeInTheDocument();
+    expect(container.querySelector(".chat-msg--action")).not.toBeNull();
+    expect(screen.queryByRole("button", { name: "Approve" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Details" })).toBeNull();
     expect(screen.queryByRole("link", { name: "Open property" })).toBeNull();
   });
 
