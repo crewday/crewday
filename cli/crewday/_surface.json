@@ -949,6 +949,37 @@
   },
   {
     "agent_link_routes": {},
+    "body_schema_ref": "#/components/schemas/AssetTypeCreateRequest",
+    "group": "asset_types",
+    "http": {
+      "method": "POST",
+      "path": "/w/{slug}/api/v1/asset_types"
+    },
+    "idempotent": false,
+    "name": "create-flat",
+    "operation_id": "asset_types.create_flat",
+    "path_params": [],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/AssetTypeResponse",
+    "summary": "Create a workspace-custom asset type",
+    "x_agent_confirm": {
+      "risk": "medium",
+      "summary": "Create a workspace-custom asset type?",
+      "verb": "Create a workspace-custom asset type"
+    },
+    "x_agent_links": {
+      "policy": "none",
+      "reason": "No safe, specific web handoff is registered for asset_types.create_flat yet."
+    },
+    "x_cli": {
+      "group": "asset_types",
+      "mutates": true,
+      "summary": "Create a workspace-custom asset type",
+      "verb": "create-flat"
+    }
+  },
+  {
+    "agent_link_routes": {},
     "body_schema_ref": null,
     "group": "asset_types",
     "http": {
@@ -992,6 +1023,46 @@
     "body_schema_ref": null,
     "group": "asset_types",
     "http": {
+      "method": "DELETE",
+      "path": "/w/{slug}/api/v1/asset_types/{type_id}"
+    },
+    "idempotent": true,
+    "name": "delete-flat",
+    "operation_id": "asset_types.delete_flat",
+    "path_params": [
+      {
+        "name": "type_id",
+        "required": true,
+        "schema": {
+          "title": "Type Id",
+          "type": "string"
+        }
+      }
+    ],
+    "query_params": [],
+    "response_schema_ref": null,
+    "summary": "Delete or archive a workspace-custom asset type",
+    "x_agent_confirm": {
+      "risk": "medium",
+      "summary": "Delete or archive a workspace-custom asset type?",
+      "verb": "Delete or archive a workspace-custom asset type"
+    },
+    "x_agent_links": {
+      "policy": "none",
+      "reason": "No safe, specific web handoff is registered for asset_types.delete_flat yet."
+    },
+    "x_cli": {
+      "group": "asset_types",
+      "mutates": true,
+      "summary": "Delete or archive a workspace-custom asset type",
+      "verb": "delete-flat"
+    }
+  },
+  {
+    "agent_link_routes": {},
+    "body_schema_ref": null,
+    "group": "asset_types",
+    "http": {
       "method": "GET",
       "path": "/w/{slug}/api/v1/assets/asset_types/{type_id}"
     },
@@ -1021,6 +1092,42 @@
       "mutates": false,
       "summary": "Get one asset type",
       "verb": "get"
+    }
+  },
+  {
+    "agent_link_routes": {},
+    "body_schema_ref": null,
+    "group": "asset_types",
+    "http": {
+      "method": "GET",
+      "path": "/w/{slug}/api/v1/asset_types/{type_id}"
+    },
+    "idempotent": true,
+    "name": "get-flat",
+    "operation_id": "asset_types.get_flat",
+    "path_params": [
+      {
+        "name": "type_id",
+        "required": true,
+        "schema": {
+          "title": "Type Id",
+          "type": "string"
+        }
+      }
+    ],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/AssetTypeResponse",
+    "summary": "Get one asset type",
+    "x_agent_confirm": null,
+    "x_agent_links": {
+      "policy": "none",
+      "reason": "No safe, specific web handoff is registered for asset_types.get_flat yet."
+    },
+    "x_cli": {
+      "group": "asset_types",
+      "mutates": false,
+      "summary": "Get one asset type",
+      "verb": "get-flat"
     }
   },
   {
@@ -1151,6 +1258,46 @@
       "mutates": true,
       "summary": "Update a workspace-custom asset type",
       "verb": "update"
+    }
+  },
+  {
+    "agent_link_routes": {},
+    "body_schema_ref": "#/components/schemas/AssetTypeUpdateRequest",
+    "group": "asset_types",
+    "http": {
+      "method": "PATCH",
+      "path": "/w/{slug}/api/v1/asset_types/{type_id}"
+    },
+    "idempotent": false,
+    "name": "update-flat",
+    "operation_id": "asset_types.update_flat",
+    "path_params": [
+      {
+        "name": "type_id",
+        "required": true,
+        "schema": {
+          "title": "Type Id",
+          "type": "string"
+        }
+      }
+    ],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/AssetTypeResponse",
+    "summary": "Update a workspace-custom asset type",
+    "x_agent_confirm": {
+      "risk": "medium",
+      "summary": "Update a workspace-custom asset type?",
+      "verb": "Update a workspace-custom asset type"
+    },
+    "x_agent_links": {
+      "policy": "none",
+      "reason": "No safe, specific web handoff is registered for asset_types.update_flat yet."
+    },
+    "x_cli": {
+      "group": "asset_types",
+      "mutates": true,
+      "summary": "Update a workspace-custom asset type",
+      "verb": "update-flat"
     }
   },
   {
@@ -4955,6 +5102,46 @@
     "body_schema_ref": null,
     "group": "documents",
     "http": {
+      "method": "DELETE",
+      "path": "/w/{slug}/api/v1/documents/{document_id}"
+    },
+    "idempotent": true,
+    "name": "delete",
+    "operation_id": "documents.delete",
+    "path_params": [
+      {
+        "name": "document_id",
+        "required": true,
+        "schema": {
+          "title": "Document Id",
+          "type": "string"
+        }
+      }
+    ],
+    "query_params": [],
+    "response_schema_ref": null,
+    "summary": "Delete a workspace document",
+    "x_agent_confirm": {
+      "risk": "medium",
+      "summary": "Delete a workspace document?",
+      "verb": "Delete a workspace document"
+    },
+    "x_agent_links": {
+      "policy": "none",
+      "reason": "No safe, specific web handoff is registered for documents.delete yet."
+    },
+    "x_cli": {
+      "group": "documents",
+      "mutates": true,
+      "summary": "Delete a workspace document",
+      "verb": "delete"
+    }
+  },
+  {
+    "agent_link_routes": {},
+    "body_schema_ref": null,
+    "group": "documents",
+    "http": {
       "method": "GET",
       "path": "/w/{slug}/api/v1/documents/{document_id}/extraction"
     },
@@ -6138,6 +6325,22 @@
           "default": false,
           "title": "Include Archived",
           "type": "boolean"
+        }
+      },
+      {
+        "name": "property_id",
+        "required": false,
+        "schema": {
+          "anyOf": [
+            {
+              "maxLength": 64,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Property Id"
         }
       },
       {
@@ -8400,7 +8603,7 @@
     "x_agent_confirm": {
       "fields_to_show": [
         "subject",
-        "target",
+        "audience_tokens",
         "confirmed_recipient_count"
       ],
       "risk": "medium",
@@ -10894,6 +11097,110 @@
     }
   },
   {
+    "agent_link_routes": {},
+    "body_schema_ref": null,
+    "group": "properties",
+    "http": {
+      "method": "GET",
+      "path": "/w/{slug}/api/v1/properties/{property_id}/documents"
+    },
+    "idempotent": true,
+    "name": "documents-list",
+    "operation_id": "properties.documents.list",
+    "path_params": [
+      {
+        "name": "property_id",
+        "required": true,
+        "schema": {
+          "title": "Property Id",
+          "type": "string"
+        }
+      }
+    ],
+    "query_params": [
+      {
+        "name": "category",
+        "required": false,
+        "schema": {
+          "anyOf": [
+            {
+              "enum": [
+                "certificate",
+                "contract",
+                "insurance",
+                "invoice",
+                "manual",
+                "other",
+                "permit",
+                "photo",
+                "receipt",
+                "warranty"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Category"
+        }
+      }
+    ],
+    "response_schema_ref": "#/components/schemas/AssetDocumentListResponse",
+    "summary": "List property documents",
+    "x_agent_confirm": null,
+    "x_agent_links": {
+      "policy": "none",
+      "reason": "No safe, specific web handoff is registered for properties.documents.list yet."
+    },
+    "x_cli": {
+      "group": "properties",
+      "mutates": false,
+      "summary": "List property documents",
+      "verb": "documents-list"
+    }
+  },
+  {
+    "agent_link_routes": {},
+    "body_schema_ref": null,
+    "group": "properties",
+    "http": {
+      "method": "POST",
+      "path": "/w/{slug}/api/v1/properties/{property_id}/documents"
+    },
+    "idempotent": false,
+    "name": "documents-upload",
+    "operation_id": "properties.documents.upload",
+    "path_params": [
+      {
+        "name": "property_id",
+        "required": true,
+        "schema": {
+          "title": "Property Id",
+          "type": "string"
+        }
+      }
+    ],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/AssetDocumentResponse",
+    "summary": "Upload a property document",
+    "x_agent_confirm": {
+      "risk": "medium",
+      "summary": "Upload a property document?",
+      "verb": "Upload a property document"
+    },
+    "x_agent_links": {
+      "policy": "none",
+      "reason": "No safe, specific web handoff is registered for properties.documents.upload yet."
+    },
+    "x_cli": {
+      "group": "properties",
+      "mutates": true,
+      "summary": "Upload a property document",
+      "verb": "documents-upload"
+    }
+  },
+  {
     "agent_link_routes": {
       "property.detail": {
         "name": "property.detail",
@@ -11023,6 +11330,82 @@
       "mutates": false,
       "summary": "List properties in a workspace",
       "verb": "list"
+    }
+  },
+  {
+    "agent_link_routes": {},
+    "body_schema_ref": "#/components/schemas/EntitySettingsPatch",
+    "group": "properties",
+    "http": {
+      "method": "PATCH",
+      "path": "/w/{slug}/api/v1/properties/{property_id}/settings"
+    },
+    "idempotent": false,
+    "name": "settings-patch",
+    "operation_id": "properties.settings.patch",
+    "path_params": [
+      {
+        "name": "property_id",
+        "required": true,
+        "schema": {
+          "title": "Property Id",
+          "type": "string"
+        }
+      }
+    ],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/EntitySettingsPayload",
+    "summary": "Patch one property's settings overrides",
+    "x_agent_confirm": {
+      "risk": "medium",
+      "summary": "Patch one property's settings overrides?",
+      "verb": "Patch one property's settings overrides"
+    },
+    "x_agent_links": {
+      "policy": "none",
+      "reason": "No safe, specific web handoff is registered for properties.settings.patch yet."
+    },
+    "x_cli": {
+      "group": "properties",
+      "mutates": true,
+      "summary": "Patch one property's settings overrides",
+      "verb": "settings-patch"
+    }
+  },
+  {
+    "agent_link_routes": {},
+    "body_schema_ref": null,
+    "group": "properties",
+    "http": {
+      "method": "GET",
+      "path": "/w/{slug}/api/v1/properties/{property_id}/settings"
+    },
+    "idempotent": true,
+    "name": "settings-read",
+    "operation_id": "properties.settings.read",
+    "path_params": [
+      {
+        "name": "property_id",
+        "required": true,
+        "schema": {
+          "title": "Property Id",
+          "type": "string"
+        }
+      }
+    ],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/EntitySettingsPayload",
+    "summary": "Read one property's resolved settings cascade",
+    "x_agent_confirm": null,
+    "x_agent_links": {
+      "policy": "none",
+      "reason": "No safe, specific web handoff is registered for properties.settings.read yet."
+    },
+    "x_cli": {
+      "group": "properties",
+      "mutates": false,
+      "summary": "Read one property's resolved settings cascade",
+      "verb": "settings-read"
     }
   },
   {
@@ -13381,6 +13764,48 @@
       "mutates": true,
       "summary": "Regenerate Stay Bundle",
       "verb": "stay-bundles-regenerate"
+    }
+  },
+  {
+    "agent_link_routes": {},
+    "body_schema_ref": "#/components/schemas/ManualStayUpdateRequest",
+    "group": "stays",
+    "http": {
+      "method": "PATCH",
+      "path": "/w/{slug}/api/v1/stays/{reservation_id}"
+    },
+    "idempotent": false,
+    "name": "update",
+    "operation_id": "stays.update",
+    "path_params": [
+      {
+        "name": "reservation_id",
+        "required": true,
+        "schema": {
+          "maxLength": 64,
+          "minLength": 1,
+          "title": "Reservation Id",
+          "type": "string"
+        }
+      }
+    ],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/ReservationResponse",
+    "summary": "Update Stay",
+    "x_agent_confirm": {
+      "risk": "medium",
+      "summary": "Update Stay?",
+      "verb": "Update Stay"
+    },
+    "x_agent_links": {
+      "policy": "none",
+      "reason": "No safe, specific web handoff is registered for stays.update yet."
+    },
+    "x_cli": {
+      "group": "stays",
+      "mutates": true,
+      "summary": "Update Stay",
+      "verb": "update"
     }
   },
   {
