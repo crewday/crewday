@@ -80,6 +80,7 @@ from sqlalchemy.orm import Session
 
 from app.authz.membership import UnknownSystemGroup, is_member_of
 from app.authz.owners import is_owner_member
+from app.authz.scopes import required_scope_for, scope_satisfied
 from app.domain.identity._action_catalog import (
     ACTION_CATALOG,
     ActionSpec,
@@ -90,6 +91,7 @@ __all__ = [
     "ApprovalRequired",
     "CatalogDrift",
     "EmptyPermissionRuleRepository",
+    "InsufficientScope",
     "InvalidScope",
     "PermissionCheck",
     "PermissionDenied",
@@ -159,6 +161,31 @@ class ApprovalRequired(RuntimeError):
         self.scope_kind = scope_kind
         self.scope_id = scope_id
         self.actor_id = actor_id
+
+
+class InsufficientScope(RuntimeError):
+    """A scoped API token lacked the scope the action requires (§03).
+
+    Raised by :func:`require` when the caller is a scoped API token
+    (``ctx.principal_kind == "token"`` + ``ctx.token_kind == "scoped"``)
+    whose granted ``token_scopes`` do not cover the scope
+    :func:`app.authz.scopes.required_scope_for` maps the action to — or
+    when the action has no scoped-token scope at all (deny-by-default,
+    ``required_scope is None``).
+
+    Distinct from :class:`PermissionDenied`: the router maps this to
+    ``403`` with an ``insufficient_scope`` envelope **and** a
+    ``WWW-Authenticate: error="insufficient_scope" scope="<scope>"``
+    header (§03 "Usage"), so the agent learns exactly which scope to
+    request rather than the opaque ``permission_denied`` a role miss
+    yields. ``required_scope`` is ``None`` for deny-by-default actions;
+    the header then carries only the ``error`` token.
+    """
+
+    def __init__(self, *, action_key: str, required_scope: str | None) -> None:
+        super().__init__(action_key)
+        self.action_key = action_key
+        self.required_scope = required_scope
 
 
 class UnknownActionKey(RuntimeError):
@@ -458,6 +485,38 @@ def _allow(
     return None
 
 
+def _enforce_scoped_token(
+    ctx: WorkspaceContext,
+    *,
+    action_key: str,
+    scope_kind: str,
+    scope_id: str,
+) -> None:
+    """Raise :class:`InsufficientScope` when a scoped token lacks the scope.
+
+    No-op for every non-scoped-token principal. For a scoped token, map
+    the action to its §03 scope (:func:`app.authz.scopes.required_scope_for`)
+    and require the token to hold it (honouring the ``*:read`` ⊂
+    ``*:write`` implication). An action with no mapped scope denies by
+    default — a scoped credential must not pass an action whose authority
+    the operator could not have granted it (see :mod:`app.authz.scopes`).
+    """
+    if ctx.principal_kind != "token" or ctx.token_kind != "scoped":
+        return
+    required = required_scope_for(action_key)
+    if required is not None and scope_satisfied(ctx.token_scopes, required):
+        return
+    _log_denied(
+        action_key=action_key,
+        scope_kind=scope_kind,
+        scope_id=scope_id,
+        actor_id=ctx.actor_id,
+        workspace_id=ctx.workspace_id,
+        reason="insufficient_scope",
+    )
+    raise InsufficientScope(action_key=action_key, required_scope=required)
+
+
 def require(
     session: Session,
     ctx: WorkspaceContext,
@@ -478,6 +537,10 @@ def require(
     * :class:`UnknownActionKey` when ``action_key`` is not catalogued.
     * :class:`InvalidScope` when ``scope_kind`` is not in the
       action's ``valid_scope_kinds``.
+    * :class:`InsufficientScope` when the caller is a scoped API token
+      whose granted scopes do not cover the action's §03 scope (or the
+      action has no scoped-token scope at all). Checked before the role
+      walk; other principals never trip it.
     * :class:`PermissionDenied` on deny.
     * :class:`ApprovalRequired` when the resolver decided ``allow``
       but the action's :class:`~app.domain.identity._action_catalog.ActionSpec`
@@ -499,6 +562,17 @@ def require(
         raise InvalidScope(
             f"action {action_key!r} does not accept scope_kind={scope_kind!r}"
         )
+
+    # Scoped-API-token gate (§03 "Scopes"). Runs BEFORE the role walk so
+    # a scoped token that never held the action's scope is refused with
+    # the ``insufficient_scope`` signal even when the token user's grants
+    # would otherwise allow it — the scope narrows authority, never
+    # widens it. Every other principal (session / owner / demo / system /
+    # delegated / personal) leaves ``token_kind`` unset and skips this
+    # entirely, so their authority is unchanged.
+    _enforce_scoped_token(
+        ctx, action_key=action_key, scope_kind=scope_kind, scope_id=scope_id
+    )
 
     repo = rule_repo if rule_repo is not None else _DEFAULT_RULE_REPO
     scope_chain = _build_scope_chain(

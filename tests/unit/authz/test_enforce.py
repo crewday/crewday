@@ -45,6 +45,7 @@ from app.adapters.db.workspace.models import Workspace
 from app.authz.enforce import (
     ApprovalRequired,
     EmptyPermissionRuleRepository,
+    InsufficientScope,
     InvalidScope,
     PermissionCheck,
     PermissionDenied,
@@ -1119,3 +1120,228 @@ class TestApprovalRequired:
                     scope_kind="workspace",
                     scope_id=seeded.workspace_id,
                 )
+
+
+# -----------------------------------------------------------------------
+# Scoped-API-token scope gate (cd-7t1f1, §03 "Scopes" / "Usage").
+# -----------------------------------------------------------------------
+
+
+def _scoped_ctx(
+    *,
+    workspace_id: str,
+    actor_id: str,
+    scopes: frozenset[str],
+    grant_role: ActorGrantRole = "manager",
+    was_owner: bool = False,
+) -> WorkspaceContext:
+    """Build a scoped-API-token :class:`WorkspaceContext`.
+
+    ``principal_kind='token'`` + ``token_kind='scoped'`` is what arms the
+    §03 scope gate; ``token_scopes`` is the granted scope-key set.
+    """
+    return WorkspaceContext(
+        workspace_id=workspace_id,
+        workspace_slug="test-ws",
+        actor_id=actor_id,
+        actor_kind="user",
+        actor_grant_role=grant_role,
+        actor_was_owner_member=was_owner,
+        audit_correlation_id=new_ulid(),
+        principal_kind="token",
+        token_kind="scoped",
+        token_scopes=scopes,
+    )
+
+
+class TestScopedTokenScopeGate:
+    """§03 scoped tokens must hold the action's mapped scope.
+
+    The gate layers on top of the role walk: a scoped token needs BOTH
+    the scope AND whatever the role resolution required. It never widens
+    authority and never fires for non-scoped principals.
+    """
+
+    def test_matching_scope_allows(
+        self, factory: sessionmaker[Session]
+    ) -> None:
+        """A scoped token with the mapped scope passes the matching action."""
+        with factory() as s:
+            seeded = _seed(s)
+            s.commit()
+            ctx = _scoped_ctx(
+                workspace_id=seeded.workspace_id,
+                actor_id=seeded.manager_user_id,
+                scopes=frozenset({"tasks:write"}),
+            )
+            # tasks.create → tasks:write; manager grant satisfies the role
+            # walk. Both pass ⇒ allow (returns None).
+            assert (
+                require(
+                    s,
+                    ctx,
+                    action_key="tasks.create",
+                    scope_kind="workspace",
+                    scope_id=seeded.workspace_id,
+                )
+                is None
+            )
+
+    def test_missing_scope_denies_despite_role(
+        self, factory: sessionmaker[Session]
+    ) -> None:
+        """The vulnerability fix: a tasks-only token cannot manage tokens.
+
+        The token user is a manager (role walk would allow
+        ``api_tokens.manage`` via default_allow), but the token holds only
+        ``tasks:read`` — not the ``admin:rotate`` the action maps to — so
+        the scope gate denies with ``insufficient_scope`` first.
+        """
+        with factory() as s:
+            seeded = _seed(s)
+            s.commit()
+            ctx = _scoped_ctx(
+                workspace_id=seeded.workspace_id,
+                actor_id=seeded.manager_user_id,
+                scopes=frozenset({"tasks:read"}),
+            )
+            with pytest.raises(InsufficientScope) as exc:
+                require(
+                    s,
+                    ctx,
+                    action_key="api_tokens.manage",
+                    scope_kind="workspace",
+                    scope_id=seeded.workspace_id,
+                )
+            assert exc.value.required_scope == "admin:rotate"
+            assert exc.value.action_key == "api_tokens.manage"
+
+    def test_unmapped_action_denies_by_default(
+        self, factory: sessionmaker[Session]
+    ) -> None:
+        """An action with no §03 scope denies scoped tokens (required=None)."""
+        with factory() as s:
+            seeded = _seed(s)
+            s.commit()
+            ctx = _scoped_ctx(
+                workspace_id=seeded.workspace_id,
+                actor_id=seeded.manager_user_id,
+                scopes=frozenset({"tasks:write", "properties:write"}),
+            )
+            # scope.view has no mapped scope → deny-by-default even though
+            # the manager role would allow it.
+            with pytest.raises(InsufficientScope) as exc:
+                require(
+                    s,
+                    ctx,
+                    action_key="scope.view",
+                    scope_kind="workspace",
+                    scope_id=seeded.workspace_id,
+                )
+            assert exc.value.required_scope is None
+
+    def test_read_implied_by_write(
+        self, factory: sessionmaker[Session]
+    ) -> None:
+        """Holding ``properties:write`` satisfies a ``properties:read`` action."""
+        with factory() as s:
+            seeded = _seed(s)
+            s.commit()
+            ctx = _scoped_ctx(
+                workspace_id=seeded.workspace_id,
+                actor_id=seeded.manager_user_id,
+                scopes=frozenset({"properties:write"}),
+            )
+            assert (
+                require(
+                    s,
+                    ctx,
+                    action_key="properties.read",
+                    scope_kind="workspace",
+                    scope_id=seeded.workspace_id,
+                )
+                is None
+            )
+
+    def test_scope_gate_precedes_role_walk(
+        self, factory: sessionmaker[Session]
+    ) -> None:
+        """A scoped token with the scope but no role still hits the role deny.
+
+        Confirms layering: scope present ⇒ gate passes ⇒ the role walk
+        runs and denies the stranger (no grant) with ``PermissionDenied``,
+        NOT ``InsufficientScope``.
+        """
+        with factory() as s:
+            seeded = _seed(s)
+            s.commit()
+            ctx = _scoped_ctx(
+                workspace_id=seeded.workspace_id,
+                actor_id=seeded.stranger_user_id,
+                scopes=frozenset({"payroll:run"}),
+                grant_role="guest",
+            )
+            with pytest.raises(PermissionDenied):
+                require(
+                    s,
+                    ctx,
+                    action_key="payroll.issue_payslip",
+                    scope_kind="workspace",
+                    scope_id=seeded.workspace_id,
+                )
+
+    def test_session_principal_unaffected(
+        self, factory: sessionmaker[Session]
+    ) -> None:
+        """A session (non-token) manager is never scope-gated."""
+        with factory() as s:
+            seeded = _seed(s)
+            s.commit()
+            # Plain _ctx ⇒ principal_kind defaults to "session",
+            # token_scopes empty. api_tokens.manage must still allow.
+            ctx = _ctx(
+                workspace_id=seeded.workspace_id,
+                actor_id=seeded.manager_user_id,
+            )
+            assert (
+                require(
+                    s,
+                    ctx,
+                    action_key="api_tokens.manage",
+                    scope_kind="workspace",
+                    scope_id=seeded.workspace_id,
+                )
+                is None
+            )
+
+    def test_delegated_token_unaffected(
+        self, factory: sessionmaker[Session]
+    ) -> None:
+        """A delegated token (scope-less) resolves on grants, not scopes."""
+        with factory() as s:
+            seeded = _seed(s)
+            s.commit()
+            ctx = WorkspaceContext(
+                workspace_id=seeded.workspace_id,
+                workspace_slug="test-ws",
+                actor_id=seeded.manager_user_id,
+                actor_kind="user",
+                actor_grant_role="manager",
+                actor_was_owner_member=False,
+                audit_correlation_id=new_ulid(),
+                principal_kind="token",
+                token_kind="delegated",
+                token_scopes=frozenset(),
+            )
+            # Delegated tokens carry no scopes; the gate must skip them and
+            # let the manager grant authorise api_tokens.manage.
+            assert (
+                require(
+                    s,
+                    ctx,
+                    action_key="api_tokens.manage",
+                    scope_kind="workspace",
+                    scope_id=seeded.workspace_id,
+                )
+                is None
+            )

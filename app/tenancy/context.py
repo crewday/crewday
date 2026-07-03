@@ -9,7 +9,7 @@ See ``docs/specs/01-architecture.md`` §"WorkspaceContext".
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Literal
 
 __all__ = ["ActorGrantRole", "ActorKind", "PrincipalKind", "WorkspaceContext"]
@@ -83,3 +83,24 @@ class WorkspaceContext:
     actor_was_owner_member: bool
     audit_correlation_id: str
     principal_kind: PrincipalKind = "session"
+
+    # Scoped-API-token authority (§03 "Scopes"). Populated only when
+    # ``principal_kind == "token"`` and the verified token's ``kind``
+    # is ``"scoped"`` — the middleware threads them from the
+    # :class:`~app.tenancy.middleware.ActorIdentity` where the verified
+    # token's ``scope_json`` already lands. ``token_kind`` mirrors the
+    # DB discriminator (``scoped`` / ``delegated`` / ``personal``) so
+    # the authz gate can single out scoped tokens; ``token_scopes`` is
+    # the set of *granted* scope keys (truthy ``scope_json`` values).
+    #
+    # The scope gate in :func:`app.authz.enforce.require` reads these:
+    # a scoped token must additionally hold the scope the route's
+    # action maps to, or the check raises
+    # :class:`~app.authz.enforce.InsufficientScope` (403). Every other
+    # principal (session, owner, demo, system, delegated, personal)
+    # leaves them at the conservative defaults — ``token_kind=None`` +
+    # an empty scope set — so the gate is a no-op for them and their
+    # authority is unchanged. A ``frozenset`` keeps the context
+    # hashable and immutable like the rest of the record.
+    token_kind: str | None = None
+    token_scopes: frozenset[str] = field(default_factory=frozenset)

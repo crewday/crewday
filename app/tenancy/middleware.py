@@ -675,6 +675,14 @@ def resolve_workspace(
         actor_was_owner_member=is_owner,
         audit_correlation_id=audit_correlation_id,
         principal_kind=actor.principal_kind,
+        token_kind=actor.token_kind,
+        # Carry only the *granted* scope keys (truthy ``scope_json``
+        # values) so the authz scope gate reads a clean membership set.
+        # Empty for every non-scoped principal — ``token_scopes`` is a
+        # ``{}`` default on the session / cookie / demo branches.
+        token_scopes=frozenset(
+            key for key, granted in actor.token_scopes.items() if granted
+        ),
     )
 
 

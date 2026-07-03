@@ -501,8 +501,11 @@ class TestAuthorityFollowsUser:
                 actor_was_owner_member=False,
                 audit_correlation_id=new_ulid(),
             )
-            # A scoped token with a *different* scope ('tasks:read')
-            # so a default gate on api_tokens.manage still denies.
+            # A scoped token whose scope ('tasks:read') does NOT cover
+            # the action's mapped scope. ``api_tokens.manage`` requires
+            # ``admin:rotate`` (§03 "Guardrails" / app.authz.scopes), so
+            # the scope gate (cd-7t1f1) denies with ``insufficient_scope``
+            # regardless of the user's grants.
             minted = mint_token(
                 s,
                 outsider_ctx,
@@ -522,17 +525,13 @@ class TestAuthorityFollowsUser:
             r1 = client.get("/w/scoped-auth/api/v1/protected", headers=headers)
             assert r1.status_code == 403
 
-            # Add manager grant. A delegated token would now pass; a
-            # scoped token with tasks:read scope but no api_tokens.manage
-            # right is gated by the action-catalog default-allow set.
-            # Because the user IS now a manager, the catalog default-
-            # allow ("owners","managers") fires AT THE SCOPE-WALK
-            # LEVEL — the scoped token doesn't suppress it. The
-            # interesting invariant is: removing the grant flips the
-            # scoped token back to deny exactly like it does for a
-            # delegated token, because both surface the user's grants
-            # via the same `require()` walk — the difference is the
-            # token's own scope_json, which we don't exercise here.
+            # Add a manager grant. A *delegated* token would now pass —
+            # its authority tracks the user's grants. A *scoped* token
+            # does NOT: the ``admin:rotate`` scope it was never issued is
+            # missing, so the scope gate refuses it with
+            # ``insufficient_scope`` even though the role walk would now
+            # allow the user. The user's grants do not move the dial for
+            # a scoped token — exactly what this test's name pins.
             _grant_role(
                 session_factory,
                 workspace_id=ws_id,
@@ -540,7 +539,17 @@ class TestAuthorityFollowsUser:
                 grant_role="manager",
             )
             r2 = client.get("/w/scoped-auth/api/v1/protected", headers=headers)
-            assert r2.status_code == 200
+            assert r2.status_code == 403
+            # This harness builds a bare ``FastAPI()`` without
+            # ``add_exception_handlers``, so FastAPI's default handler
+            # renders ``HTTPException.detail`` verbatim under ``detail``
+            # (in production, app/api/errors.py spreads the dict to
+            # top-level §12 fields instead). The WWW-Authenticate header
+            # below is the spec-pinned invariant and holds on both paths.
+            assert r2.json()["detail"]["error"] == "insufficient_scope"
+            assert r2.json()["detail"]["scope"] == "admin:rotate"
+            assert 'error="insufficient_scope"' in r2.headers["WWW-Authenticate"]
+            assert 'scope="admin:rotate"' in r2.headers["WWW-Authenticate"]
 
             _revoke_role(
                 session_factory,

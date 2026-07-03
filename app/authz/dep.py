@@ -34,6 +34,7 @@ from app.api.deps import current_workspace_context, db_session
 from app.authz.approval_mint import mint_and_envelope_for_http
 from app.authz.enforce import (
     ApprovalRequired,
+    InsufficientScope,
     InvalidScope,
     PermissionDenied,
     PermissionRuleRepository,
@@ -71,6 +72,32 @@ def _deny_to_http(action_key: str) -> HTTPException:
     return HTTPException(
         status_code=status.HTTP_403_FORBIDDEN,
         detail={"error": "permission_denied", "action_key": action_key},
+    )
+
+
+def _insufficient_scope_to_http(exc: InsufficientScope) -> HTTPException:
+    """Map a scoped-token :class:`InsufficientScope` into the 403 shape.
+
+    §03 "Usage" pins ``403`` with a ``WWW-Authenticate: error=
+    "insufficient_scope" scope="<scope>"`` header so the agent learns
+    exactly which scope to request. ``scope`` is omitted for
+    deny-by-default actions (no mapped scope) — the header then carries
+    only the ``error`` token, still RFC 6750-valid. The body mirrors the
+    §12 envelope with an ``insufficient_scope`` error code, distinct
+    from the role-miss ``permission_denied``.
+    """
+    challenge = 'error="insufficient_scope"'
+    detail: dict[str, str] = {
+        "error": "insufficient_scope",
+        "action_key": exc.action_key,
+    }
+    if exc.required_scope is not None:
+        challenge = f'{challenge} scope="{exc.required_scope}"'
+        detail["scope"] = exc.required_scope
+    return HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail=detail,
+        headers={"WWW-Authenticate": challenge},
     )
 
 
@@ -122,6 +149,9 @@ def Permission(
 
     * :class:`UnknownActionKey` → 422 ``unknown_action_key``.
     * :class:`InvalidScope` → 422 ``invalid_scope_kind``.
+    * :class:`InsufficientScope` → 403 ``insufficient_scope`` with a
+      ``WWW-Authenticate: error="insufficient_scope"`` header (§03
+      "Usage"); only scoped API tokens can trip it.
     * :class:`PermissionDenied` → 403 ``permission_denied``.
     * :class:`ApprovalRequired` → 409 ``approval_required`` (mints
       one ``approval_request`` row and commits before returning).
@@ -197,6 +227,8 @@ def Permission(
             raise _misuse_to_http("unknown_action_key", action_key, str(exc)) from exc
         except InvalidScope as exc:
             raise _misuse_to_http("invalid_scope_kind", action_key, str(exc)) from exc
+        except InsufficientScope as exc:
+            raise _insufficient_scope_to_http(exc) from exc
         except PermissionDenied as exc:
             raise _deny_to_http(action_key) from exc
         except ApprovalRequired as exc:
