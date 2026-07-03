@@ -167,6 +167,20 @@ def test_purpose_label_unknown_falls_back() -> None:
     assert purpose_label("never_seen_before") == "complete your crew.day action"
 
 
+def test_purpose_label_untranslated_locale_falls_back_to_english() -> None:
+    """Staged English-only: a locale with no translation yields the
+    ``en-US`` catalog phrase, so v1 output stays byte-identical while the
+    phrase is now catalog-keyed and translation-ready."""
+    assert (
+        purpose_label("signup_verify", locale="fr")
+        == "verify your email and finish signing up"
+    )
+    assert (
+        purpose_label("signup_verify", locale="en-US")
+        == "verify your email and finish signing up"
+    )
+
+
 def test_render_auth_email_unknown_template_raises() -> None:
     with pytest.raises(AuthTemplateNotFound) as excinfo:
         render_auth_email("does_not_exist", foo="bar")

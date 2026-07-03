@@ -16,9 +16,10 @@ Covers:
   push_enqueue not configured → skipped with a distinct audit reason.
 * ``TemplateNotFound`` raised LOUDLY when the kind's default template
   does not exist.
-* Locale fallback: ``fr`` template used when recipient's locale is
-  ``fr``; falls back to the locale-free default when a locale-specific
-  template is missing.
+* Locale fallback: a locale-specific template variant is used when one
+  exists; a missing variant falls back to the locale-free default.
+* Notification locale resolution (§18): ``recipient.locale`` →
+  ``workspace.default_locale`` → ``en-US``.
 * Recipient not on file: :class:`LookupError` raised.
 * Enum ↔ DB CHECK parity: the module-level import guard refuses to
   import with drift.
@@ -167,8 +168,16 @@ class FakePushQueue:
 # ---------------------------------------------------------------------------
 
 
-def _bootstrap_workspace(s: Session, *, slug: str) -> str:
+def _bootstrap_workspace(
+    s: Session,
+    *,
+    slug: str,
+    default_locale: str | None = None,
+) -> str:
     workspace_id = new_ulid()
+    kwargs: dict[str, Any] = {}
+    if default_locale is not None:
+        kwargs["default_locale"] = default_locale
     s.add(
         Workspace(
             id=workspace_id,
@@ -177,6 +186,7 @@ def _bootstrap_workspace(s: Session, *, slug: str) -> str:
             plan="free",
             quota_json={},
             created_at=_PINNED,
+            **kwargs,
         )
     )
     s.flush()
@@ -327,18 +337,29 @@ class TestTemplateLoader:
         )
         assert "Clean room 3" in out
 
-    def test_locale_specific_template_takes_precedence(self) -> None:
-        """``task_assigned.fr.subject.j2`` exists and is used for ``fr``."""
-        loader = Jinja2TemplateLoader.default()
+    def test_locale_specific_template_takes_precedence(self, tmp_path: Path) -> None:
+        """An exact-locale variant is picked over the locale-free default.
+
+        Uses a temp tree rather than a shipped locale file — v1 ships
+        English only (the lone ``task_assigned.fr.subject.j2`` was
+        removed as incoherent), so the precedence rule is exercised
+        against fixtures the test owns.
+        """
+        env = Environment(
+            loader=FileSystemLoader(str(tmp_path)),
+            autoescape=select_autoescape(["html", "j2"]),
+            undefined=StrictUndefined,
+        )
+        (tmp_path / "kind.fr.subject.j2").write_text("french\n")
+        (tmp_path / "kind.subject.j2").write_text("english\n")
+        loader = Jinja2TemplateLoader(env=env)
         out = loader.render(
-            kind="task_assigned",
+            kind="kind",
             locale="fr",
             channel="subject",
-            context={"task_title": "X"},
+            context={},
         )
-        # French file uses the no-break colon; the presence of the
-        # accented word proves the fr file was picked, not the default.
-        assert "Tâche" in out
+        assert out.strip() == "french"
 
     def test_unknown_locale_falls_back_to_default(self) -> None:
         """A locale with no template variant falls through to English."""
@@ -567,6 +588,7 @@ class TestNotifyHappyPath:
         row = session.execute(select(Notification)).scalar_one()
 
         assert row.subject == "Approval needed: Broadcast 'Test' to 3 recipients?"
+        assert row.body_md is not None
         assert "**Broadcast 'Test' to 3 recipients?**" in row.body_md
         assert "&#39;" not in row.subject
         assert "&#39;" not in row.body_md
@@ -976,14 +998,37 @@ class TestTemplateNotFoundLoud:
 # ---------------------------------------------------------------------------
 
 
+@dataclass
+class _RecordingLoader:
+    """:class:`TemplateLoader` double that records the resolved locale.
+
+    Lets the fallback-chain tests observe exactly which locale
+    :meth:`NotificationService.notify` resolved, without depending on a
+    shipped locale-specific template file.
+    """
+
+    locales: list[str | None]
+
+    def render(
+        self,
+        *,
+        kind: str,
+        locale: str | None,
+        channel: str,
+        context: Mapping[str, Any],
+    ) -> str:
+        self.locales.append(locale)
+        return "x"
+
+
 class TestLocaleFallback:
-    def test_recipient_locale_selects_french_template(
+    def test_recipient_locale_wins(
         self,
         session: Session,
         base_env: tuple[WorkspaceContext, str, FrozenClock],
     ) -> None:
+        """Chain step 1: ``recipient.locale`` is used when present."""
         ctx, _recipient_id, clock = base_env
-        # Re-insert a recipient with a French locale.
         fr_recipient_id = _bootstrap_user(
             session,
             email="maria@example.com",
@@ -992,23 +1037,98 @@ class TestLocaleFallback:
         )
         session.commit()
 
-        mailer = InMemoryMailer()
-        service = NotificationService(
+        loader = _RecordingLoader(locales=[])
+        NotificationService(
             session=session,
             ctx=ctx,
-            mailer=mailer,
+            mailer=InMemoryMailer(),
             clock=clock,
             bus=bus,
-        )
-        service.notify(
+            templates=loader,
+        ).notify(
             recipient_user_id=fr_recipient_id,
             kind=NotificationKind.TASK_ASSIGNED,
-            payload={"task_title": "Nettoyer la chambre 3"},
+            payload={"task_title": "X"},
         )
 
-        assert len(mailer.sent) == 1
-        # The French template used 'Tâche assignée'.
-        assert "Tâche" in mailer.sent[0].subject
+        assert loader.locales
+        assert all(seen == "fr" for seen in loader.locales)
+
+    def test_falls_back_to_workspace_default(
+        self,
+        session: Session,
+    ) -> None:
+        """Chain step 2: absent ``recipient.locale`` → workspace default."""
+        ws_id = _bootstrap_workspace(session, slug="ws-es", default_locale="es")
+        recipient_id = _bootstrap_user(
+            session,
+            email="norm@example.com",
+            display_name="Norm",
+            locale=None,
+        )
+        actor_id = _bootstrap_user(
+            session,
+            email="act-es@example.com",
+            display_name="Act",
+        )
+        session.commit()
+        ctx = _ctx(workspace_id=ws_id, actor_id=actor_id)
+
+        loader = _RecordingLoader(locales=[])
+        NotificationService(
+            session=session,
+            ctx=ctx,
+            mailer=InMemoryMailer(),
+            clock=FrozenClock(_PINNED),
+            bus=bus,
+            templates=loader,
+        ).notify(
+            recipient_user_id=recipient_id,
+            kind=NotificationKind.TASK_ASSIGNED,
+            payload={"task_title": "X"},
+        )
+
+        assert loader.locales
+        assert all(seen == "es" for seen in loader.locales)
+
+    def test_falls_back_to_en_us_when_both_absent(
+        self,
+        session: Session,
+    ) -> None:
+        """Chain step 3: no recipient locale + blank workspace default → en-US."""
+        # An empty workspace default_locale exercises the final fallback
+        # (the column is NOT NULL but an empty string is falsy).
+        ws_id = _bootstrap_workspace(session, slug="ws-blank", default_locale="")
+        recipient_id = _bootstrap_user(
+            session,
+            email="blank@example.com",
+            display_name="Blank",
+            locale=None,
+        )
+        actor_id = _bootstrap_user(
+            session,
+            email="act-blank@example.com",
+            display_name="Act",
+        )
+        session.commit()
+        ctx = _ctx(workspace_id=ws_id, actor_id=actor_id)
+
+        loader = _RecordingLoader(locales=[])
+        NotificationService(
+            session=session,
+            ctx=ctx,
+            mailer=InMemoryMailer(),
+            clock=FrozenClock(_PINNED),
+            bus=bus,
+            templates=loader,
+        ).notify(
+            recipient_user_id=recipient_id,
+            kind=NotificationKind.TASK_ASSIGNED,
+            payload={"task_title": "X"},
+        )
+
+        assert loader.locales
+        assert all(seen == "en-US" for seen in loader.locales)
 
     def test_unknown_locale_falls_back_to_default(
         self,

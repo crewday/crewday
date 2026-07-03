@@ -13,6 +13,27 @@ msgstr "Pending"
 msgid "approval.status.rejected"
 msgstr "Rejected"
 
+msgid "auth.magic_link.purpose.email_change_confirm"
+msgstr "confirm your new email address"
+
+msgid "auth.magic_link.purpose.email_change_revert"
+msgstr "revert the recent email change on your account"
+
+msgid "auth.magic_link.purpose.fallback"
+msgstr "complete your crew.day action"
+
+msgid "auth.magic_link.purpose.grant_invite"
+msgstr "accept the invite to join a workspace"
+
+msgid "auth.magic_link.purpose.recover_passkey"
+msgstr "recover your account and enrol a new passkey"
+
+msgid "auth.magic_link.purpose.signup_verify"
+msgstr "verify your email and finish signing up"
+
+msgid "auth.magic_link.purpose.workspace_verify_ownership"
+msgstr "verify ownership of your workspace"
+
 msgid "i18n.testGreeting"
 msgstr "Hello, {name}!"
 

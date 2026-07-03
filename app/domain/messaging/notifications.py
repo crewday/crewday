@@ -112,6 +112,7 @@ from app.adapters.db.messaging.models import (
     Notification,
     PushToken,
 )
+from app.adapters.db.workspace.models import Workspace
 from app.adapters.mail.ports import MailDeliveryError, Mailer
 from app.adapters.notifications.ports import NotificationKind
 from app.audit import write_audit
@@ -119,7 +120,7 @@ from app.domain.messaging.ports import EmailDeliveryRepository
 from app.events import NotificationCreated
 from app.events.bus import EventBus
 from app.events.bus import bus as default_event_bus
-from app.i18n import activate_locale, install_jinja_i18n
+from app.i18n import DEFAULT_LOCALE, activate_locale, install_jinja_i18n
 from app.tenancy import WorkspaceContext
 from app.util.clock import Clock, SystemClock
 from app.util.ulid import new_ulid
@@ -498,7 +499,7 @@ class NotificationService:
         context.setdefault("recipient_display_name", recipient.display_name)
         context.setdefault("recipient_user_id", recipient.id)
         context.setdefault("workspace_id", self.ctx.workspace_id)
-        locale = recipient.locale  # may be None → English defaults
+        locale = self._resolve_locale(recipient)
 
         templates = self.templates or Jinja2TemplateLoader.default()
 
@@ -748,6 +749,29 @@ class NotificationService:
         if user is None:
             raise LookupError(f"recipient_user_id={recipient_user_id!r} not found")
         return user
+
+    def _resolve_locale(self, recipient: User) -> str:
+        """Resolve the notification locale per §18 "Notification locale".
+
+        Chain: ``recipient.locale`` → ``workspace.default_locale`` →
+        ``en-US``. The first non-empty candidate wins; the raw tag is
+        returned unnormalised so the template loader's own
+        region-to-language fallback (``fr-CA`` → ``fr`` → default) still
+        applies. An unknown tag with no on-disk variant falls through to
+        the English default at render time.
+        """
+        candidates = (recipient.locale, self._workspace_default_locale())
+        for candidate in candidates:
+            if candidate and candidate.strip():
+                return candidate
+        return DEFAULT_LOCALE
+
+    def _workspace_default_locale(self) -> str | None:
+        """Return the workspace's ``default_locale`` (``None`` if absent)."""
+        stmt = select(Workspace.default_locale).where(
+            Workspace.id == self.ctx.workspace_id
+        )
+        return self.session.execute(stmt).scalar_one_or_none()
 
     def _render_required(
         self,

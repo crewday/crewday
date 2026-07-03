@@ -13,6 +13,27 @@ msgstr ""
 msgid "approval.status.rejected"
 msgstr ""
 
+msgid "auth.magic_link.purpose.email_change_confirm"
+msgstr ""
+
+msgid "auth.magic_link.purpose.email_change_revert"
+msgstr ""
+
+msgid "auth.magic_link.purpose.fallback"
+msgstr ""
+
+msgid "auth.magic_link.purpose.grant_invite"
+msgstr ""
+
+msgid "auth.magic_link.purpose.recover_passkey"
+msgstr ""
+
+msgid "auth.magic_link.purpose.signup_verify"
+msgstr ""
+
+msgid "auth.magic_link.purpose.workspace_verify_ownership"
+msgstr ""
+
 msgid "i18n.testGreeting"
 msgstr ""
 

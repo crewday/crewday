@@ -2,6 +2,13 @@
   "approval.status.approved": "Åṕṕŕöṽéð ~~",
   "approval.status.pending": "Ṕéñðíñĝ ~~",
   "approval.status.rejected": "Ŕéĵéçŧéð ~~",
+  "auth.magic_link.purpose.email_change_confirm": "çöñƒíŕṁ ýöúŕ ñéŵ éṁåíĺ åððŕéšš ~~~~~~~~~",
+  "auth.magic_link.purpose.email_change_revert": "ŕéṽéŕŧ ŧĥé ŕéçéñŧ éṁåíĺ çĥåñĝé öñ ýöúŕ åççöúñŧ ~~~~~~~~~~~~~",
+  "auth.magic_link.purpose.fallback": "çöṁṕĺéŧé ýöúŕ çŕéŵ.ðåý åçŧíöñ ~~~~~~~~",
+  "auth.magic_link.purpose.grant_invite": "åççéṕŧ ŧĥé íñṽíŧé ŧö ĵöíñ å ŵöŕķšṕåçé ~~~~~~~~~~~",
+  "auth.magic_link.purpose.recover_passkey": "ŕéçöṽéŕ ýöúŕ åççöúñŧ åñð éñŕöĺ å ñéŵ ṕåššķéý ~~~~~~~~~~~~~",
+  "auth.magic_link.purpose.signup_verify": "ṽéŕíƒý ýöúŕ éṁåíĺ åñð ƒíñíšĥ šíĝñíñĝ úṕ ~~~~~~~~~~~",
+  "auth.magic_link.purpose.workspace_verify_ownership": "ṽéŕíƒý öŵñéŕšĥíṕ öƒ ýöúŕ ŵöŕķšṕåçé ~~~~~~~~~~",
   "i18n.testGreeting": "Ĥéĺĺö,  ~~{name}! ~",
   "login.firstTime": "Ƒíŕšŧ ŧíṁé ĥéŕé? Öṕéñ ŧĥé íñṽíŧé ĺíñķ ýöúŕ ṁåñåĝéŕ šéñŧ. ~~~~~~~~~~~~~~~~",
   "login.inviteExampleLink": "Šéé ŵĥåŧ åççéṕŧíñĝ åñ íñṽíŧé ĺööķš ĺíķé → ~~~~~~~~~~~~",
@@ -11,7 +18,7 @@
   "login.title": "Šíĝñ íñ ŵíŧĥ ýöúŕ ṕåššķéý ~~~~~~~",
   "notification.task_assigned": "Ŧåšķ åššíĝñéð:  ~~~~{task_title}",
   "task.status.cancelled": "Çåñçéĺĺéð ~~",
-  "task.status.completed": "Çöḿṕĺéţéð ~~",
+  "task.status.completed": "Çöṁṕĺéŧéð ~~",
   "task.status.in_progress": "Ĩñ ṕŕöĝŕéšš ~~~",
   "task.status.scheduled": "Šçĥéðúĺéð ~~"
 }

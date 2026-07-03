@@ -31,8 +31,11 @@ Public surface:
   ``None`` when the template has no HTML alternative.
 * :func:`purpose_label` — magic-link purpose → human-readable phrase
   ("verify your email and finish signing up", "recover your account",
-  ...). Kept as a Python map because the lookup is data, not template
-  copy.
+  ...), resolved through the gettext catalog at the requested locale.
+  The map holds catalog keys, not English copy, so the phrases live in
+  ``app/i18n/locales`` alongside every other backend-notification
+  string. v1 ships English only; a missing locale falls back to
+  ``en-US`` inside :func:`app.i18n.t`.
 
 See ``docs/specs/10-messaging-notifications.md`` §"Email template
 system" and ``docs/specs/03-auth-and-tokens.md``.
@@ -46,6 +49,8 @@ from typing import Any, Final
 
 from jinja2 import Environment, FileSystemLoader, StrictUndefined, select_autoescape
 from jinja2 import TemplateNotFound as _JinjaTemplateNotFound
+
+from app.i18n import t
 
 __all__ = [
     "AUTH_TEMPLATE_ROOT",
@@ -152,26 +157,36 @@ def render_auth_email(
     return subject, body_text, body_html
 
 
-# Magic-link purpose → human-readable phrase. Kept as a Python map
-# (not a per-purpose template) because the value is data the subject
-# AND body templates both interpolate via ``purpose_label`` — splitting
-# into two files would duplicate the copy.
-_PURPOSE_LABELS: Final[dict[str, str]] = {
-    "signup_verify": "verify your email and finish signing up",
-    "recover_passkey": "recover your account and enrol a new passkey",
-    "email_change_confirm": "confirm your new email address",
-    "email_change_revert": "revert the recent email change on your account",
-    "grant_invite": "accept the invite to join a workspace",
-    "workspace_verify_ownership": "verify ownership of your workspace",
+# Magic-link purpose → gettext catalog key. The subject AND body
+# templates both interpolate the resolved phrase via ``purpose_label``;
+# the phrases themselves live in ``app/i18n/locales`` so they are
+# translation-ready without a code change (v1 ships English only).
+_PURPOSE_LABEL_KEYS: Final[dict[str, str]] = {
+    "signup_verify": "auth.magic_link.purpose.signup_verify",
+    "recover_passkey": "auth.magic_link.purpose.recover_passkey",
+    "email_change_confirm": "auth.magic_link.purpose.email_change_confirm",
+    "email_change_revert": "auth.magic_link.purpose.email_change_revert",
+    "grant_invite": "auth.magic_link.purpose.grant_invite",
+    "workspace_verify_ownership": "auth.magic_link.purpose.workspace_verify_ownership",
 }
 
+# Fallback key for an unknown purpose — a future purpose added without
+# updating the map still resolves to a sane generic phrase.
+_PURPOSE_LABEL_FALLBACK_KEY: Final[str] = "auth.magic_link.purpose.fallback"
 
-def purpose_label(purpose: str) -> str:
+
+def purpose_label(purpose: str, *, locale: str | None = None) -> str:
     """Return the human-readable phrase for a magic-link ``purpose``.
 
+    Resolved through the gettext catalog at ``locale`` (the notification
+    locale). ``locale=None`` resolves to ``en-US`` inside
+    :func:`app.i18n.t`, and any locale without a translation falls back
+    to the ``en-US`` catalog — so v1's English output is unchanged.
+
     Unknown purposes fall back to a generic phrase rather than raising
-    so a future purpose added without updating the label map still
-    produces a sane email. Callers already validate ``purpose`` at the
-    domain layer; a typo there lands elsewhere.
+    so a future purpose added without updating the map still produces a
+    sane email. Callers already validate ``purpose`` at the domain
+    layer; a typo there lands elsewhere.
     """
-    return _PURPOSE_LABELS.get(purpose, "complete your crew.day action")
+    key = _PURPOSE_LABEL_KEYS.get(purpose, _PURPOSE_LABEL_FALLBACK_KEY)
+    return t(key, locale=locale)
