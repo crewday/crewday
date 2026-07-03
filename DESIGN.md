@@ -118,21 +118,21 @@ components:
     typography: "{typography.label-md}"
     rounded: "{rounded.pill}"
     padding: "8px 14px"
-    height: 40px
+    height: 44px
   button-ghost:
     backgroundColor: transparent
     textColor: "{colors.ink-2}"
     typography: "{typography.label-md}"
     rounded: "{rounded.pill}"
     padding: "8px 14px"
-    height: 40px
+    height: 44px
   button-destructive:
     backgroundColor: "{colors.destructive}"
     textColor: "#FFFFFF"
     typography: "{typography.label-md}"
     rounded: "{rounded.pill}"
     padding: "8px 14px"
-    height: 40px
+    height: 44px
   chip:
     backgroundColor: "{colors.paper-2}"
     textColor: "{colors.ink-2}"
@@ -364,7 +364,7 @@ Reuse before inventing; promote variants via BEM modifiers
 
 ### Buttons (`.btn`)
 
-Pill-shaped, 40 px tall by default, `Inter Tight 14/500`.
+Pill-shaped, 44 px tall by default, `Inter Tight 14/500`.
 
 - `.btn` — neutral, on `paper-2`. Use for tertiary actions.
 - `.btn--moss` — primary action. **One per page** (the
@@ -372,9 +372,9 @@ Pill-shaped, 40 px tall by default, `Inter Tight 14/500`.
 - `.btn--rust` — destructive. Confirm via `<dialog>` first.
 - `.btn--ghost` — outlined, `line-strong` border. Secondary action.
 - `.btn--sm` (32 px) and `.btn--lg` (48 px) for density.
-- `.btn--block` — full-width, ≥ 44 px tall. Pairs with size
-  modifiers; use inside `.btn-group--stack` / `--split` for
-  rows of equal CTAs.
+- `.btn--block` — full-width; height follows its size modifier
+  (44 px default). Pairs with size modifiers; use inside
+  `.btn-group--stack` / `--split` for rows of equal CTAs.
 
 Group buttons with `.btn-group` and a layout modifier
 (`--end`, `--center`, `--between`, `--split`, `--stack`). Never
