@@ -332,10 +332,14 @@ pay.
 A worker may **decline** a `scheduled` booking via
 `POST /bookings/{id}/decline` (verb `bookings.decline_self`). The
 server stamps `declined_at`, `declined_reason`, returns the row to
-`status = pending_approval`, clears the `work_engagement_id`
-(unassigned), and notifies the manager via the daily digest +
-agent-message chain. The original assignee is excluded from the
-auto-reassignment candidate pool for that booking.
+`status = pending_approval`, and notifies the manager via the daily
+digest + agent-message chain. The `work_engagement_id` is **not**
+nulled — the v1 column is a `NOT NULL` FK, so "unassigned" is carried
+by the `pending_approval` status plus a non-null `declined_at`, not by
+a null engagement; the manager reassignment flow rewrites
+`work_engagement_id` when it hands the slot to someone else. The
+original assignee is excluded from the auto-reassignment candidate
+pool for that booking (via `declined_at`, not engagement nulling).
 
 Decline is unilateral — no confirmation prompt — but the audit row
 makes the act visible. A worker who declines repeatedly will surface

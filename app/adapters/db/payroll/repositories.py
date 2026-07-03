@@ -47,6 +47,8 @@ from app.domain.payroll.bookings import (
 from app.domain.payroll.ports import (
     BookingPayRepository,
     BookingPayRow,
+    BookingWriteRepository,
+    BookingWriteRow,
     ExpenseLedgerExportRow,
     PayPeriodEntryRow,
     PayPeriodRepository,
@@ -66,6 +68,7 @@ from app.util.ulid import new_ulid
 
 __all__ = [
     "SqlAlchemyBookingPayRepository",
+    "SqlAlchemyBookingWriteRepository",
     "SqlAlchemyPayPeriodRepository",
     "SqlAlchemyPayRuleRepository",
     "SqlAlchemyPayrollExportRepository",
@@ -147,6 +150,32 @@ def _pay_basis(value: str) -> Literal["scheduled", "actual"]:
     if value == "actual":
         return "actual"
     raise ValueError(f"unknown booking pay_basis: {value!r}")
+
+
+def _booking_write_to_row(row: Booking) -> BookingWriteRow:
+    return BookingWriteRow(
+        id=row.id,
+        workspace_id=row.workspace_id,
+        work_engagement_id=row.work_engagement_id,
+        user_id=row.user_id,
+        property_id=row.property_id,
+        client_org_id=row.client_org_id,
+        status=row.status,
+        kind=row.kind,
+        pay_basis=_pay_basis(row.pay_basis),
+        scheduled_start=row.scheduled_start,
+        scheduled_end=row.scheduled_end,
+        actual_minutes=row.actual_minutes,
+        actual_minutes_paid=row.actual_minutes_paid,
+        break_seconds=row.break_seconds,
+        notes_md=row.notes_md,
+        adjusted=row.adjusted,
+        adjustment_reason=row.adjustment_reason,
+        pending_amend_minutes=row.pending_amend_minutes,
+        pending_amend_reason=row.pending_amend_reason,
+        declined_at=row.declined_at,
+        declined_reason=row.declined_reason,
+    )
 
 
 def _booking_to_row(
@@ -676,6 +705,77 @@ class SqlAlchemyPayPeriodRepository(PayPeriodRepository):
             ends_at=ends_at,
             limit=limit,
         )
+
+
+class SqlAlchemyBookingWriteRepository(BookingWriteRepository):
+    """SA-backed booking write repository for the §09 amend / decline path."""
+
+    def __init__(self, session: Session) -> None:
+        self._session = session
+
+    @property
+    def session(self) -> Session:
+        return self._session
+
+    def _load(self, *, workspace_id: str, booking_id: str) -> Booking | None:
+        return self._session.scalars(
+            select(Booking).where(
+                Booking.id == booking_id,
+                Booking.workspace_id == workspace_id,
+                Booking.deleted_at.is_(None),
+            )
+        ).one_or_none()
+
+    def get(self, *, workspace_id: str, booking_id: str) -> BookingWriteRow | None:
+        row = self._load(workspace_id=workspace_id, booking_id=booking_id)
+        return None if row is None else _booking_write_to_row(row)
+
+    def apply_amend(
+        self,
+        *,
+        workspace_id: str,
+        booking_id: str,
+        actual_minutes: int | None,
+        actual_minutes_paid: int,
+        adjusted: bool,
+        adjustment_reason: str | None,
+        pending_amend_minutes: int | None,
+        pending_amend_reason: str | None,
+        now: datetime,
+    ) -> BookingWriteRow:
+        # code-health: ignore[params] Adapter mirrors the port's field-set.
+        row = self._load(workspace_id=workspace_id, booking_id=booking_id)
+        if row is None:  # pragma: no cover - caller confirms existence first
+            raise LookupError(booking_id)
+        row.actual_minutes = actual_minutes
+        row.actual_minutes_paid = actual_minutes_paid
+        row.adjusted = adjusted
+        row.adjustment_reason = adjustment_reason
+        row.pending_amend_minutes = pending_amend_minutes
+        row.pending_amend_reason = pending_amend_reason
+        row.updated_at = now
+        self._session.flush()
+        return _booking_write_to_row(row)
+
+    def apply_decline(
+        self,
+        *,
+        workspace_id: str,
+        booking_id: str,
+        status: str,
+        declined_at: datetime,
+        declined_reason: str | None,
+        now: datetime,
+    ) -> BookingWriteRow:
+        row = self._load(workspace_id=workspace_id, booking_id=booking_id)
+        if row is None:  # pragma: no cover - caller confirms existence first
+            raise LookupError(booking_id)
+        row.status = status
+        row.declined_at = declined_at
+        row.declined_reason = declined_reason
+        row.updated_at = now
+        self._session.flush()
+        return _booking_write_to_row(row)
 
 
 class SqlAlchemyBookingPayRepository(BookingPayRepository):

@@ -4453,6 +4453,86 @@
   },
   {
     "agent_link_routes": {},
+    "body_schema_ref": "#/components/schemas/BookingAmendRequest",
+    "group": "bookings",
+    "http": {
+      "method": "POST",
+      "path": "/w/{slug}/api/v1/bookings/{booking_id}/amend"
+    },
+    "idempotent": false,
+    "name": "amend",
+    "operation_id": "bookings.amend",
+    "path_params": [
+      {
+        "name": "booking_id",
+        "required": true,
+        "schema": {
+          "title": "Booking Id",
+          "type": "string"
+        }
+      }
+    ],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/BookingResponse",
+    "summary": "Amend a booking's actual worked time",
+    "x_agent_confirm": {
+      "risk": "medium",
+      "summary": "Amend a booking's actual worked time?",
+      "verb": "Amend a booking's actual worked time"
+    },
+    "x_agent_links": {
+      "policy": "none",
+      "reason": "No safe, specific web handoff is registered for bookings.amend yet."
+    },
+    "x_cli": {
+      "group": "bookings",
+      "mutates": true,
+      "summary": "Amend a booking's actual worked minutes",
+      "verb": "amend"
+    }
+  },
+  {
+    "agent_link_routes": {},
+    "body_schema_ref": "#/components/schemas/BookingDeclineRequest",
+    "group": "bookings",
+    "http": {
+      "method": "POST",
+      "path": "/w/{slug}/api/v1/bookings/{booking_id}/decline"
+    },
+    "idempotent": false,
+    "name": "decline",
+    "operation_id": "bookings.decline",
+    "path_params": [
+      {
+        "name": "booking_id",
+        "required": true,
+        "schema": {
+          "title": "Booking Id",
+          "type": "string"
+        }
+      }
+    ],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/BookingResponse",
+    "summary": "Decline an assigned scheduled booking",
+    "x_agent_confirm": {
+      "risk": "medium",
+      "summary": "Decline an assigned scheduled booking?",
+      "verb": "Decline an assigned scheduled booking"
+    },
+    "x_agent_links": {
+      "policy": "none",
+      "reason": "No safe, specific web handoff is registered for bookings.decline yet."
+    },
+    "x_cli": {
+      "group": "bookings",
+      "mutates": true,
+      "summary": "Decline a scheduled booking assigned to you",
+      "verb": "decline"
+    }
+  },
+  {
+    "agent_link_routes": {},
     "body_schema_ref": null,
     "group": "bookings",
     "http": {

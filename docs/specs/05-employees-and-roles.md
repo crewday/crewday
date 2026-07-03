@@ -570,9 +570,11 @@ configuration.
 | `tasks.review.decide`                   | `workspace`, `property`        | `owners, managers`            | —  | §06 — approve, reject, or request changes on a completed task's manager-review row. |
 | `bookings.view_other`                   | `workspace`, `property`        | `owners, managers`            | —  | §09 |
 | `bookings.amend_other`                  | `workspace`, `property`        | `owners, managers`            | —  | §09 |
+| `bookings.amend_self`                   | `workspace`, `property`        | `owners, managers, all_workers` | — | §09 — worker amends their OWN booking's actual time; auto-approves within the engagement's `bookings.auto_approve_overrun_minutes`, else lands `pending_amend_*`. |
 | `bookings.assign_other`                 | `workspace`, `property`        | `owners, managers`            | —  | §09 |
 | `bookings.cancel`                       | `workspace`, `property`        | `owners, managers`            | —  | §09 |
 | `bookings.create_pending`               | `workspace`, `property`        | `owners, managers, all_workers` | — | §09 |
+| `bookings.decline_self`                 | `workspace`, `property`        | `owners, managers, all_workers` | — | §09 — assigned worker declines a `scheduled` booking; returns it to `pending_approval` for manager reassignment. |
 | `payroll.export`                        | `workspace`                    | `owners, managers`            | —  | §09 |
 | `payroll.lock_period`                   | `workspace`                    | `owners, managers`            | ✅ | §09 |
 | `payroll.issue_payslip`                 | `workspace`                    | `owners, managers`            | ✅ | §09 |

@@ -289,6 +289,13 @@ _RULE_DRIVEN: tuple[ActionSpec, ...] = (
         root_protected_deny=False,
     ),
     ActionSpec(
+        key="bookings.amend_self",
+        valid_scope_kinds=("workspace", "property"),
+        default_allow=("owners", "managers", "all_workers"),
+        root_only=False,
+        root_protected_deny=False,
+    ),
+    ActionSpec(
         key="bookings.assign_other",
         valid_scope_kinds=("workspace", "property"),
         default_allow=("owners", "managers"),
@@ -304,6 +311,13 @@ _RULE_DRIVEN: tuple[ActionSpec, ...] = (
     ),
     ActionSpec(
         key="bookings.create_pending",
+        valid_scope_kinds=("workspace", "property"),
+        default_allow=("owners", "managers", "all_workers"),
+        root_only=False,
+        root_protected_deny=False,
+    ),
+    ActionSpec(
+        key="bookings.decline_self",
         valid_scope_kinds=("workspace", "property"),
         default_allow=("owners", "managers", "all_workers"),
         root_only=False,

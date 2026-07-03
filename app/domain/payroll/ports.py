@@ -44,6 +44,8 @@ from sqlalchemy.orm import Session
 __all__ = [
     "BookingPayRepository",
     "BookingPayRow",
+    "BookingWriteRepository",
+    "BookingWriteRow",
     "ExpenseLedgerExportRow",
     "PayPeriodEntryRow",
     "PayPeriodRecomputeScheduler",
@@ -134,6 +136,41 @@ class BookingPayRow:
     cancellation_pay_to_worker: bool
     created_at: datetime
     updated_at: datetime
+
+
+@dataclass(frozen=True, slots=True)
+class BookingWriteRow:
+    """Immutable projection of a ``booking`` row for the worker write path.
+
+    Carries every field the §09 amend/decline REST response renders
+    plus the ``scheduled_*`` / ``break_seconds`` inputs the amend
+    threshold math reads. Distinct from :class:`BookingPayRow` (the
+    period-close read shape) because the write surface needs
+    ``notes_md`` / ``client_org_id`` for the response and does not need
+    the cancellation-policy columns.
+    """
+
+    id: str
+    workspace_id: str
+    work_engagement_id: str
+    user_id: str
+    property_id: str | None
+    client_org_id: str | None
+    status: str
+    kind: str
+    pay_basis: Literal["scheduled", "actual"]
+    scheduled_start: datetime
+    scheduled_end: datetime
+    actual_minutes: int | None
+    actual_minutes_paid: int
+    break_seconds: int
+    notes_md: str | None
+    adjusted: bool
+    adjustment_reason: str | None
+    pending_amend_minutes: int | None
+    pending_amend_reason: str | None
+    declined_at: datetime | None
+    declined_reason: str | None
 
 
 @dataclass(frozen=True, slots=True)
@@ -676,6 +713,57 @@ class PayPeriodRepository(Protocol):
         limit: int,
     ) -> Sequence[str]:
         """Return unsettled booking ids that block locking this period."""
+        ...
+
+
+class BookingWriteRepository(Protocol):
+    """Read + write seam for the §09 worker-facing amend / decline path.
+
+    The concretion pins every read + write to the caller's
+    ``workspace_id`` (defence-in-depth over the ORM tenant filter) and
+    flushes mutations so the caller's audit row can FK-reference the
+    booking inside the same UoW. It never commits — the router's UoW
+    owns the transaction boundary (§01 "Key runtime invariants" #3).
+    """
+
+    @property
+    def session(self) -> Session:
+        """Return the underlying SQLAlchemy session for audit writes."""
+        ...
+
+    def get(self, *, workspace_id: str, booking_id: str) -> BookingWriteRow | None:
+        """Return the live booking or ``None`` when absent / soft-deleted."""
+        ...
+
+    def apply_amend(
+        self,
+        *,
+        workspace_id: str,
+        booking_id: str,
+        actual_minutes: int | None,
+        actual_minutes_paid: int,
+        adjusted: bool,
+        adjustment_reason: str | None,
+        pending_amend_minutes: int | None,
+        pending_amend_reason: str | None,
+        now: datetime,
+    ) -> BookingWriteRow:
+        """Persist the resolved amend field-set and return the refreshed row."""
+        # code-health: ignore[params] Port params are adapter API contract.  # noqa: E501
+        ...
+
+    def apply_decline(
+        self,
+        *,
+        workspace_id: str,
+        booking_id: str,
+        status: str,
+        declined_at: datetime,
+        declined_reason: str | None,
+        now: datetime,
+    ) -> BookingWriteRow:
+        """Stamp the decline + status return and return the refreshed row."""
+        # code-health: ignore[params] Port params are adapter API contract.  # noqa: E501
         ...
 
 

@@ -78,9 +78,11 @@ class TestShape:
         added work-order actions, cd-5b35 added asset action /
         document permissions, cd-14m3 added ``inventory.stocktake``, and
         cd-om4v added ``vendor_invoices.mark_paid``. cd-z5rd added
-        ``admin.view`` for the workspace-admin read surfaces.
+        ``admin.view`` for the workspace-admin read surfaces. cd-juy0i
+        added ``bookings.amend_self`` / ``bookings.decline_self`` for
+        the worker-facing booking amend + decline API (§09).
         """
-        assert len(ACTION_CATALOG) == 103
+        assert len(ACTION_CATALOG) == 105
 
     def test_entries_are_action_spec_instances(self) -> None:
         for key, spec in ACTION_CATALOG.items():
