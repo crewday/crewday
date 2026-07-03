@@ -340,9 +340,9 @@ omit = ["*/migrations/*", "*/__init__.py"]
 #   uv run python scripts/check_csp_inlines.py
 #   uv run python scripts/check_csp_inlines.py app/web/dist
 #
-# Wiring this into CI is deployment-infra scope (separate task); the
-# script is ready to drop into any pipeline that already invokes the
-# scripts/ directory. See docs/specs/15-security-privacy.md
+# Wired into CI as the ``csp-inlines`` job (cd-ro0f5): it builds the
+# production SPA (``vite build``) so ``app/web/dist`` exists, then runs
+# this checker against it. See docs/specs/15-security-privacy.md
 # §"HTTP security headers".
 [tool.check_csp]
 default_path = "app/web/dist"
@@ -350,6 +350,16 @@ default_path = "app/web/dist"
 [tool.coverage.report]
 show_missing = true
 skip_covered = true
+# Coverage floor (cd-ro0f5; spec docs/specs/17-testing-quality.md
+# §"Quality gates"). pytest-cov reads this when ``--cov-fail-under`` is
+# not passed and fails the session below it (see the ``coverage`` CI
+# job). Measured coverage on the CI test surface (unit + api + property
+# + llm + integration, SQLite) is 89.62% today; 88 leaves ~2 points of
+# headroom so ordinary run-to-run drift does not red-wall CI while a
+# material regression still trips. coverage.py compares
+# ``round(total, precision)`` against this value (precision 0), so keep
+# the floor a few points under the real number rather than at it.
+fail_under = 88
 
 # Import boundary contracts (cd-ev0).
 #

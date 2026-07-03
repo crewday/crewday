@@ -123,6 +123,37 @@ jobs:
       - name: React Doctor
         run: ./scripts/react-doctor-gate.sh
 
+  csp-inlines:
+    # Built SPA must carry no un-nonced inline <script>/<style> (cd-wv2v,
+    # cd-ro0f5; spec docs/specs/15-security-privacy.md §"HTTP security
+    # headers"). The strict CSP served by SecurityHeadersMiddleware only
+    # accepts nonced inlines; an un-nonced one is silently refused by the
+    # browser and bricks the SPA with no server-side error. Build the
+    # production SPA so app/web/dist exists, then scan it. ``vite build``
+    # skips the ``tsc -b`` prelude on purpose — TS type-check is a
+    # separate concern and running it here would red-fail this gate on
+    # unrelated TS noise (same rationale as the e2e surface-manifest
+    # step). The checker is stdlib-only (html.parser), so no ``uv sync``
+    # is needed — the setup-python interpreter runs it directly.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: app/web/package-lock.json
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+      - name: Install app web deps
+        run: npm --prefix app/web ci
+      - name: Build SPA
+        run: npx vite build
+        working-directory: app/web
+      - name: CSP inline check
+        run: python scripts/check_csp_inlines.py app/web/dist
+
   i18n-keys:
     runs-on: ubuntu-latest
     strategy:
@@ -274,6 +305,35 @@ jobs:
         run: echo "CREWDAY_TEST_DB=postgres" >> "$GITHUB_ENV"
       - name: pytest (integration)
         run: uv run pytest tests/integration -x -q
+
+  coverage:
+    # Enforce the coverage floor (cd-ro0f5; spec
+    # docs/specs/17-testing-quality.md §"Quality gates" — "85% domain,
+    # 70% overall"). The floor lives in pyproject
+    # [tool.coverage.report] ``fail_under``; pytest-cov reads it when
+    # ``--cov-fail-under`` is absent (plugin.py: cov_config.fail_under)
+    # and fails the session when total coverage drops below it. This
+    # job re-runs the same PR test surface the ``unit`` and
+    # ``integration`` jobs cover (SQLite) under ``--cov=app`` so a
+    # change that erodes coverage trips here. ``tests/tenant`` is
+    # deliberately excluded: it is not wired into any CI job today and
+    # currently red (see cd-ro0f5 notes), so folding it in would
+    # red-wall this gate on an unrelated pre-existing failure. Single
+    # Python (3.14) — the floor is version-independent.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v3
+        with:
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+      - name: Install deps
+        run: uv sync --group dev
+      - name: pytest (coverage floor, SQLite)
+        run: uv run pytest tests/unit tests/api tests/property tests/llm tests/integration --cov=app --cov-report=term-missing
 
   schemathesis:
     # API contract sweep (cd-3j25, spec
