@@ -24,6 +24,8 @@ from app.util.ulid import new_ulid
 __all__ = [
     "AGENT_PREFERENCES_EMPTY_HEADER",
     "APPROVAL_MODES",
+    "MULTI_PROPERTY_DROP_NOTE",
+    "MULTI_PROPERTY_NOTE",
     "PREFERENCE_HARD_TOKEN_CAP",
     "PreferenceBundle",
     "PreferenceContainsSecret",
@@ -55,6 +57,18 @@ if frozenset(CONSENT_TOKEN_ORDER) != CONSENT_TOKENS:  # pragma: no cover
 PREFERENCE_HARD_TOKEN_CAP = 16_000
 INJECTION_TOKEN_CAP = 8_000
 AGENT_PREFERENCES_EMPTY_HEADER = "## Agent preferences\n(none)"
+
+# Resolver system notes for multi-property scope, per spec 11 "Property
+# context resolution" (rules 3 and its size cap). The wording is verbatim
+# from docs/specs/11-llm-and-agents.md:566-567 and :574-576.
+MULTI_PROPERTY_NOTE = (
+    "Multiple properties in scope; confirm with the user if the "
+    "answer depends on which property they mean."
+)
+MULTI_PROPERTY_DROP_NOTE = (
+    "Multiple properties in scope; call `get_agent_preferences(property_id)` "
+    "to pull a specific property's preferences."
+)
 
 _SECRET_PATTERNS: tuple[re.Pattern[str], ...] = (
     re.compile(r"\b[A-Z]{2}\d{2}[A-Z0-9]{11,30}\b"),
@@ -312,7 +326,21 @@ def resolve_preferences(
             if user_id is not None
             else None
         )
-        text = _fit_to_budget(workspace_section, property_sections, user_section)
+        # Spec 11 rule 3: with more than one reachable property in scope, a
+        # resolver note is appended. Reserve its token cost up front so the
+        # note counts against INJECTION_TOKEN_CAP and can never itself push
+        # the injected stack over budget.
+        multi_property = len(property_ids) > 1
+        note_reserve = _note_reserve_tokens() if multi_property else 0
+        text, properties_dropped = _fit_to_budget(
+            workspace_section,
+            property_sections,
+            user_section,
+            note_reserve_tokens=note_reserve,
+        )
+        note = _resolver_note(multi_property, properties_dropped)
+        if note is not None:
+            text = f"{text}\n\n{note}"
 
     return PreferenceBundle(
         text=text,
@@ -411,32 +439,40 @@ def _fit_to_budget(
     workspace_section: str,
     property_sections: Sequence[str],
     user_section: str | None,
-) -> str:
+    *,
+    note_reserve_tokens: int = 0,
+) -> tuple[str, bool]:
     """Assemble sections within the injection budget, per spec 11 "Size budget".
 
     When the concatenated stack exceeds the budget, property blobs are
     dropped first, then the workspace blob is truncated from its end with a
     ``[truncated]`` marker. The user blob is never truncated -- it survives
     intact even if that pushes the result slightly over budget.
+
+    ``note_reserve_tokens`` shrinks the effective cap so a resolver note the
+    caller appends afterwards still fits inside INJECTION_TOKEN_CAP. Returns
+    the assembled text and whether any property section was dropped.
     """
+    effective_cap = INJECTION_TOKEN_CAP - note_reserve_tokens
     ordered = [workspace_section, *property_sections]
     if user_section is not None:
         ordered.append(user_section)
     text = "\n\n".join(ordered)
-    if _estimate_tokens(text) <= INJECTION_TOKEN_CAP:
-        return text
+    if _estimate_tokens(text) <= effective_cap:
+        return text, False
 
     # 1. Drop every property blob.
+    dropped = bool(property_sections)
     kept = [workspace_section]
     if user_section is not None:
         kept.append(user_section)
     text = "\n\n".join(kept)
-    if _estimate_tokens(text) <= INJECTION_TOKEN_CAP:
-        return text
+    if _estimate_tokens(text) <= effective_cap:
+        return text, dropped
 
     # 2. Truncate the workspace blob from its end, leaving the user blob
     #    intact. Reserve the budget the (untouched) user section consumes.
-    max_chars = INJECTION_TOKEN_CAP * 4
+    max_chars = effective_cap * 4
     user_overhead = len(user_section) + len("\n\n") if user_section is not None else 0
     truncated_workspace = _truncate_to_budget(
         workspace_section, max_chars - user_overhead
@@ -444,7 +480,29 @@ def _fit_to_budget(
     kept = [truncated_workspace]
     if user_section is not None:
         kept.append(user_section)
-    return "\n\n".join(kept)
+    return "\n\n".join(kept), dropped
+
+
+def _resolver_note(multi_property: bool, properties_dropped: bool) -> str | None:
+    """Pick the single spec 11 multi-property note for this turn.
+
+    Only one note is ever emitted. When property sections were dropped for
+    the size cap, the more informative drop note (which tells the model how to
+    fetch a specific property) supersedes the plain disambiguation note.
+    """
+    if not multi_property:
+        return None
+    if properties_dropped:
+        return MULTI_PROPERTY_DROP_NOTE
+    return MULTI_PROPERTY_NOTE
+
+
+def _note_reserve_tokens() -> int:
+    """Token headroom to reserve for whichever multi-property note may fire."""
+    return max(
+        _estimate_tokens(f"\n\n{MULTI_PROPERTY_NOTE}"),
+        _estimate_tokens(f"\n\n{MULTI_PROPERTY_DROP_NOTE}"),
+    )
 
 
 def _truncate_to_budget(text: str, max_chars: int) -> str:

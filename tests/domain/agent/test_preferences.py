@@ -10,6 +10,8 @@ from app.adapters.db.llm.models import AgentPreferenceRevision
 from app.adapters.db.workspace.models import Workspace
 from app.domain.agent.preferences import (
     INJECTION_TOKEN_CAP,
+    MULTI_PROPERTY_DROP_NOTE,
+    MULTI_PROPERTY_NOTE,
     PreferenceContainsSecret,
     PreferenceTooLarge,
     PreferenceUpdate,
@@ -374,6 +376,177 @@ def test_resolver_never_truncates_user_even_when_user_alone_over_budget(
     # Workspace is fully truncated down to (essentially) the marker.
     assert "[truncated]" in bundle.text
     assert "w" * 100 not in bundle.text
+
+
+def test_resolver_appends_multi_property_note_under_budget(
+    db_session: Session,
+    clock: FrozenClock,
+) -> None:
+    _workspace, ctx, user_id = _bind_workspace(db_session)
+    _save_scope(
+        db_session,
+        ctx,
+        clock,
+        scope_kind="workspace",
+        scope_id=ctx.workspace_id,
+        body_md="WORKSPACE_BODY",
+        actor_user_id=user_id,
+    )
+    for prop in ("prop-1", "prop-2"):
+        _save_scope(
+            db_session,
+            ctx,
+            clock,
+            scope_kind="property",
+            scope_id=prop,
+            body_md=f"BODY_{prop}",
+            actor_user_id=user_id,
+        )
+
+    bundle = resolve_preferences(
+        db_session,
+        ctx,
+        capability="chat.manager",
+        property_ids=("prop-1", "prop-2"),
+        user_id=user_id,
+    )
+
+    # Both property sections survive and the plain disambiguation note (not the
+    # drop note) is appended exactly once.
+    assert "BODY_prop-1" in bundle.text
+    assert "BODY_prop-2" in bundle.text
+    assert MULTI_PROPERTY_NOTE in bundle.text
+    assert MULTI_PROPERTY_DROP_NOTE not in bundle.text
+    assert bundle.text.count(MULTI_PROPERTY_NOTE) == 1
+
+
+def test_resolver_single_property_gets_no_note(
+    db_session: Session,
+    clock: FrozenClock,
+) -> None:
+    _workspace, ctx, user_id = _bind_workspace(db_session)
+    _save_scope(
+        db_session,
+        ctx,
+        clock,
+        scope_kind="workspace",
+        scope_id=ctx.workspace_id,
+        body_md="WORKSPACE_BODY",
+        actor_user_id=user_id,
+    )
+    _save_scope(
+        db_session,
+        ctx,
+        clock,
+        scope_kind="property",
+        scope_id="prop-1",
+        body_md="PROPERTY_BODY",
+        actor_user_id=user_id,
+    )
+
+    bundle = resolve_preferences(
+        db_session,
+        ctx,
+        capability="chat.manager",
+        property_ids=("prop-1",),
+        user_id=user_id,
+    )
+
+    assert MULTI_PROPERTY_NOTE not in bundle.text
+    assert MULTI_PROPERTY_DROP_NOTE not in bundle.text
+
+
+def test_resolver_emits_drop_note_when_multi_property_dropped(
+    db_session: Session,
+    clock: FrozenClock,
+) -> None:
+    _workspace, ctx, user_id = _bind_workspace(db_session)
+    _save_scope(
+        db_session,
+        ctx,
+        clock,
+        scope_kind="workspace",
+        scope_id=ctx.workspace_id,
+        body_md="WORKSPACE_BODY",
+        actor_user_id=user_id,
+    )
+    # Two reachable properties whose combined blobs blow the budget: both are
+    # dropped, so the drop note fires and the plain note must not.
+    for prop in ("prop-1", "prop-2"):
+        _save_scope(
+            db_session,
+            ctx,
+            clock,
+            scope_kind="property",
+            scope_id=prop,
+            body_md=f"BODY_{prop} " + "p" * _OVER_BUDGET,
+            actor_user_id=user_id,
+        )
+    _save_scope(
+        db_session,
+        ctx,
+        clock,
+        scope_kind="user",
+        scope_id=user_id,
+        body_md="USER_BODY",
+        actor_user_id=user_id,
+    )
+
+    bundle = resolve_preferences(
+        db_session,
+        ctx,
+        capability="chat.manager",
+        property_ids=("prop-1", "prop-2"),
+        user_id=user_id,
+    )
+
+    assert "BODY_prop-1" not in bundle.text
+    assert "BODY_prop-2" not in bundle.text
+    # Both-conditions precedence: only the drop note, emitted once, no plain note.
+    assert MULTI_PROPERTY_DROP_NOTE in bundle.text
+    assert MULTI_PROPERTY_NOTE not in bundle.text
+    assert bundle.text.count(MULTI_PROPERTY_DROP_NOTE) == 1
+
+
+def test_resolver_drop_note_stays_within_budget_after_truncation(
+    db_session: Session,
+    clock: FrozenClock,
+) -> None:
+    # Workspace alone is over budget, so the note-reserve must shrink the
+    # truncation target enough that the appended drop note still fits the cap.
+    _workspace, ctx, user_id = _bind_workspace(db_session)
+    _save_scope(
+        db_session,
+        ctx,
+        clock,
+        scope_kind="workspace",
+        scope_id=ctx.workspace_id,
+        body_md="WORKSPACE_BODY " + "w" * _OVER_BUDGET,
+        actor_user_id=user_id,
+    )
+    for prop in ("prop-1", "prop-2"):
+        _save_scope(
+            db_session,
+            ctx,
+            clock,
+            scope_kind="property",
+            scope_id=prop,
+            body_md=f"BODY_{prop}",
+            actor_user_id=user_id,
+        )
+
+    bundle = resolve_preferences(
+        db_session,
+        ctx,
+        capability="chat.manager",
+        property_ids=("prop-1", "prop-2"),
+        user_id=user_id,
+    )
+
+    assert MULTI_PROPERTY_DROP_NOTE in bundle.text
+    assert bundle.text.rstrip().endswith(MULTI_PROPERTY_DROP_NOTE)
+    assert "[truncated]" in bundle.text
+    assert _estimate_tokens(bundle.text) <= INJECTION_TOKEN_CAP
 
 
 def test_save_rejects_secret_like_preferences(
