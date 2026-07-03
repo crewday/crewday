@@ -30,6 +30,10 @@
 #                    container inside the test process; no workflow-
 #                    level services block is needed because the runner
 #                    (ubuntu-latest) ships Docker preinstalled.
+#   * tenant       — pytest tests/tenant (cross-tenant isolation matrix
+#                    + repository/HTTP/event/worker surface-parity gates,
+#                    §17 "Tenant isolation"). Same 2-shard sqlite/postgres
+#                    database matrix as integration.
 #   * e2e          — pytest tests/e2e against the dev stack (compose
 #                    bring-up + Playwright Chromium/WebKit). Single
 #                    Python (3.14) — browser tests don't benefit from
@@ -38,8 +42,8 @@
 #                    on failure for post-mortem.
 #
 # Matrix over Python 3.14 on every job except e2e.
-# integration additionally matrices database = [sqlite, postgres]
-# (2 shards total on that job).
+# integration and tenant additionally matrix database = [sqlite, postgres]
+# (2 shards each on those jobs).
 
 name: CI
 
@@ -306,6 +310,45 @@ jobs:
       - name: pytest (integration)
         run: uv run pytest tests/integration -x -q
 
+  tenant:
+    # Tenant-isolation suite (cd-zp9jp; spec
+    # docs/specs/17-testing-quality.md §"Tenant isolation" —
+    # ``pytest tests/tenant/`` on every PR; and
+    # docs/specs/01-architecture.md §"Tenant filter enforcement"). The
+    # cross-tenant regression matrix (§17 case (a)–(d)) plus the
+    # repository / HTTP / event / worker surface-parity gates live here:
+    # a new workspace-scoped surface added without a case or an explicit
+    # opt-out fails the gate. Runs on both SQLite (app-filter only) and
+    # Postgres 15 via testcontainers (RLS + app-filter), matching the
+    # ``integration`` job's backend selection — the suite re-exports
+    # tests/integration's engine / db_url / migrate_once fixtures, which
+    # honour ``CREWDAY_TEST_DB``.
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.14"]
+        database: [sqlite, postgres]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v3
+        with:
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Install deps
+        run: uv sync --group dev
+      - name: Select backend (sqlite)
+        if: matrix.database == 'sqlite'
+        run: echo "CREWDAY_TEST_DB=sqlite" >> "$GITHUB_ENV"
+      - name: Select backend (postgres)
+        if: matrix.database == 'postgres'
+        run: echo "CREWDAY_TEST_DB=postgres" >> "$GITHUB_ENV"
+      - name: pytest (tenant isolation)
+        run: uv run pytest tests/tenant -x -q
+
   coverage:
     # Enforce the coverage floor (cd-ro0f5; spec
     # docs/specs/17-testing-quality.md §"Quality gates" — "85% domain,
@@ -315,11 +358,13 @@ jobs:
     # and fails the session when total coverage drops below it. This
     # job re-runs the same PR test surface the ``unit`` and
     # ``integration`` jobs cover (SQLite) under ``--cov=app`` so a
-    # change that erodes coverage trips here. ``tests/tenant`` is
-    # deliberately excluded: it is not wired into any CI job today and
-    # currently red (see cd-ro0f5 notes), so folding it in would
-    # red-wall this gate on an unrelated pre-existing failure. Single
-    # Python (3.14) — the floor is version-independent.
+    # change that erodes coverage trips here. ``tests/tenant`` runs in
+    # its own dedicated ``tenant`` job (cd-zp9jp) and is intentionally
+    # excluded from this coverage aggregate: the floor is measured over
+    # the unit + integration surface, and the tenant matrix is a
+    # cross-tenant *isolation* gate (surface-parity + fail-closed
+    # assertions), not a coverage contributor. Single Python (3.14) —
+    # the floor is version-independent.
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

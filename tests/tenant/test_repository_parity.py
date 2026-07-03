@@ -44,6 +44,7 @@ import importlib
 import inspect
 import pkgutil
 from collections.abc import Callable, Iterator, Mapping
+from datetime import UTC, datetime
 from types import ModuleType
 
 import pytest
@@ -51,7 +52,11 @@ from sqlalchemy import select, text
 from sqlalchemy.orm import Session, sessionmaker
 
 import app.domain as domain_pkg
+from app.adapters.db.payroll.models import Booking
+from app.adapters.db.payroll.repositories import SqlAlchemyBookingWriteRepository
 from app.adapters.db.tasks.models import TaskTemplate
+from app.adapters.db.workspace.models import WorkEngagement
+from app.domain.payroll import booking_write as booking_write_module
 from app.domain.tasks import templates as tpl_module
 from app.tenancy import WorkspaceContext, registry, tenant_agnostic
 from app.tenancy.orm_filter import TenantFilterMissing
@@ -386,6 +391,239 @@ class TestScopedRowIsolation:
                 if row is not None:
                     s.delete(row)
                     s.commit()
+
+
+class _NeverConsultedChecker:
+    """A :class:`CapabilityChecker` that must never be reached.
+
+    ``amend_booking`` / ``decline_booking`` resolve the booking through
+    the workspace-scoped repository BEFORE the capability check. A
+    cross-tenant caller must trip :class:`BookingNotFound` first, so any
+    call into this stub means the workspace scope failed to hide the
+    peer row — we surface that as an :class:`AssertionError`.
+    """
+
+    def require(self, action_key: str) -> None:
+        raise AssertionError(
+            "capability check reached on a cross-tenant booking — the "
+            f"workspace scope failed to hide the peer row (action={action_key!r})"
+        )
+
+    def has(self, action_key: str) -> bool:  # pragma: no cover - never reached
+        raise AssertionError(
+            "capability check reached on a cross-tenant booking — the "
+            f"workspace scope failed to hide the peer row (action={action_key!r})"
+        )
+
+
+class TestBookingWriteCrossTenant:
+    """§17 case (d) — the §09 booking amend / decline write path is scoped.
+
+    ``app.domain.payroll.booking_write.amend_booking`` and
+    ``decline_booking`` are the two ctx-taking write methods the parity
+    gate discovers. Both load through
+    :meth:`SqlAlchemyBookingWriteRepository.get`, whose SELECT is pinned
+    to ``workspace_id`` (defence-in-depth on top of the ORM filter). A
+    tenant-A caller handed a tenant-B booking id must see ``None`` ->
+    :class:`BookingNotFound` and must NOT mutate B's row — proving the
+    write path cannot cross workspaces.
+    """
+
+    _PINNED = datetime(2026, 4, 20, tzinfo=UTC)
+
+    def _seed_peer_booking(
+        self,
+        factory: sessionmaker[Session],
+        *,
+        workspace_id: str,
+        user_id: str,
+    ) -> tuple[str, str]:
+        """Seed a payroll engagement + scheduled booking under the peer workspace.
+
+        Returns ``(booking_id, engagement_id)``. ``booking`` FKs its
+        ``work_engagement_id`` (``RESTRICT``) so a valid engagement must
+        exist first.
+        """
+        import datetime as _dt
+
+        engagement_id = new_ulid()
+        booking_id = new_ulid()
+        # justification: seeding rows on behalf of the peer workspace for
+        # a cross-tenant isolation regression; the filter would refuse
+        # the write because the caller's ctx is workspace A, not B.
+        with factory() as s, tenant_agnostic():
+            s.add(
+                WorkEngagement(
+                    id=engagement_id,
+                    user_id=user_id,
+                    workspace_id=workspace_id,
+                    engagement_kind="payroll",
+                    supplier_org_id=None,
+                    started_on=_dt.date(2026, 1, 1),
+                    archived_on=None,
+                    notes_md="",
+                    created_at=self._PINNED,
+                    updated_at=self._PINNED,
+                )
+            )
+            # Flush the engagement before the booking: no ORM
+            # relationship is declared between the two, so the
+            # unit-of-work would otherwise be free to emit the
+            # booking INSERT first and trip the FK.
+            s.flush()
+            s.add(
+                Booking(
+                    id=booking_id,
+                    workspace_id=workspace_id,
+                    work_engagement_id=engagement_id,
+                    user_id=user_id,
+                    property_id=None,
+                    client_org_id=None,
+                    status="scheduled",
+                    kind="work",
+                    pay_basis="scheduled",
+                    scheduled_start=_dt.datetime(2026, 5, 6, 9, 0, tzinfo=_dt.UTC),
+                    scheduled_end=_dt.datetime(2026, 5, 6, 11, 0, tzinfo=_dt.UTC),
+                    actual_minutes=None,
+                    actual_minutes_paid=120,
+                    break_seconds=0,
+                    notes_md=None,
+                    adjusted=False,
+                    adjustment_reason=None,
+                    pending_amend_minutes=None,
+                    pending_amend_reason=None,
+                    declined_at=None,
+                    declined_reason=None,
+                    cancelled_at=None,
+                    cancellation_window_hours=24,
+                    cancellation_pay_to_worker=True,
+                    created_by_actor_kind="user",
+                    created_by_actor_id=user_id,
+                    created_at=self._PINNED,
+                    updated_at=self._PINNED,
+                )
+            )
+            s.commit()
+        return booking_id, engagement_id
+
+    def _teardown_peer_booking(
+        self,
+        factory: sessionmaker[Session],
+        *,
+        booking_id: str,
+        engagement_id: str,
+    ) -> None:
+        # justification: cross-tenant cleanup for the isolation seed —
+        # delete the booking before its engagement (FK RESTRICT).
+        with factory() as s, tenant_agnostic():
+            booking = s.get(Booking, booking_id)
+            if booking is not None:
+                s.delete(booking)
+                s.flush()
+            engagement = s.get(WorkEngagement, engagement_id)
+            if engagement is not None:
+                s.delete(engagement)
+            s.commit()
+
+    def test_amend_under_a_ctx_cannot_touch_b_booking(
+        self,
+        tenant_session_factory: sessionmaker[Session],
+        tenant_a: TenantSeed,
+        tenant_b: TenantSeed,
+    ) -> None:
+        """A tenant-A ``amend_booking`` on a tenant-B booking raises not-found."""
+        import datetime as _dt
+
+        from app.tenancy.current import reset_current, set_current
+
+        booking_id, engagement_id = self._seed_peer_booking(
+            tenant_session_factory,
+            workspace_id=tenant_b.workspace_id,
+            user_id=tenant_b.owner_user_id,
+        )
+        try:
+            with tenant_session_factory() as s:
+                repo = SqlAlchemyBookingWriteRepository(s)
+                token = set_current(tenant_a.ctx)
+                try:
+                    with pytest.raises(booking_write_module.BookingNotFound):
+                        booking_write_module.amend_booking(
+                            repo,
+                            _NeverConsultedChecker(),
+                            tenant_a.ctx,
+                            booking_id=booking_id,
+                            requested_minutes=999,
+                            reason="cross-tenant amend attempt",
+                            now=_dt.datetime(2026, 5, 7, tzinfo=_dt.UTC),
+                        )
+                finally:
+                    reset_current(token)
+
+            # B's booking is untouched — the amend never landed.
+            # justification: cross-tenant read-back to assert the peer
+            # row's fields were not mutated by the A-scoped call.
+            with tenant_session_factory() as s, tenant_agnostic():
+                row = s.get(Booking, booking_id)
+                assert row is not None
+                assert row.actual_minutes_paid == 120
+                assert row.actual_minutes is None
+                assert row.adjusted is False
+                assert row.pending_amend_minutes is None
+        finally:
+            self._teardown_peer_booking(
+                tenant_session_factory,
+                booking_id=booking_id,
+                engagement_id=engagement_id,
+            )
+
+    def test_decline_under_a_ctx_cannot_touch_b_booking(
+        self,
+        tenant_session_factory: sessionmaker[Session],
+        tenant_a: TenantSeed,
+        tenant_b: TenantSeed,
+    ) -> None:
+        """A tenant-A ``decline_booking`` on a tenant-B booking raises not-found."""
+        import datetime as _dt
+
+        from app.tenancy.current import reset_current, set_current
+
+        booking_id, engagement_id = self._seed_peer_booking(
+            tenant_session_factory,
+            workspace_id=tenant_b.workspace_id,
+            user_id=tenant_b.owner_user_id,
+        )
+        try:
+            with tenant_session_factory() as s:
+                repo = SqlAlchemyBookingWriteRepository(s)
+                token = set_current(tenant_a.ctx)
+                try:
+                    with pytest.raises(booking_write_module.BookingNotFound):
+                        booking_write_module.decline_booking(
+                            repo,
+                            _NeverConsultedChecker(),
+                            tenant_a.ctx,
+                            booking_id=booking_id,
+                            reason="cross-tenant decline attempt",
+                            now=_dt.datetime(2026, 5, 7, tzinfo=_dt.UTC),
+                        )
+                finally:
+                    reset_current(token)
+
+            # B's booking stays ``scheduled`` — the decline never landed.
+            # justification: cross-tenant read-back to assert the peer
+            # row's state was not mutated by the A-scoped call.
+            with tenant_session_factory() as s, tenant_agnostic():
+                row = s.get(Booking, booking_id)
+                assert row is not None
+                assert row.status == "scheduled"
+                assert row.declined_at is None
+                assert row.declined_reason is None
+        finally:
+            self._teardown_peer_booking(
+                tenant_session_factory,
+                booking_id=booking_id,
+                engagement_id=engagement_id,
+            )
 
 
 # ---------------------------------------------------------------------------
@@ -818,6 +1056,17 @@ COVERED_METHODS: frozenset[str] = frozenset(
         "app.domain.issues.service.get_issue",
         "app.domain.issues.service.list_issues",
         "app.domain.issues.service.update_issue",
+        # cd-zp9jp: §09 worker amend / decline write path. Both entry
+        # points load the booking through
+        # ``BookingWriteRepository.get`` -> ``_load`` which scopes the
+        # SELECT by ``workspace_id`` (defence-in-depth on top of the
+        # ORM filter) and returns ``None`` -> ``BookingNotFound`` for a
+        # peer-workspace id before the capability check or any
+        # ``apply_amend`` / ``apply_decline`` write. A method-specific
+        # case in :class:`TestBookingWriteCrossTenant` proves a tenant-A
+        # caller cannot read or mutate a tenant-B booking.
+        "app.domain.payroll.booking_write.amend_booking",
+        "app.domain.payroll.booking_write.decline_booking",
         "app.domain.payroll.compute.compute_payslip",
         "app.domain.payroll.compute.payslip_recompute",
         "app.domain.payroll.exports.export_expense_ledger_csv",

@@ -173,10 +173,16 @@ def tenant_settings(db_url: str) -> Settings:
         # Cross-tenant probe samples easily exceed the default
         # 30-anonymous / 60-token per-minute IP buckets; raise the cap
         # so the matrix test isn't gated by rate limits before it can
-        # finish probing.
-        rate_limit_anonymous_per_minute=10_000,
-        rate_limit_token_per_minute=10_000,
-        rate_limit_personal_me_per_minute=10_000,
+        # finish probing. The HTTP-surface sweep issues one request per
+        # (scoped route x synthetic-slug x verb) into a single per-IP
+        # bucket — comfortably into five figures as the scoped surface
+        # grows — so the cap sits well above that count to keep the
+        # probe from tripping the limiter mid-sweep (a 429 would fail
+        # the §15 404-envelope assertion). A million leaves ample
+        # headroom for further surface growth.
+        rate_limit_anonymous_per_minute=1_000_000,
+        rate_limit_token_per_minute=1_000_000,
+        rate_limit_personal_me_per_minute=1_000_000,
     )
 
 
