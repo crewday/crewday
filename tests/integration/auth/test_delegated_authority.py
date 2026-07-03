@@ -30,7 +30,7 @@ from __future__ import annotations
 
 from collections.abc import Iterator
 from datetime import UTC, datetime
-from typing import Annotated
+from typing import Annotated, cast
 
 import pytest
 from fastapi import Depends, FastAPI
@@ -42,6 +42,11 @@ from sqlalchemy.orm import Session, sessionmaker
 
 import app.adapters.db.session as _session_mod
 from app.adapters.db.authz.models import RoleGrant
+from app.adapters.db.identity.models import User
+from app.adapters.db.llm.models import ApprovalRequest
+from app.adapters.db.messaging.models import Notification
+from app.adapters.db.session import FilteredSession
+from app.api.middleware.approval import AgentApprovalMiddleware
 from app.auth.tokens import mint as mint_token
 from app.authz.dep import Permission
 from app.config import Settings
@@ -110,7 +115,9 @@ def wire_default_uow(
     original_engine = _session_mod._default_engine
     original_factory = _session_mod._default_sessionmaker_
     _session_mod._default_engine = engine
-    _session_mod._default_sessionmaker_ = session_factory
+    _session_mod._default_sessionmaker_ = cast(
+        "sessionmaker[FilteredSession]", session_factory
+    )
     monkeypatch.setattr("app.tenancy.middleware.get_settings", lambda: settings)
     try:
         yield
@@ -197,6 +204,42 @@ def _build_app() -> FastAPI:
         return {"status": "allowed"}
 
     return app
+
+
+def _build_approval_app() -> FastAPI:
+    """FastAPI app with the real tenancy + approval middleware chain.
+
+    Mirrors the production ``factory.py`` ordering: the approval gate
+    is registered *inner* of :class:`WorkspaceContextMiddleware` so the
+    tenancy resolver stamps ``request.state`` with the delegated
+    :class:`ActorIdentity` before the gate reads it. A plain cancel
+    route stands in for the real handler — the middleware short-circuits
+    with the 409 pending envelope before the route is ever reached, so a
+    ``200 executed`` would prove the gate failed to fire.
+    """
+    app = FastAPI()
+    app.add_middleware(AgentApprovalMiddleware)
+    app.add_middleware(WorkspaceContextMiddleware)
+
+    @app.post("/w/{slug}/api/v1/tasks/{task_id}/cancel")
+    def cancel(slug: str, task_id: str) -> dict[str, str]:
+        return {"status": "executed"}
+
+    return app
+
+
+def _set_agent_approval_mode(
+    session_factory: sessionmaker[Session],
+    *,
+    user_id: str,
+    mode: str,
+) -> None:
+    """Set the delegating user's per-user agent approval mode (§11)."""
+    with session_factory() as s, tenant_agnostic():
+        user = s.get(User, user_id)
+        assert user is not None
+        user.agent_approval_mode = mode
+        s.commit()
 
 
 def _seed_workspace_with_outsider(
@@ -566,32 +609,229 @@ class TestAuthorityFollowsUser:
 
 
 class TestApprovalModeHook:
-    """Approval-mode hooks fire on every mutation by a delegated token.
+    """A delegated-token mutation under user ``strict`` mode is queued, not run.
 
-    The HITL approval pipeline (cd-9ghv) is not yet wired — there is
-    no middleware, no approval-mode reader, no ``approval_request``
-    write path. Until that lands, this test asserts the dependency is
-    absent and skips with a pointer to the task that owns the wiring.
-    Once cd-9ghv ships, this skip is the failing test that drives the
-    contract: a delegated-token mutation against a route flagged
-    ``x-agent-confirm`` MUST return the 202 approval-pending envelope
-    when the delegating user's mode is ``strict`` (or ``auto`` against
-    a workspace-always-gated route).
+    cd-9ghv shipped ``app.api.middleware.approval``. When the
+    delegating user is in ``strict`` mode, a delegated token's mutating
+    write must not execute directly: :class:`AgentApprovalMiddleware`
+    intercepts the call, writes an ``ApprovalRequest`` row, notifies the
+    workspace owners / managers, and returns the §11 ``409
+    approval_required`` pending envelope. The route handler is never
+    invoked. See ``docs/specs/11-llm-and-agents.md`` §"Agent action
+    approval" (source ``user_strict_mutation``).
     """
 
-    def test_delegated_mutation_returns_approval_pending_when_strict(self) -> None:
-        # Probe for the approval middleware / hook via the import-machinery
-        # so a missing module is a runtime ``find_spec`` miss instead of a
-        # static ``module has no attribute`` error. When cd-9ghv ships,
-        # the spec resolves and the skip flips to a real exercise of the
-        # gate (the body below the skip becomes the contract).
-        import importlib.util
+    def test_delegated_mutation_returns_approval_pending_when_strict(
+        self,
+        session_factory: sessionmaker[Session],
+        settings: Settings,
+        wire_default_uow: None,
+    ) -> None:
+        ws_id, owner_id, outsider_id = _seed_workspace_with_outsider(
+            session_factory,
+            slug="strict-appr",
+            owner_email="owner-strict-appr@example.com",
+            outsider_email="outsider-strict-appr@example.com",
+        )
+        try:
+            self._exercise_strict_gate(
+                session_factory,
+                ws_id=ws_id,
+                outsider_id=outsider_id,
+            )
+        finally:
+            _scoped_sweep(
+                session_factory,
+                workspace_id=ws_id,
+                user_ids=(owner_id, outsider_id),
+            )
 
-        if importlib.util.find_spec("app.api.middleware.approval") is None:
-            pytest.skip(
-                "Approval-mode wiring (cd-9ghv) not yet implemented — "
-                "no app.api.middleware.approval module. This test pins "
-                "the contract for the day cd-9ghv lands; until then a "
-                "delegated-token mutation runs without the strict-mode "
-                "gate. Track: bd show cd-9ghv."
+    def _exercise_strict_gate(
+        self,
+        session_factory: sessionmaker[Session],
+        *,
+        ws_id: str,
+        outsider_id: str,
+    ) -> None:
+        # The delegating user must hold a live grant so the verifier
+        # admits the token — a grantless delegated token 401s at verify
+        # time (cd-ljvs, see TestAuthorityFollowsUser). A manager grant
+        # clears that gate; the strict-mode knob below is the only thing
+        # that turns a successful write into a queued approval.
+        _add_outsider_to_workspace(
+            session_factory,
+            workspace_id=ws_id,
+            user_id=outsider_id,
+        )
+        _grant_role(
+            session_factory,
+            workspace_id=ws_id,
+            user_id=outsider_id,
+            grant_role="manager",
+        )
+        _set_agent_approval_mode(
+            session_factory,
+            user_id=outsider_id,
+            mode="strict",
+        )
+
+        with session_factory() as s:
+            owner_ctx = WorkspaceContext(
+                workspace_id=ws_id,
+                workspace_slug="strict-appr",
+                actor_id=outsider_id,
+                actor_kind="user",
+                actor_grant_role="manager",
+                actor_was_owner_member=False,
+                audit_correlation_id=new_ulid(),
+            )
+            minted = mint_token(
+                s,
+                owner_ctx,
+                user_id=outsider_id,
+                label="agent",
+                scopes={},
+                expires_at=None,
+                kind="delegated",
+                delegate_for_user_id=outsider_id,
+                now=_PINNED,
+            )
+            s.commit()
+
+        task_id = new_ulid()
+        app = _build_approval_app()
+        with TestClient(app, raise_server_exceptions=False) as client:
+            r = client.post(
+                f"/w/strict-appr/api/v1/tasks/{task_id}/cancel",
+                headers={"Authorization": f"Bearer {minted.token}"},
+                json={"reason_md": "Guest cancelled the stay"},
+            )
+
+        # 1) The §11 409 pending envelope — the handler never runs, so
+        #    the "executed" body is proof-of-failure if it ever appears.
+        assert r.status_code == 409, r.text
+        assert r.headers["content-type"].startswith("application/problem+json")
+        body = r.json()
+        assert body["type"] == f"{_PROBLEM_TYPE_BASE}approval_required"
+        assert body["status"] == 409
+        assert body["error"] == "approval_required"
+        assert body["approval_status"] == "pending"
+        approval_id = body["approval_id"]
+        assert isinstance(approval_id, str) and approval_id
+        assert body["approval_request_id"] == approval_id
+        assert body["expires_at"]
+
+        # 2) The ApprovalRequest row landed with the resolved payload.
+        with session_factory() as s, tenant_agnostic():
+            row = s.get(ApprovalRequest, approval_id)
+            assert row is not None
+            assert row.workspace_id == ws_id
+            assert row.requester_actor_id == outsider_id
+            assert row.for_user_id == outsider_id
+            assert row.status == "pending"
+            assert row.resolved_user_mode == "strict"
+            assert row.inline_channel == "desk_only"
+            assert row.expires_at is not None
+            assert row.action_json["tool_name"] == "cancel_task"
+            assert row.action_json["pre_approval_source"] == "user_strict_mutation"
+            assert row.action_json["card_summary"] == "Cancel task?"
+            assert row.action_json["requested_by_token_id"] == minted.key_id
+            assert row.action_json["tool_input"] == {
+                "workspace_slug": "strict-appr",
+                "task_id": task_id,
+                "reason_md": "Guest cancelled the stay",
+            }
+
+            # 3) The owner / manager fan-out fired (lines 221-233): one
+            #    APPROVAL_NEEDED notification per resolved decider.
+            notifs = s.scalars(
+                select(Notification).where(
+                    Notification.workspace_id == ws_id,
+                    Notification.kind == "approval_needed",
+                )
+            ).all()
+            assert notifs, "expected an approval_needed fan-out notification"
+            # The delegating user is a resolved manager, so they are one
+            # of the notified deciders; owners are also fanned to.
+            assert outsider_id in {n.recipient_user_id for n in notifs}
+
+    def test_delegated_strict_mutation_without_reason_is_rejected(
+        self,
+        session_factory: sessionmaker[Session],
+        settings: Settings,
+        wire_default_uow: None,
+    ) -> None:
+        """A strict-mode cancel missing ``reason_md`` is a 422, not a queue.
+
+        The gate resolves the target but cannot build the approval
+        action without the required ``reason_md`` payload field, so it
+        returns the §12 ``422 validation`` envelope and writes no
+        ``ApprovalRequest`` row.
+        """
+        ws_id, owner_id, outsider_id = _seed_workspace_with_outsider(
+            session_factory,
+            slug="strict-noreason",
+            owner_email="owner-strict-noreason@example.com",
+            outsider_email="outsider-strict-noreason@example.com",
+        )
+        try:
+            _add_outsider_to_workspace(
+                session_factory, workspace_id=ws_id, user_id=outsider_id
+            )
+            _grant_role(
+                session_factory,
+                workspace_id=ws_id,
+                user_id=outsider_id,
+                grant_role="manager",
+            )
+            _set_agent_approval_mode(
+                session_factory, user_id=outsider_id, mode="strict"
+            )
+            with session_factory() as s:
+                owner_ctx = WorkspaceContext(
+                    workspace_id=ws_id,
+                    workspace_slug="strict-noreason",
+                    actor_id=outsider_id,
+                    actor_kind="user",
+                    actor_grant_role="manager",
+                    actor_was_owner_member=False,
+                    audit_correlation_id=new_ulid(),
+                )
+                minted = mint_token(
+                    s,
+                    owner_ctx,
+                    user_id=outsider_id,
+                    label="agent",
+                    scopes={},
+                    expires_at=None,
+                    kind="delegated",
+                    delegate_for_user_id=outsider_id,
+                    now=_PINNED,
+                )
+                s.commit()
+
+            app = _build_approval_app()
+            with TestClient(app, raise_server_exceptions=False) as client:
+                r = client.post(
+                    f"/w/strict-noreason/api/v1/tasks/{new_ulid()}/cancel",
+                    headers={"Authorization": f"Bearer {minted.token}"},
+                    json={"note": "missing the required reason_md"},
+                )
+
+            assert r.status_code == 422, r.text
+            assert r.json()["type"] == f"{_PROBLEM_TYPE_BASE}validation"
+            with session_factory() as s, tenant_agnostic():
+                assert (
+                    s.scalars(
+                        select(ApprovalRequest).where(
+                            ApprovalRequest.workspace_id == ws_id
+                        )
+                    ).all()
+                    == []
+                )
+        finally:
+            _scoped_sweep(
+                session_factory,
+                workspace_id=ws_id,
+                user_ids=(owner_id, outsider_id),
             )
