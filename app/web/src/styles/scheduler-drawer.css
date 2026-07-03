@@ -226,6 +226,15 @@
   gap: 10px;
 }
 
+/* §09 amend / decline dialogs — validation feedback under the fields. */
+.amend-dialog__error,
+.decline-dialog__error {
+  margin: 0;
+  color: var(--rust);
+  font-size: 13px;
+  line-height: 1.4;
+}
+
 @keyframes schedule-fade-in {
   from { opacity: 0; }
   to   { opacity: 1; }

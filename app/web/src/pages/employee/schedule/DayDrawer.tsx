@@ -6,12 +6,11 @@
 
 import { Link, useLocation } from "react-router-dom";
 import { useMemo, useState } from "react";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { fetchJson } from "@/lib/api";
-import { qk } from "@/lib/queryKeys";
 import { useCloseOnEscape } from "@/lib/useCloseOnEscape";
 import { workspaceRouteForPathname } from "@/lib/workspaceRoutes";
 import type { Booking, MySchedulePayload } from "@/types/api";
+import { BookingAmendDialog } from "./BookingAmendDialog";
+import { BookingDeclineDialog } from "./BookingDeclineDialog";
 import { DayTimeline } from "./DayTimeline";
 import { hoursLabel } from "./lib/availability";
 import {
@@ -42,36 +41,12 @@ export function DayDrawer(props: DayDrawerProps) {
   const { cell, data, onClose, onRequestLeave, onRequestOverride, onProposeBooking } = props;
   const [nowMs] = useState(() => Date.now());
   const { pathname } = useLocation();
-  const qc = useQueryClient();
 
-  // §09 amend and decline. Self-amend above the threshold goes
-  // straight to `pending_amend_*`, below it mutates actuals directly
-  //, the server decides, we just post. The mock endpoint does the
-  // simpler "applies whatever you send" behaviour; production does
-  // the real §09 gating.
-  const amendMutation = useMutation({
-    mutationFn: ({ id, body }: { id: string; body: Record<string, unknown> }) =>
-      fetchJson<Booking>(`/api/v1/bookings/${id}/amend`, {
-        method: "POST",
-        body,
-      }),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: qk.mySchedulePrefix() });
-      qc.invalidateQueries({ queryKey: qk.bookings() });
-    },
-  });
-
-  const declineMutation = useMutation({
-    mutationFn: ({ id, reason }: { id: string; reason: string }) =>
-      fetchJson<Booking>(`/api/v1/bookings/${id}/decline`, {
-        method: "POST",
-        body: { reason },
-      }),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: qk.mySchedulePrefix() });
-      qc.invalidateQueries({ queryKey: qk.bookings() });
-    },
-  });
+  // §09 amend and decline each open a proper form (§14 "Day drawer");
+  // the target booking drives which dialog renders. Both post the
+  // worker's own input and surface failures via the error-toast bus.
+  const [amendTarget, setAmendTarget] = useState<Booking | null>(null);
+  const [declineTarget, setDeclineTarget] = useState<Booking | null>(null);
 
   // A per-day window for the drawer's hero timeline, it sits in its
   // own context so it doesn't need to share scale with the agenda
@@ -268,31 +243,16 @@ export function DayDrawer(props: DayDrawerProps) {
                             <button
                               type="button"
                               className="btn btn--moss btn--sm"
-                              disabled={amendMutation.isPending}
-                              onClick={() =>
-                                amendMutation.mutate({
-                                  id: b.id,
-                                  body: {
-                                    actual_minutes: bookingMinutes(b) + 15,
-                                    reason: "Stayed 15 min extra to finish",
-                                  },
-                                })
-                              }
+                              onClick={() => setAmendTarget(b)}
                             >
-                              Amend (+15 min)
+                              Amend
                             </button>
                           )}
                           {isFutureScheduled && (
                             <button
                               type="button"
                               className="btn btn--rust btn--sm"
-                              disabled={declineMutation.isPending}
-                              onClick={() =>
-                                declineMutation.mutate({
-                                  id: b.id,
-                                  reason: "Sick today",
-                                })
-                              }
+                              onClick={() => setDeclineTarget(b)}
                             >
                               Decline
                             </button>
@@ -336,6 +296,16 @@ export function DayDrawer(props: DayDrawerProps) {
           </section>
         </div>
       </aside>
+      <BookingAmendDialog
+        booking={amendTarget}
+        propertyLabel={amendTarget ? propertyName(amendTarget.property_id, data) : ""}
+        onClose={() => setAmendTarget(null)}
+      />
+      <BookingDeclineDialog
+        booking={declineTarget}
+        propertyLabel={declineTarget ? propertyName(declineTarget.property_id, data) : ""}
+        onClose={() => setDeclineTarget(null)}
+      />
     </>
   );
 }
