@@ -970,6 +970,31 @@ narrow escape hatch. `me:*` implies nothing outside `me:*` — the
 subject narrowing is enforced at the row level regardless of which
 `me:*` verb the caller asked for.
 
+**`me.*` scope → route mapping.** The PAT-reachable self-service routes
+live under `/w/<slug>/api/v1/me/...` (cd-fktzw); each is bearer-reachable,
+self-keyed on `ctx.actor_id`, and gated on the scope below via the
+`MeScope` dependency (sessions and delegated tokens skip the scope gate —
+their only confinement is the same `ctx.actor_id` self-keying):
+
+| scope                | route(s)                                   |
+|----------------------|--------------------------------------------|
+| `me.tasks:read`      | `GET /me/tasks`                            |
+| `me.expenses:read`   | `GET /me/expenses`                         |
+| `me.expenses:write`  | `POST /me/expenses` (draft create)         |
+| `me.profile:read`    | `GET /me/profile`                          |
+| `me.profile:write`   | `PATCH /me/profile`                        |
+| `me.bookings:read`   | *reserved — route lands in a follow-up*    |
+
+Two documented behaviours are partially realised and tracked as
+follow-ups: `GET /me/tasks` today returns the tasks **assigned to** the
+subject (the "plus unassigned tasks on properties in scope matching their
+`user_work_role`" arm is not yet built), and `me.bookings:read` (own
+bookings + payslips) has a reserved scope string but no mounted route.
+`me.profile:write` writes only the columns that exist on `users` —
+`display_name`, `locale` (language), `timezone`; avatar is the separate
+`/api/v1/me/avatar` upload surface, and there is no `emergency_contact`
+column yet.
+
 **Generic entry gates map to a resource scope per route.** A handful of
 routes are gated by the resource-agnostic §05 actions `scope.view` and
 `scope.edit_settings` (a shared "any grant role may read" / "owners &

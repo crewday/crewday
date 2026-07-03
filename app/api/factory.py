@@ -154,6 +154,7 @@ from app.api.v1.dashboard import build_dashboard_router
 from app.api.v1.employees import build_employees_router
 from app.api.v1.history import build_history_router
 from app.api.v1.llm import build_workspace_llm_router
+from app.api.v1.me_data import build_me_data_router
 from app.api.v1.me_schedule import build_me_schedule_router
 from app.api.v1.permission_groups import build_permission_groups_router
 from app.api.v1.permission_rules import build_permission_rules_router
@@ -890,6 +891,15 @@ def _mount_auth_routers(
     # ``extra="forbid"``), so a worker cannot use these surfaces to
     # author requests for another user.
     app.include_router(build_me_schedule_router(), prefix=scoped_prefix)
+    # Workspace-scoped PAT-reachable ``/me`` self-service data routes
+    # (cd-fktzw). Bearer-authenticated (accepts a personal access token,
+    # not cookie-only): the tenancy middleware confines a PAT to the
+    # ``/me`` subtree and pins ``ctx.actor_id`` to the token's subject,
+    # so every route here self-keys on ``ctx.actor_id`` and gates on its
+    # documented ``me.*`` scope via :func:`app.authz.dep.MeScope`. This
+    # is the surface that makes the §03 ``me.*`` scopes actually usable
+    # end-to-end (mintable-but-unusable before this task).
+    app.include_router(build_me_data_router(), prefix=scoped_prefix)
     app.include_router(build_scheduler_router(), prefix=scoped_prefix)
     app.include_router(build_bookings_router(), prefix=scoped_prefix)
     app.include_router(build_dashboard_router(), prefix=scoped_prefix)

@@ -40,10 +40,11 @@ from app.authz.enforce import (
     PermissionRuleRepository,
     UnknownActionKey,
     require,
+    require_me_scope,
 )
 from app.tenancy import WorkspaceContext
 
-__all__ = ["Permission", "PermissionDependencyMetadata"]
+__all__ = ["MeScope", "Permission", "PermissionDependencyMetadata"]
 
 
 @dataclass(frozen=True, slots=True)
@@ -121,6 +122,36 @@ def _attach_permission_metadata(
     metadata: PermissionDependencyMetadata,
 ) -> None:
     vars(dep)["__crewday_permission__"] = metadata
+
+
+def MeScope(required_scope: str) -> Callable[..., None]:
+    """Build a FastAPI dependency enforcing a ``me.*`` scope (§03 "Scopes").
+
+    Router-side wrapper around :func:`app.authz.enforce.require_me_scope`,
+    the ``me.*`` sibling of :func:`Permission`. Used only by the
+    bearer-authenticated ``/w/<slug>/api/v1/me/...`` self-service routes,
+    which carry a per-route ``me.*`` requirement rather than a §05 action
+    key. A personal access token must hold ``required_scope`` (with the
+    ``me.<r>:read`` ⊂ ``me.<r>:write`` implication); sessions, demo,
+    system, and delegated tokens fall through unchecked — their only
+    confinement is the route's own ``ctx.actor_id`` self-keying.
+
+    :class:`InsufficientScope` is mapped to the same ``403``
+    ``insufficient_scope`` + ``WWW-Authenticate: error="insufficient_scope"
+    scope="me.<r>:<verb>"`` envelope that a scoped-token miss yields
+    (:func:`_insufficient_scope_to_http`), so an agent learns exactly
+    which ``me.*`` scope to request.
+    """
+
+    def _dep(
+        ctx: Annotated[WorkspaceContext, Depends(current_workspace_context)],
+    ) -> None:
+        try:
+            require_me_scope(ctx, required_scope=required_scope)
+        except InsufficientScope as exc:
+            raise _insufficient_scope_to_http(exc) from exc
+
+    return _dep
 
 
 def Permission(

@@ -100,6 +100,7 @@ __all__ = [
     "RuleRow",
     "UnknownActionKey",
     "require",
+    "require_me_scope",
     "validate_catalog_integrity",
 ]
 
@@ -529,6 +530,54 @@ def _enforce_scoped_token(
         reason="insufficient_scope",
     )
     raise InsufficientScope(action_key=action_key, required_scope=required)
+
+
+def require_me_scope(ctx: WorkspaceContext, *, required_scope: str) -> None:
+    """Enforce a ``me.*`` scope on a PAT-reachable ``/me`` self-service route (§03).
+
+    The ``me:*`` scope family is reserved for **personal access tokens**
+    (§03 "Scopes") and is never checked by :func:`require` — that gate only
+    covers workspace-scoped tokens (``token_kind == "scoped"``). The new
+    bearer-authenticated ``/w/<slug>/api/v1/me/...`` routes carry their own
+    per-route ``me.*`` requirement instead, and this is its enforcer.
+
+    Who is gated:
+
+    * **Scope-bearing tokens** (``token_kind`` in ``{"scoped", "personal"}``)
+      must hold ``required_scope`` (honouring the single §03 implication
+      ``me.<r>:read`` ⊂ ``me.<r>:write`` via :func:`scope_satisfied`). A
+      personal token minted with ``me.tasks:read`` reaches ``GET /me/tasks``
+      but not ``GET /me/expenses``; a scoped workspace token — which can
+      never hold a ``me.*`` scope (§03 forbids mixing) — is refused here,
+      keeping the ``me.*`` surface reserved for PATs.
+    * **Every other principal** — passkey sessions, demo, system, and
+      **delegated** tokens (which ignore scopes and inherit the delegating
+      user's full grants, §03 "Delegated tokens") — is a no-op: the route's
+      own ``ctx.actor_id`` self-keying is their only confinement, exactly
+      as on the existing session-only ``/me`` routes. Their self-service
+      authority is unchanged.
+
+    Raises :class:`InsufficientScope` (the router maps it to the §03
+    ``403 insufficient_scope`` + ``WWW-Authenticate`` challenge). The
+    exception's ``action_key`` carries the ``me.*`` scope string so the
+    single-scope wire envelope stays informative — there is no §05 action
+    key behind a ``me.*`` read, the scope *is* the authority unit here.
+    """
+    if ctx.principal_kind != "token":
+        return
+    if ctx.token_kind not in ("scoped", "personal"):
+        return
+    if scope_satisfied(ctx.token_scopes, required_scope):
+        return
+    _log_denied(
+        action_key=required_scope,
+        scope_kind="workspace",
+        scope_id=ctx.workspace_id,
+        actor_id=ctx.actor_id,
+        workspace_id=ctx.workspace_id,
+        reason="insufficient_me_scope",
+    )
+    raise InsufficientScope(action_key=required_scope, required_scope=required_scope)
 
 
 def require(

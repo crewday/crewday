@@ -8098,6 +8098,108 @@
     "body_schema_ref": null,
     "group": "me",
     "http": {
+      "method": "GET",
+      "path": "/w/{slug}/api/v1/me/expenses"
+    },
+    "idempotent": true,
+    "name": "expenses",
+    "operation_id": "me.expenses.list",
+    "path_params": [],
+    "query_params": [
+      {
+        "name": "state",
+        "required": false,
+        "schema": {
+          "anyOf": [
+            {
+              "maxLength": 32,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "State"
+        }
+      },
+      {
+        "name": "cursor",
+        "required": false,
+        "schema": {
+          "anyOf": [
+            {
+              "maxLength": 256,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Opaque forward cursor from the previous page's ``next_cursor``. Omitted or empty on the first call. Bounded to 256 chars to keep the URL below reverse-proxy header limits.",
+          "title": "Cursor"
+        }
+      },
+      {
+        "name": "limit",
+        "required": false,
+        "schema": {
+          "default": 50,
+          "description": "Maximum rows to return. Default 50, cap 500 per spec \u00a712 'Pagination'. Rejected with 422 outside ``[1, 500]``.",
+          "maximum": 500,
+          "minimum": 1,
+          "title": "Limit",
+          "type": "integer"
+        }
+      }
+    ],
+    "response_schema_ref": "#/components/schemas/ExpenseClaimListResponse",
+    "summary": "List the caller's own expense claims (self-only)",
+    "x_agent_confirm": null,
+    "x_agent_links": {
+      "policy": "none",
+      "reason": "No safe, specific web handoff is registered for me.expenses.list yet."
+    },
+    "x_cli": {
+      "group": "me",
+      "verb": "expenses"
+    }
+  },
+  {
+    "agent_link_routes": {},
+    "body_schema_ref": "#/components/schemas/ExpenseClaimCreate",
+    "group": "me",
+    "http": {
+      "method": "POST",
+      "path": "/w/{slug}/api/v1/me/expenses"
+    },
+    "idempotent": false,
+    "name": "expenses-create",
+    "operation_id": "me.expenses.create",
+    "path_params": [],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/ExpenseClaimPayload",
+    "summary": "Create a draft expense claim for the caller (self-only)",
+    "x_agent_confirm": {
+      "risk": "medium",
+      "summary": "Create a draft expense claim for the caller (self-only)?",
+      "verb": "Create a draft expense claim for the caller (self-only)"
+    },
+    "x_agent_links": {
+      "policy": "none",
+      "reason": "No safe, specific web handoff is registered for me.expenses.create yet."
+    },
+    "x_cli": {
+      "group": "me",
+      "mutates": true,
+      "summary": "Create a draft expense claim for the caller (self-only)",
+      "verb": "expenses-create"
+    }
+  },
+  {
+    "agent_link_routes": {},
+    "body_schema_ref": null,
+    "group": "me",
+    "http": {
       "method": "POST",
       "path": "/api/v1/me/export"
     },
@@ -8262,6 +8364,62 @@
     "group": "me",
     "http": {
       "method": "GET",
+      "path": "/w/{slug}/api/v1/me/profile"
+    },
+    "idempotent": true,
+    "name": "profile-get",
+    "operation_id": "me.profile.self.get",
+    "path_params": [],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/MeSelfProfileResponse",
+    "summary": "Return the caller's own editable profile (self-only)",
+    "x_agent_confirm": null,
+    "x_agent_links": {
+      "policy": "none",
+      "reason": "No safe, specific web handoff is registered for me.profile.self.get yet."
+    },
+    "x_cli": {
+      "group": "me",
+      "verb": "profile-get"
+    }
+  },
+  {
+    "agent_link_routes": {},
+    "body_schema_ref": "#/components/schemas/MeProfileUpdateRequest",
+    "group": "me",
+    "http": {
+      "method": "PATCH",
+      "path": "/w/{slug}/api/v1/me/profile"
+    },
+    "idempotent": false,
+    "name": "profile-self-update",
+    "operation_id": "me.profile.self.update",
+    "path_params": [],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/MeSelfProfileResponse",
+    "summary": "Update the caller's own profile (self-only)",
+    "x_agent_confirm": {
+      "risk": "medium",
+      "summary": "Update the caller's own profile (self-only)?",
+      "verb": "Update the caller's own profile (self-only)"
+    },
+    "x_agent_links": {
+      "policy": "none",
+      "reason": "No safe, specific web handoff is registered for me.profile.self.update yet."
+    },
+    "x_cli": {
+      "group": "me",
+      "mutates": true,
+      "summary": "Update the caller's own profile (self-only)",
+      "verb": "profile-self-update"
+    }
+  },
+  {
+    "agent_link_routes": {},
+    "body_schema_ref": null,
+    "group": "me",
+    "http": {
+      "method": "GET",
       "path": "/w/{slug}/api/v1/me/schedule"
     },
     "idempotent": true,
@@ -8314,6 +8472,85 @@
     "x_cli": {
       "group": "me",
       "verb": "schedule"
+    }
+  },
+  {
+    "agent_link_routes": {},
+    "body_schema_ref": null,
+    "group": "me",
+    "http": {
+      "method": "GET",
+      "path": "/w/{slug}/api/v1/me/tasks"
+    },
+    "idempotent": true,
+    "name": "tasks",
+    "operation_id": "me.tasks.list",
+    "path_params": [],
+    "query_params": [
+      {
+        "name": "state",
+        "required": false,
+        "schema": {
+          "anyOf": [
+            {
+              "enum": [
+                "cancelled",
+                "completed",
+                "in_progress",
+                "overdue",
+                "pending",
+                "scheduled",
+                "skipped"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "State"
+        }
+      },
+      {
+        "name": "cursor",
+        "required": false,
+        "schema": {
+          "anyOf": [
+            {
+              "maxLength": 256,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Opaque forward cursor from the previous page's ``next_cursor``. Omitted or empty on the first call. Bounded to 256 chars to keep the URL below reverse-proxy header limits.",
+          "title": "Cursor"
+        }
+      },
+      {
+        "name": "limit",
+        "required": false,
+        "schema": {
+          "default": 50,
+          "description": "Maximum rows to return. Default 50, cap 500 per spec \u00a712 'Pagination'. Rejected with 422 outside ``[1, 500]``.",
+          "maximum": 500,
+          "minimum": 1,
+          "title": "Limit",
+          "type": "integer"
+        }
+      }
+    ],
+    "response_schema_ref": "#/components/schemas/TaskListResponse",
+    "summary": "List tasks assigned to the caller (self-only)",
+    "x_agent_confirm": null,
+    "x_agent_links": {
+      "policy": "none",
+      "reason": "No safe, specific web handoff is registered for me.tasks.list yet."
+    },
+    "x_cli": {
+      "group": "me",
+      "verb": "tasks"
     }
   },
   {
