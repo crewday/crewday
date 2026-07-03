@@ -22,6 +22,8 @@ the suite.
 from __future__ import annotations
 
 import logging
+import sys
+from collections.abc import Iterator
 
 import pytest
 from click.testing import CliRunner
@@ -43,6 +45,36 @@ from crewday._main import (
     main,
     root,
 )
+
+
+@pytest.fixture(autouse=True)
+def _restore_crewday_logger() -> Iterator[None]:
+    """Snapshot and restore the ``crewday`` logger around every test.
+
+    The root callback (§13 wiring) sets ``propagate = False`` and
+    installs a stderr handler on the ``crewday`` logger. Tests that
+    invoke a subcommand run that callback and would otherwise leave the
+    logger with ``propagate = False``, which breaks later
+    ``caplog``-based assertions (caplog captures via propagation to the
+    root logger). Restoring the snapshot keeps each test isolated.
+    """
+    logger = logging.getLogger("crewday")
+    handlers = logger.handlers[:]
+    level = logger.level
+    propagate = logger.propagate
+    # Force a clean, propagating logger for the test so caplog (which
+    # captures via propagation to root) works even if a prior test —
+    # possibly in another module on this xdist worker — left the logger
+    # with ``propagate = False`` and a stderr handler attached.
+    logger.handlers[:] = []
+    logger.setLevel(logging.WARNING)
+    logger.propagate = True
+    try:
+        yield
+    finally:
+        logger.handlers[:] = handlers
+        logger.setLevel(level)
+        logger.propagate = propagate
 
 
 @pytest.fixture
@@ -78,6 +110,103 @@ def test_help_lists_global_flags(runner: CliRunner) -> None:
     # The help header should mention the CLI's role so new users get
     # a single-sentence anchor on invocation.
     assert "crew.day" in help_text
+
+
+def test_help_lists_spec13_global_flags(runner: CliRunner) -> None:
+    """Every §13 "Global flags" row is present on the root group."""
+    result = runner.invoke(root, ["--help"])
+    assert result.exit_code == 0, result.output
+    for flag in (
+        "--jq",
+        "--dry-run",
+        "--explain",
+        "--correlation-id",
+        "--agent-reason",
+        "--conversation-ref",
+        "--no-color",
+    ):
+        assert flag in result.output, f"missing global flag {flag!r} in --help"
+
+
+def test_no_dash_w_short_alias(runner: CliRunner) -> None:
+    """``-W`` is explicitly NOT in the spec — it must not be an accepted
+    alias for any global flag."""
+    assert "-W" not in runner.invoke(root, ["--help"]).output
+    result = runner.invoke(root, ["-W", "x", "--help"])
+    assert result.exit_code == 2
+
+
+def test_global_flags_thread_into_context(runner: CliRunner) -> None:
+    """The root callback populates :class:`CrewdayContext` from the new
+    §13 global flags. A throwaway capture command reads ``ctx.obj``."""
+    import click
+
+    seen: dict[str, object] = {}
+
+    @root.command(name="_capture_ctx")
+    @click.pass_obj
+    def _capture(ctx: CrewdayContext) -> None:
+        seen["ctx"] = ctx
+
+    try:
+        result = runner.invoke(
+            root,
+            [
+                "--dry-run",
+                "--explain",
+                "--agent-reason",
+                "closing shift",
+                "--conversation-ref",
+                "conv-7",
+                "--correlation-id",
+                "corr-3",
+                "--jq",
+                ".data",
+                "--no-color",
+                "_capture_ctx",
+            ],
+        )
+    finally:
+        del root.commands["_capture_ctx"]
+
+    assert result.exit_code == 0, result.output
+    ctx = seen["ctx"]
+    assert isinstance(ctx, CrewdayContext)
+    assert ctx.dry_run is True
+    assert ctx.explain is True
+    assert ctx.agent_reason == "closing shift"
+    assert ctx.conversation_ref == "conv-7"
+    assert ctx.correlation_id == "corr-3"
+    assert ctx.jq == ".data"
+    assert ctx.no_color is True
+
+
+def test_global_flags_default_off(runner: CliRunner) -> None:
+    """Absent flags leave the context at its documented defaults."""
+    import click
+
+    seen: dict[str, object] = {}
+
+    @root.command(name="_capture_defaults")
+    @click.pass_obj
+    def _capture(ctx: CrewdayContext) -> None:
+        seen["ctx"] = ctx
+
+    try:
+        result = runner.invoke(root, ["_capture_defaults"])
+    finally:
+        del root.commands["_capture_defaults"]
+
+    assert result.exit_code == 0, result.output
+    ctx = seen["ctx"]
+    assert isinstance(ctx, CrewdayContext)
+    assert ctx.dry_run is False
+    assert ctx.explain is False
+    assert ctx.agent_reason is None
+    assert ctx.conversation_ref is None
+    assert ctx.correlation_id is None
+    assert ctx.jq is None
+    assert ctx.no_color is False
 
 
 def test_help_is_sorted_for_agent_discovery(runner: CliRunner) -> None:
@@ -286,6 +415,35 @@ def test_handle_errors_catches_keyboard_interrupt(
     assert exc_info.value.code == 130
     captured = capsys.readouterr()
     assert captured.err.strip() == "Aborted."
+
+
+def test_main_emits_dry_run_plan_and_exits_zero(
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``main()`` catches :class:`DryRunComplete`, prints the resolved
+    request as JSON to stdout, and exits 0 (§13 "plan without
+    executing")."""
+    import json
+
+    from crewday._main import DryRunComplete, root
+
+    plan = {"method": "POST", "url": "https://x/y", "body": {"a": 1}, "dry_run": True}
+
+    @root.command(name="_dry_capture")
+    def _dry() -> None:
+        raise DryRunComplete(plan)
+
+    monkeypatch.setattr(sys, "argv", ["crewday", "_dry_capture"])
+    try:
+        with pytest.raises(SystemExit) as exc_info:
+            main()
+    finally:
+        del root.commands["_dry_capture"]
+
+    assert exc_info.value.code == ExitCode.SUCCESS
+    out = capsys.readouterr().out
+    assert json.loads(out) == plan
 
 
 def test_python_dash_m_entry_point_module_exists() -> None:

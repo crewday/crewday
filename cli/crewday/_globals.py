@@ -67,6 +67,19 @@ class CrewdayContext:
       * ``idempotency_key_factory``: zero-arg callable returning a
         fresh idempotency key per mutating call. Override via
         ``--idempotency-key`` wraps this with a constant factory.
+      * ``dry_run``: when set, mutating verbs are planned but never
+        sent (§13 "Global flags" ``--dry-run``): the client raises the
+        resolved request instead of committing.
+      * ``explain``: when set, the underlying HTTP call is dumped to
+        stderr before it is sent (§13 "Agent UX" ``--explain``).
+      * ``agent_reason`` / ``conversation_ref`` / ``correlation_id``:
+        agent audit-trail values (§12 "Agent audit headers"), forwarded
+        as ``X-Agent-Reason`` / ``X-Agent-Conversation-Ref`` /
+        ``X-Correlation-Id`` on mutating requests when present.
+      * ``jq``: optional jq filter applied client-side to JSON output
+        (§13 "Global flags" ``--jq``).
+      * ``no_color``: suppress ANSI colour in human-readable output
+        (§13 "Global flags" ``--no-color``).
       * ``logger``: scoped to ``crewday``; commands create children
         (``logger.getChild("tasks")``). Verbose mode bumps the level
         to DEBUG; default is WARNING so stdout stays clean for agent
@@ -79,6 +92,13 @@ class CrewdayContext:
     base_url: str | None = None
     token: str | None = None
     output_from_default: bool = False
+    dry_run: bool = False
+    explain: bool = False
+    agent_reason: str | None = None
+    conversation_ref: str | None = None
+    correlation_id: str | None = None
+    jq: str | None = None
+    no_color: bool = False
     idempotency_key_factory: Callable[[], str] = field(
         default=default_idempotency_key_factory,
     )

@@ -26,10 +26,12 @@ picture".
 
 from __future__ import annotations
 
+import json
 import logging
 import sys
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from functools import wraps
+from typing import Any
 
 import click
 
@@ -47,6 +49,7 @@ __all__ = [
     "ApprovalPending",
     "ConfigError",
     "CrewdayError",
+    "DryRunComplete",
     "ExitCode",
     "RateLimited",
     "ServerError",
@@ -106,6 +109,22 @@ class RateLimited(CrewdayError):
     """Exceeded retry budget against a 429 / token-bucket response."""
 
     exit_code = ExitCode.RATE_LIMITED
+
+
+class DryRunComplete(Exception):
+    """Control-flow signal raised by the client under ``--dry-run``.
+
+    Not an error: §13 "Global flags" ``--dry-run`` plans a mutating
+    call without executing it. :meth:`crewday._client.CrewdayClient.request`
+    raises this instead of sending, carrying the resolved request
+    (method, URL, redacted headers, body). :func:`main` catches it,
+    prints the plan as JSON to stdout, and exits ``0`` — the command
+    never touches server state.
+    """
+
+    def __init__(self, plan: Mapping[str, Any]) -> None:
+        super().__init__("dry-run: request planned, not sent")
+        self.plan = dict(plan)
 
 
 def _resolve_version() -> str:
@@ -228,6 +247,54 @@ def handle_errors[**P, R](func: Callable[P, R]) -> Callable[P, R]:
     help="Output format. 'json' (default) and 'ndjson' stream cleanly through jq.",
 )
 @click.option(
+    "--jq",
+    "jq_filter",
+    type=str,
+    default=None,
+    metavar="EXPR",
+    help="Filter the JSON output through a jq expression, client-side.",
+)
+@click.option(
+    "--dry-run",
+    is_flag=True,
+    default=False,
+    help="Plan a mutating call and print the resolved request without sending it.",
+)
+@click.option(
+    "--explain",
+    is_flag=True,
+    default=False,
+    help="Dump the resolved HTTP call (method, URL, redacted headers, body) to stderr.",
+)
+@click.option(
+    "--correlation-id",
+    type=str,
+    default=None,
+    envvar="CREWDAY_CORRELATION_ID",
+    help="Propagate an agent's correlation id (X-Correlation-Id on mutating calls).",
+)
+@click.option(
+    "--agent-reason",
+    type=str,
+    default=None,
+    help="Audit reason for the action (sets X-Agent-Reason on mutating calls).",
+)
+@click.option(
+    "--conversation-ref",
+    type=str,
+    default=None,
+    help=(
+        "Opaque conversation/prompt reference "
+        "(sets X-Agent-Conversation-Ref on mutating calls)."
+    ),
+)
+@click.option(
+    "--no-color",
+    is_flag=True,
+    default=False,
+    help="Disable ANSI colour in human-readable output (for pipes).",
+)
+@click.option(
     "--verbose/--quiet",
     default=False,
     help="Bump the 'crewday' logger to DEBUG on stderr (default: WARNING).",
@@ -241,6 +308,13 @@ def root(
     token: str | None,
     workspace: str | None,
     output: str | None,
+    jq_filter: str | None,
+    dry_run: bool,
+    explain: bool,
+    correlation_id: str | None,
+    agent_reason: str | None,
+    conversation_ref: str | None,
+    no_color: bool,
     verbose: bool,
 ) -> None:
     """crew.day command-line interface.
@@ -265,6 +339,13 @@ def root(
         base_url=base_url,
         token=token,
         output_from_default=output_from_default,
+        dry_run=dry_run,
+        explain=explain,
+        agent_reason=agent_reason,
+        conversation_ref=conversation_ref,
+        correlation_id=correlation_id,
+        jq=jq_filter,
+        no_color=no_color,
         idempotency_key_factory=default_idempotency_key_factory,
         logger=logging.getLogger("crewday"),
     )
@@ -447,7 +528,14 @@ def main() -> None:
     _register_config_commands_once()
     _register_surface_commands_once()
     _register_overrides_once()
-    root(prog_name="crewday")
+    try:
+        root(prog_name="crewday")
+    except DryRunComplete as planned:
+        # ``--dry-run`` planned a mutating call instead of sending it.
+        # Emit the resolved request as JSON to stdout and exit clean so
+        # an agent can parse the plan without touching server state.
+        click.echo(json.dumps(planned.plan, indent=2, sort_keys=False))
+        sys.exit(ExitCode.SUCCESS)
 
 
 if __name__ == "__main__":  # pragma: no cover — ``python -m crewday._main`` path.

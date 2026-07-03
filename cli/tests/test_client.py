@@ -22,7 +22,7 @@ from typing import Any
 import httpx
 import pytest
 from crewday._client import ApiError, CrewdayClient
-from crewday._main import ConfigError, ExitCode, ServerError
+from crewday._main import ConfigError, DryRunComplete, ExitCode, ServerError
 
 
 def _no_sleep(_seconds: float) -> None:
@@ -972,3 +972,161 @@ def test_request_files_with_data_is_accepted() -> None:
     assert b'name="kind"' in body
     assert b"photo" in body
     assert b'name="file"' in body
+
+
+# ---------------------------------------------------------------------------
+# Agent audit headers + --dry-run / --explain (§12, §13 "Global flags")
+# ---------------------------------------------------------------------------
+
+
+def _audit_client(
+    handler: Any,
+    *,
+    agent_reason: str | None = None,
+    conversation_ref: str | None = None,
+    correlation_id: str | None = None,
+    dry_run: bool = False,
+    explain: bool = False,
+) -> CrewdayClient:
+    """Build a client wired for the audit-header / dry-run / explain paths."""
+    return CrewdayClient(
+        base_url="https://api.test.local",
+        token="tok",
+        workspace="acme",
+        transport=httpx.MockTransport(handler),
+        rng=random.Random(0),
+        sleep=_no_sleep,
+        agent_reason=agent_reason,
+        conversation_ref=conversation_ref,
+        correlation_id=correlation_id,
+        dry_run=dry_run,
+        explain=explain,
+    )
+
+
+def test_agent_audit_headers_on_mutating_request() -> None:
+    """POST carries X-Agent-Reason / X-Agent-Conversation-Ref /
+    X-Correlation-Id when the operator supplied them (§12)."""
+    captured: dict[str, httpx.Headers] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["headers"] = request.headers
+        return httpx.Response(200, json={"ok": True})
+
+    with _audit_client(
+        handler,
+        agent_reason="closing the shift",
+        conversation_ref="conv-42",
+        correlation_id="corr-9",
+    ) as client:
+        client.post("/w/acme/api/v1/tasks", json={"a": 1})
+
+    headers = captured["headers"]
+    assert headers["X-Agent-Reason"] == "closing the shift"
+    assert headers["X-Agent-Conversation-Ref"] == "conv-42"
+    assert headers["X-Correlation-Id"] == "corr-9"
+
+
+def test_agent_audit_headers_absent_on_read() -> None:
+    """GET is not a mutating call: audit headers stay off it (§12
+    "on mutating requests")."""
+    captured: dict[str, httpx.Headers] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["headers"] = request.headers
+        return httpx.Response(200, json={"ok": True})
+
+    with _audit_client(
+        handler,
+        agent_reason="reading",
+        conversation_ref="conv-1",
+        correlation_id="corr-1",
+    ) as client:
+        client.get("/w/acme/api/v1/tasks")
+
+    lowered = {k.lower() for k in captured["headers"]}
+    assert "x-agent-reason" not in lowered
+    assert "x-agent-conversation-ref" not in lowered
+    assert "x-correlation-id" not in lowered
+
+
+def test_agent_audit_headers_absent_when_unset() -> None:
+    """No audit values supplied -> no audit headers, even on a mutation."""
+    captured: dict[str, httpx.Headers] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["headers"] = request.headers
+        return httpx.Response(200, json={"ok": True})
+
+    with _audit_client(handler) as client:
+        client.post("/w/acme/api/v1/tasks", json={"a": 1})
+
+    lowered = {k.lower() for k in captured["headers"]}
+    assert "x-agent-reason" not in lowered
+    assert "x-agent-conversation-ref" not in lowered
+    assert "x-correlation-id" not in lowered
+
+
+def test_dry_run_plans_mutation_without_sending() -> None:
+    """--dry-run raises DryRunComplete with the resolved request and
+    never touches the transport (§13 "plan without executing")."""
+    calls: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(request)
+        return httpx.Response(200, json={"ok": True})
+
+    with (
+        _audit_client(handler, dry_run=True, agent_reason="why") as client,
+        pytest.raises(DryRunComplete) as exc_info,
+    ):
+        client.post("/w/acme/api/v1/tasks", json={"title": "x"})
+
+    assert not calls, "dry-run must not send the request"
+    plan = exc_info.value.plan
+    assert plan["method"] == "POST"
+    assert plan["url"] == "https://api.test.local/w/acme/api/v1/tasks"
+    assert plan["body"] == {"title": "x"}
+    assert plan["dry_run"] is True
+    # Audit headers appear in the plan (they are added before the plan
+    # is built) and the bearer token is redacted (§15).
+    assert plan["headers"]["x-agent-reason"] == "why"
+    assert plan["headers"]["authorization"] == "Bearer <redacted>"
+
+
+def test_dry_run_does_not_block_reads() -> None:
+    """A read is side-effect-free, so --dry-run lets GET run normally so
+    an agent can inspect state while planning a multi-step flow."""
+    calls: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(request)
+        return httpx.Response(200, json={"data": []})
+
+    with _audit_client(handler, dry_run=True) as client:
+        response = client.get("/w/acme/api/v1/tasks")
+
+    assert response.status_code == 200
+    assert len(calls) == 1
+
+
+def test_explain_dumps_request_to_stderr_and_sends(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """--explain narrates the call to stderr, redacts the token, and
+    still sends the request (§13 "Agent UX")."""
+    calls: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(request)
+        return httpx.Response(200, json={"ok": True})
+
+    with _audit_client(handler, explain=True) as client:
+        client.post("/w/acme/api/v1/tasks", json={"title": "x"})
+
+    assert len(calls) == 1, "explain must still send the request"
+    err = capsys.readouterr().err
+    assert "POST https://api.test.local/w/acme/api/v1/tasks" in err
+    assert "authorization: Bearer <redacted>" in err
+    assert "tok" not in err  # the real token never leaks
+    assert '"title": "x"' in err

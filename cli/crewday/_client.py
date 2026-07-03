@@ -32,9 +32,11 @@ See ``docs/specs/13-cli.md`` §"HTTP client", §"Retries", §"Streaming",
 
 from __future__ import annotations
 
+import json
 import logging
 import pathlib
 import random
+import sys
 import time
 from collections.abc import Iterator, Mapping
 from contextlib import AbstractContextManager
@@ -48,6 +50,7 @@ import httpx
 from crewday._main import (
     ConfigError,
     CrewdayError,
+    DryRunComplete,
     ExitCode,
     ServerError,
 )
@@ -299,6 +302,11 @@ class CrewdayClient(AbstractContextManager["CrewdayClient"]):
         transport: httpx.BaseTransport | None = None,
         rng: random.Random | None = None,
         sleep: object = time.sleep,
+        agent_reason: str | None = None,
+        conversation_ref: str | None = None,
+        correlation_id: str | None = None,
+        dry_run: bool = False,
+        explain: bool = False,
     ) -> None:
         if not base_url:
             # Profile resolution should reject empty base URLs; this is
@@ -309,6 +317,15 @@ class CrewdayClient(AbstractContextManager["CrewdayClient"]):
         self._base_path = httpx.URL(base_url).path.rstrip("/")
         self._token = token
         self._workspace = workspace
+        # §12 "Agent audit headers" — forwarded on mutating requests
+        # only, when the operator/agent supplied them via the global
+        # flags. §13 "Global flags" ``--dry-run`` / ``--explain`` are
+        # request-plan controls that short-circuit or narrate the send.
+        self._agent_reason = agent_reason
+        self._conversation_ref = conversation_ref
+        self._correlation_id = correlation_id
+        self._dry_run = dry_run
+        self._explain = explain
         self._user_agent = _resolve_user_agent(user_agent)
         # ``rng`` is injectable so tests can pin jitter; default RNG is
         # the module random because retries don't need cryptographic
@@ -415,6 +432,37 @@ class CrewdayClient(AbstractContextManager["CrewdayClient"]):
         headers: dict[str, str] = dict(extra_headers) if extra_headers else {}
         if idempotency_key is not None:
             headers["Idempotency-Key"] = idempotency_key
+
+        # §12 "Agent audit headers": enrich the audit trail on mutating
+        # calls only. Reads don't produce audit rows, so we keep them
+        # off idempotent verbs to match the spec's "on mutating
+        # requests" contract.
+        is_mutating = method_upper not in _IDEMPOTENT_METHODS
+        if is_mutating:
+            if self._agent_reason is not None:
+                headers["X-Agent-Reason"] = self._agent_reason
+            if self._conversation_ref is not None:
+                headers["X-Agent-Conversation-Ref"] = self._conversation_ref
+            if self._correlation_id is not None:
+                headers["X-Correlation-Id"] = self._correlation_id
+
+        # §13 "Global flags" ``--explain`` / ``--dry-run``. ``--explain``
+        # narrates the call to stderr for any verb; ``--dry-run`` plans a
+        # mutating verb without sending it (reads are side-effect-free, so
+        # they run normally under ``--dry-run``).
+        if self._explain or (self._dry_run and is_mutating):
+            plan = self._describe_request(
+                method=method_upper,
+                path=request_path,
+                headers=headers,
+                params=params,
+                body=json,
+            )
+            if self._explain:
+                self._emit_explain(plan)
+            if self._dry_run and is_mutating:
+                plan["dry_run"] = True
+                raise DryRunComplete(plan)
 
         # Each iteration of the loop either ``return``s a 2xx response,
         # raises (transport budget exhausted or non-retriable HTTP
@@ -728,6 +776,58 @@ class CrewdayClient(AbstractContextManager["CrewdayClient"]):
         if not callable(sleep_fn):
             raise TypeError("sleep callable was replaced with non-callable")
         sleep_fn(base_sleep * (1.0 + jitter))
+
+    def _describe_request(
+        self,
+        *,
+        method: str,
+        path: str,
+        headers: Mapping[str, str],
+        params: Mapping[str, Any] | None,
+        body: object | None,
+    ) -> dict[str, Any]:
+        """Return the resolved request for ``--explain`` / ``--dry-run``.
+
+        Uses :meth:`httpx.Client.build_request` so the URL and header
+        merge match what an actual send would produce (base-URL join,
+        query encoding, inherited auth/workspace/user-agent headers).
+        The ``Authorization`` value is redacted — §15 forbids leaking
+        the bearer token into operator-visible output.
+        """
+        request_obj = self._client.build_request(
+            method,
+            path,
+            json=body if body is not None else None,
+            params=params,
+            headers=dict(headers) or None,
+        )
+        redacted: dict[str, str] = {}
+        for name, value in request_obj.headers.items():
+            redacted[name] = (
+                "Bearer <redacted>" if name.lower() == "authorization" else value
+            )
+        plan: dict[str, Any] = {
+            "method": method,
+            "url": str(request_obj.url),
+            "headers": redacted,
+        }
+        if body is not None:
+            plan["body"] = body
+        return plan
+
+    def _emit_explain(self, plan: Mapping[str, Any]) -> None:
+        """Dump the resolved request to stderr (§13 "Agent UX")."""
+        lines = [f"{plan['method']} {plan['url']}"]
+        headers = plan["headers"]
+        if isinstance(headers, Mapping):
+            lines.extend(f"{name}: {value}" for name, value in headers.items())
+        if "body" in plan:
+            lines.append("")
+            lines.append(
+                json.dumps(plan["body"], indent=2, sort_keys=False, default=str)
+            )
+        sys.stderr.write("\n".join(lines) + "\n")
+        sys.stderr.flush()
 
     def _log_attempt(
         self,

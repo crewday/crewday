@@ -303,6 +303,7 @@ def test_complete_uses_profile_default_workspace(
             base_url: str,
             token: str | None,
             workspace: str | None,
+            **_kwargs: object,
         ) -> None:
             assert base_url == "https://api.test.local"
             assert token == "test-token"

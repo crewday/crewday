@@ -996,6 +996,11 @@ def _default_client_factory(ctx: CrewdayContext) -> CrewdayClient:
         base_url=base_url,
         token=token,
         workspace=ctx.workspace,
+        agent_reason=ctx.agent_reason,
+        conversation_ref=ctx.conversation_ref,
+        correlation_id=ctx.correlation_id,
+        dry_run=ctx.dry_run,
+        explain=ctx.explain,
     )
 
 
