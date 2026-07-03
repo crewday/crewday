@@ -543,6 +543,7 @@ def resolve_actor(
                 secret,
                 workspace_slug=slug,
                 cookies=request.cookies,
+                ttl_hours=settings.demo_workspace_ttl_hours,
             )
             if binding is not None:
                 return ActorIdentity(

@@ -1101,6 +1101,7 @@ def _register_demo_routes(
                 cookie_secret,
                 scenario_key=scenario_key,
                 value=request.cookies.get(demo_cookie_name(scenario_key)),
+                ttl_hours=settings.demo_workspace_ttl_hours,
             )
             if existing is not None:
                 slug = demo_workspace_slug(session, existing.workspace_id)
@@ -1114,6 +1115,7 @@ def _register_demo_routes(
                 session,
                 scenario_key,
                 persona_key=persona_key,
+                ttl_hours=settings.demo_workspace_ttl_hours,
             )
             cookie_value = mint_demo_cookie(
                 cookie_secret,

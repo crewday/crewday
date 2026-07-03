@@ -13,6 +13,7 @@ from app.adapters.db.demo.models import DemoWorkspace
 from app.adapters.db.session import UnitOfWorkImpl
 from app.adapters.db.workspace.models import UserWorkspace, Workspace
 from app.config import Settings
+from app.demo.seeder import DEFAULT_DEMO_WORKSPACE_TTL_HOURS
 from app.util.clock import FrozenClock
 from app.worker.jobs import demo as demo_jobs
 
@@ -99,6 +100,68 @@ def test_demo_gc_purges_expired_workspace_rows_and_upload_dir(
             is None
         )
         assert demo_jobs.count_workspace_id_orphans(session) == baseline_orphans
+
+
+def test_demo_gc_selects_workspace_idle_past_default_ttl(
+    engine: Engine,
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    now = datetime(2026, 4, 30, 12, 0, tzinfo=UTC)
+    workspace_id = "01HWA00000000000000000IDL"
+    factory = sessionmaker(bind=engine, expire_on_commit=False, class_=Session)
+    monkeypatch.setattr(demo_jobs, "make_uow", lambda: UnitOfWorkImpl(factory))
+
+    assert DEFAULT_DEMO_WORKSPACE_TTL_HOURS == 24
+    ttl = timedelta(hours=DEFAULT_DEMO_WORKSPACE_TTL_HOURS)
+    with factory() as session:
+        session.add(
+            Workspace(
+                id=workspace_id,
+                slug="idle-demo",
+                name="Idle Demo",
+                plan="free",
+                quota_json={},
+                settings_json={},
+                default_timezone="UTC",
+                default_locale="en",
+                default_currency="USD",
+                created_at=now,
+                updated_at=now,
+            )
+        )
+        session.flush()
+        # expires_at set exactly as a default-TTL mint would compute it.
+        session.add(
+            DemoWorkspace(
+                id=workspace_id,
+                scenario_key="rental-manager",
+                seed_digest="digest",
+                created_at=now,
+                last_activity_at=now,
+                expires_at=now + ttl,
+                cookie_binding_digest="binding",
+            )
+        )
+        session.commit()
+
+    # Still inside the 24h window: not selected.
+    alive = demo_jobs.purge_expired_demo_workspaces(
+        settings=_settings(tmp_path),
+        clock=FrozenClock(now + ttl - timedelta(seconds=1)),
+    )
+    assert workspace_id not in alive.workspace_ids
+    with factory() as session:
+        assert session.get(DemoWorkspace, workspace_id) is not None
+
+    # Idle past 24h: selected and purged.
+    purged = demo_jobs.purge_expired_demo_workspaces(
+        settings=_settings(tmp_path),
+        clock=FrozenClock(now + ttl + timedelta(seconds=1)),
+    )
+    assert workspace_id in purged.workspace_ids
+    with factory() as session:
+        assert session.get(DemoWorkspace, workspace_id) is None
 
 
 def _settings(data_dir) -> Settings:

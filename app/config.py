@@ -195,6 +195,12 @@ class Settings(BaseSettings):
     demo_upload_bytes_per_ip_per_day: int = Field(default=25 * 1024 * 1024, ge=1)
     demo_uploads_per_workspace_lifetime: int = Field(default=10, ge=1)
     demo_max_payload_bytes: int = Field(default=32 * 1024, ge=1)
+    # Idle lifetime of a demo workspace (§24 "Entity":
+    # ``expires_at = last_activity_at + ttl``). Every mint and every
+    # activity touch sets ``expires_at`` to ``now + ttl``; the
+    # ``demo_gc`` job purges rows once ``expires_at < now``. Default
+    # 24h keeps demo data inside the privacy contract.
+    demo_workspace_ttl_hours: int = Field(default=24, ge=1)
     # Emit ``Strict-Transport-Security`` on every response (§15 "HTTP
     # security headers"). Default **off** so a fresh deployment that
     # has not yet provisioned TLS doesn't accidentally send a 2-year

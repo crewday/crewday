@@ -75,7 +75,9 @@ _START_MAX_BYTES: Final[int] = 256
 _START_PATH_RE: Final[re.Pattern[str]] = re.compile(r"^/[-A-Za-z0-9_./]*$")
 _START_QUERY_RE: Final[re.Pattern[str]] = re.compile(r"^[-A-Za-z0-9_.~=&%]*$")
 _WINDOW: Final[timedelta] = timedelta(days=30)
-_DEMO_WORKSPACE_TTL: Final[timedelta] = timedelta(days=30)
+# Mirrors the ``demo_workspace_ttl_hours`` config default (§24). Used only
+# when a caller does not thread an explicit TTL (e.g. seeder unit tests).
+DEFAULT_DEMO_WORKSPACE_TTL_HOURS: Final[int] = 24
 _ACTIVITY_TOUCH_INTERVAL: Final[timedelta] = timedelta(seconds=5)
 
 
@@ -125,6 +127,7 @@ def seed_workspace(
     *,
     persona_key: str | None = None,
     now: datetime | None = None,
+    ttl_hours: int = DEFAULT_DEMO_WORKSPACE_TTL_HOURS,
 ) -> SeededDemoWorkspace:
     """Seed one fresh demo workspace from ``scenario_key``."""
     # code-health: ignore[nloc] Demo fixture orchestration follows spec seed order.  # noqa: E501
@@ -195,6 +198,7 @@ def seed_workspace(
         seed_digest=_seed_digest(fixture),
         persona_user_id=persona_user_id,
         now=resolved_now,
+        ttl=timedelta(hours=ttl_hours),
     )
 
     role_ids = _seed_work_roles(session, fixture, workspace_id, resolved_now)
@@ -316,6 +320,7 @@ def load_bound_demo_workspace(
     scenario_key: str,
     value: str | None,
     now: datetime | None = None,
+    ttl_hours: int = DEFAULT_DEMO_WORKSPACE_TTL_HOURS,
 ) -> DemoCookieBinding | None:
     """Validate a signed cookie against its live demo workspace row."""
     binding = load_demo_cookie(secret, scenario_key=scenario_key, value=value)
@@ -336,7 +341,7 @@ def load_bound_demo_workspace(
     if row.cookie_binding_digest != expected_digest:
         return None
 
-    _touch_demo_workspace(row, now=resolved_now)
+    _touch_demo_workspace(row, now=resolved_now, ttl=timedelta(hours=ttl_hours))
     return binding
 
 
@@ -347,6 +352,7 @@ def load_bound_demo_workspace_for_slug(
     workspace_slug: str,
     cookies: Mapping[str, str],
     now: datetime | None = None,
+    ttl_hours: int = DEFAULT_DEMO_WORKSPACE_TTL_HOURS,
 ) -> DemoCookieBinding | None:
     """Validate the scenario cookie that belongs to ``workspace_slug``."""
     scenario_key = session.scalar(
@@ -362,6 +368,7 @@ def load_bound_demo_workspace_for_slug(
         scenario_key=scenario_key,
         value=cookies.get(demo_cookie_name(scenario_key)),
         now=now,
+        ttl_hours=ttl_hours,
     )
 
 
@@ -458,6 +465,7 @@ def _seed_demo_workspace(
     seed_digest: str,
     persona_user_id: str,
     now: datetime,
+    ttl: timedelta,
 ) -> None:
     session.add(
         DemoWorkspace(
@@ -466,7 +474,7 @@ def _seed_demo_workspace(
             seed_digest=seed_digest,
             created_at=now,
             last_activity_at=now,
-            expires_at=now + _DEMO_WORKSPACE_TTL,
+            expires_at=now + ttl,
             cookie_binding_digest=binding_digest(
                 scenario_key=scenario_key,
                 workspace_id=workspace_id,
@@ -942,11 +950,12 @@ def _touch_demo_workspace(
     row: DemoWorkspace,
     *,
     now: datetime,
+    ttl: timedelta,
 ) -> None:
     if now - _to_utc(row.last_activity_at) < _ACTIVITY_TOUCH_INTERVAL:
         return
     row.last_activity_at = now
-    row.expires_at = now + _DEMO_WORKSPACE_TTL
+    row.expires_at = now + ttl
 
 
 def _seed_digest(fixture: Mapping[str, object]) -> str:

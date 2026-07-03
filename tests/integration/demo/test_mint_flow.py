@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Iterator
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from fastapi.testclient import TestClient
@@ -24,6 +24,7 @@ from app.adapters.db.workspace.models import UserWorkspace, Workspace
 from app.api.factory import create_app
 from app.config import Settings
 from app.demo import demo_cookie_name, mint_demo_cookie
+from app.demo.seeder import DEFAULT_DEMO_WORKSPACE_TTL_HOURS
 from app.util.ulid import new_ulid
 
 pytestmark = pytest.mark.integration
@@ -34,11 +35,11 @@ def session_factory(engine: Engine) -> sessionmaker[Session]:
     return sessionmaker(bind=engine, expire_on_commit=False, class_=Session)
 
 
-@pytest.fixture
-def demo_client(
+def _build_demo_client(
     session_factory: sessionmaker[Session],
     monkeypatch: pytest.MonkeyPatch,
-) -> Iterator[TestClient]:
+    settings: Settings,
+) -> TestClient:
     monkeypatch.setattr(
         "app.api.factory.make_uow", lambda _url=None: UnitOfWorkImpl(session_factory)
     )
@@ -48,14 +49,20 @@ def demo_client(
     monkeypatch.setattr(
         "app.tenancy.middleware.make_uow", lambda: UnitOfWorkImpl(session_factory)
     )
-    settings = _settings()
     monkeypatch.setattr("app.tenancy.middleware.get_settings", lambda: settings)
-    app = create_app(settings=settings)
-    with TestClient(
-        app,
+    return TestClient(
+        create_app(settings=settings),
         base_url="https://demo.crew.day",
         raise_server_exceptions=False,
-    ) as client:
+    )
+
+
+@pytest.fixture
+def demo_client(
+    session_factory: sessionmaker[Session],
+    monkeypatch: pytest.MonkeyPatch,
+) -> Iterator[TestClient]:
+    with _build_demo_client(session_factory, monkeypatch, _settings()) as client:
         yield client
 
 
@@ -271,9 +278,34 @@ def test_two_scenarios_create_distinct_cookies_and_workspaces(
     assert _workspace_count(session_factory) == before + 2
 
 
-def _settings() -> Settings:
+def test_configured_ttl_hours_flows_through_mint_route(
+    session_factory: sessionmaker[Session],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # A 1h override (not the 24h default) must reach ``expires_at`` via the
+    # real HTTP mint route, proving the factory threads the config knob
+    # rather than falling back to the seeder default.
+    settings = _settings(demo_workspace_ttl_hours=1)
+    assert settings.demo_workspace_ttl_hours != DEFAULT_DEMO_WORKSPACE_TTL_HOURS
+    with _build_demo_client(session_factory, monkeypatch, settings) as client:
+        response = client.get("/app?scenario=rental-manager", follow_redirects=False)
+
+    assert response.status_code == 303
+    slug = response.headers["location"].split("/")[2]
+    with session_factory() as session:
+        workspace = session.scalar(select(Workspace).where(Workspace.slug == slug))
+        assert workspace is not None
+        row = session.get(DemoWorkspace, workspace.id)
+        assert row is not None
+        assert row.expires_at - row.created_at == timedelta(hours=1)
+
+
+def _settings(
+    *, demo_workspace_ttl_hours: int = DEFAULT_DEMO_WORKSPACE_TTL_HOURS
+) -> Settings:
     return Settings.model_construct(
         database_url="sqlite:///:memory:",
+        demo_workspace_ttl_hours=demo_workspace_ttl_hours,
         root_key=SecretStr("integration-demo-root-key"),
         demo_cookie_key=SecretStr("integration-demo-cookie-key"),
         demo_mode=True,

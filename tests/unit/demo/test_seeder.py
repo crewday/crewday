@@ -25,6 +25,7 @@ from app.demo import (
     resolve_relative_timestamp,
     seed_workspace,
 )
+from app.demo.seeder import DEFAULT_DEMO_WORKSPACE_TTL_HOURS
 
 
 @pytest.fixture
@@ -128,6 +129,26 @@ class TestSeedWorkspace:
         assert first.workspace_id != second.workspace_id
         assert first.persona_user_id != second.persona_user_id
         assert first.counts == second.counts
+
+    def test_expiry_uses_default_24h_ttl(self, session: Session) -> None:
+        now = datetime(2026, 4, 29, 12, 0, tzinfo=UTC)
+        assert DEFAULT_DEMO_WORKSPACE_TTL_HOURS == 24
+
+        result = seed_workspace(session, "rental-manager", now=now)
+
+        row = session.get(DemoWorkspace, result.workspace_id)
+        assert row is not None
+        assert _as_utc(row.last_activity_at) == now
+        assert _as_utc(row.expires_at) == now + timedelta(hours=24)
+
+    def test_expiry_honours_configured_ttl_hours(self, session: Session) -> None:
+        now = datetime(2026, 4, 29, 12, 0, tzinfo=UTC)
+
+        result = seed_workspace(session, "rental-manager", now=now, ttl_hours=1)
+
+        row = session.get(DemoWorkspace, result.workspace_id)
+        assert row is not None
+        assert _as_utc(row.expires_at) == now + timedelta(hours=1)
 
     def test_created_at_values_stay_inside_demo_window(self, session: Session) -> None:
         now = datetime(2026, 4, 29, 12, 0, tzinfo=UTC)
