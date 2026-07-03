@@ -386,11 +386,22 @@ include_external_packages = true
 [[tool.importlinter.contracts]]
 name = "Domain forbids adapters (except ports)"
 type = "forbidden"
-source_modules = ["app.domain"]
+# cd-cbiie: ``app.services`` and ``app.ports`` join ``app.domain`` as
+# sources so the pre-P3 layers (which cd-4mae6 will fold into
+# ``app.domain``) get the same adapter prohibition today, closing the
+# bypass where 14 ``app/services`` modules reached
+# ``app.adapters.db.*.models`` directly, ungated. Their existing edges
+# are enumerated as tracked stopgaps below (same pattern as the domain
+# entries) — new violations still fail the gate.
+source_modules = ["app.domain", "app.services", "app.ports"]
 forbidden_modules = ["app.adapters"]
 ignore_imports = [
     "app.domain.** -> app.adapters.*.ports",
     "app.domain.** -> app.adapters.*.ports.*",
+    "app.services.** -> app.adapters.*.ports",
+    "app.services.** -> app.adapters.*.ports.*",
+    "app.ports.** -> app.adapters.*.ports",
+    "app.ports.** -> app.adapters.*.ports.*",
     # Per-context repository ports live in the domain's public surface
     # (``app/domain/<context>/ports.py``) per
     # ``docs/specs/01-architecture.md`` §"Boundary rules" rule 4 —
@@ -678,13 +689,96 @@ ignore_imports = [
     "app.domain.settings.cascade -> app.adapters.db.tasks.models",
     "app.domain.settings.cascade -> app.adapters.db.workspace.models",
     "app.domain.tasks.completion -> app.adapters.db.assets.models",
+    # cd-cbiie stopgaps: the pre-P3 ``app.services`` layer reaches
+    # ``app.adapters.db.*.models`` (and a couple of shared authz/auth
+    # seams that transitively touch adapters) directly, the same way
+    # the older ``app.domain`` services did before their Protocol
+    # seams landed. Adding ``app.services`` as a contract source (see
+    # the ``source_modules`` note above) surfaces these edges; they are
+    # enumerated here — not blessed by a blanket wildcard — so a *new*
+    # ``import app.adapters...`` in any services/ports module still
+    # fails the gate. They drop when cd-4mae6 folds ``app.services`` /
+    # ``app.ports`` into ``app.domain`` behind repository ports.
+    # (``app.services.llm.prompts -> app.adapters.db.llm.models`` is
+    # already listed in the cd-j7wt block above and is not repeated.)
+    # -- direct ORM / adapter-model reads --
+    "app.services.agent.system_docs -> app.adapters.db.llm.models",
+    "app.services.employees.service -> app.adapters.db.identity.models",
+    "app.services.inventory.item_service -> app.adapters.db.inventory.models",
+    "app.services.inventory.item_service -> app.adapters.db.places.models",
+    "app.services.inventory.movement_service -> app.adapters.db.inventory.models",
+    "app.services.inventory.movement_service -> app.adapters.db.tasks.models",
+    "app.services.inventory.reorder_service -> app.adapters.db.audit.models",
+    "app.services.inventory.reorder_service -> app.adapters.db.inventory.models",
+    "app.services.inventory.reorder_service -> app.adapters.db.places.models",
+    "app.services.inventory.reorder_service -> app.adapters.db.tasks.models",
+    "app.services.inventory.reorder_service -> app.adapters.db.workspace.models",
+    "app.services.inventory.report_service -> app.adapters.db.inventory.models",
+    "app.services.inventory.report_service -> app.adapters.db.places.models",
+    "app.services.inventory.stocktake_service -> app.adapters.db.inventory.models",
+    "app.services.inventory.stocktake_service -> app.adapters.db.places.models",
+    "app.services.leave.service -> app.adapters.db.identity.models",
+    "app.services.leave.service -> app.adapters.db.tasks.models",
+    "app.services.leave.service -> app.adapters.db.time.models",
+    "app.services.leave.service -> app.adapters.db.workspace.models",
+    "app.services.workspace.deletion_service -> app.adapters.db.base",
+    "app.services.workspace.deletion_service -> app.adapters.db.workspace.models",
+    # ``export_service`` imports every context's model package so the
+    # SQLAlchemy metadata is registered before it walks the workspace
+    # object graph (cd-4mae6 replaces this with per-context exporters).
+    "app.services.workspace.export_service -> app.adapters.db.audit",
+    "app.services.workspace.export_service -> app.adapters.db.authz",
+    "app.services.workspace.export_service -> app.adapters.db.availability",
+    "app.services.workspace.export_service -> app.adapters.db.base",
+    "app.services.workspace.export_service -> app.adapters.db.billing",
+    "app.services.workspace.export_service -> app.adapters.db.expenses",
+    "app.services.workspace.export_service -> app.adapters.db.holidays",
+    "app.services.workspace.export_service -> app.adapters.db.identity",
+    "app.services.workspace.export_service -> app.adapters.db.instructions",
+    "app.services.workspace.export_service -> app.adapters.db.integrations",
+    "app.services.workspace.export_service -> app.adapters.db.inventory",
+    "app.services.workspace.export_service -> app.adapters.db.issues",
+    "app.services.workspace.export_service -> app.adapters.db.llm",
+    "app.services.workspace.export_service -> app.adapters.db.messaging",
+    "app.services.workspace.export_service -> app.adapters.db.payroll",
+    "app.services.workspace.export_service -> app.adapters.db.places",
+    "app.services.workspace.export_service -> app.adapters.db.stays",
+    "app.services.workspace.export_service -> app.adapters.db.tasks",
+    "app.services.workspace.export_service -> app.adapters.db.time",
+    "app.services.workspace.export_service -> app.adapters.db.workspace",
+    "app.services.workspace.export_service -> app.adapters.db.workspace.models",
+    "app.services.workspace.import_service -> app.adapters.db.base",
+    "app.services.workspace.import_service -> app.adapters.db.identity.models",
+    "app.services.workspace.import_service -> app.adapters.db.workspace.models",
+    "app.services.workspace.ownership_verification -> app.adapters.db.identity.models",
+    "app.services.workspace.ownership_verification -> app.adapters.db.workspace.models",
+    "app.services.workspace.settings_service -> app.adapters.db.workspace.models",
+    # -- transitive shared-kernel edges: the service imports an
+    #    authz/auth helper that itself reaches ``app.adapters`` (same
+    #    shape as the ``app.domain.* -> app.authz`` stopgaps above).
+    #    Whitelisting the service's own outgoing edge breaks the chain
+    #    without loosening the top-level adapters rule.
+    "app.services.employees.service -> app.authz",
+    "app.services.employees.service -> app.authz.deployment_owners",
+    "app.services.instructions.service -> app.authz",
+    "app.services.inventory.movement_service -> app.authz",
+    "app.services.inventory.stocktake_service -> app.authz",
+    "app.services.leave.service -> app.authz",
+    "app.services.workspace.export_service -> app.authz.owners",
+    "app.services.workspace.ownership_verification -> app.auth.magic_link",
+    "app.services.workspace.ownership_verification -> app.authz.owners",
+    "app.services.workspace.settings_service -> app.authz.owners",
 ]
 unmatched_ignore_imports_alerting = "none"
 
 [[tool.importlinter.contracts]]
 name = "Domain forbids handlers (api/web/cli/worker)"
 type = "forbidden"
-source_modules = ["app.domain"]
+# cd-cbiie: ``app.services`` / ``app.ports`` join ``app.domain`` as
+# sources (see the adapters contract above) so the pre-P3 layers cannot
+# reach the handler layers either. No stopgaps needed — today neither
+# layer imports a handler module (verified by the sweep).
+source_modules = ["app.domain", "app.services", "app.ports"]
 forbidden_modules = ["app.api", "app.web", "app.cli", "cli", "app.worker"]
 # No ignore_imports needed today: cd-7qxh moved the FastAPI-dep
 # :func:`Permission` factory out of :mod:`app.authz.enforce` into a
