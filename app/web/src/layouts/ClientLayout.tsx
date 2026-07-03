@@ -56,10 +56,11 @@ export default function ClientLayout() {
   // footer; `me.employee` is a legacy compat projection that only
   // the worker shell consumes. Hand the User in directly so the
   // sidebar shows the right person.
+  const userId = data?.user_id ?? "";
   const userQ = useQuery({
-    queryKey: ["user", data?.user_id ?? ""] as const,
-    queryFn: () => fetchJson<{ user: User }>("/api/v1/users/" + data!.user_id),
-    enabled: !!data?.user_id,
+    queryKey: qk.user(userId),
+    queryFn: () => fetchJson<{ user: User }>("/api/v1/users/" + userId),
+    enabled: userId !== "",
     select: (r) => r.user,
   });
   const { pathname } = useLocation();

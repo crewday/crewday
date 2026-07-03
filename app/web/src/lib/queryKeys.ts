@@ -174,6 +174,10 @@ export const qk = {
   documents: () => [...ws(), "documents"] as const,
   propertyDocuments: (pid: string) => [...ws(), "property", pid, "documents"] as const,
   users: (workspaceId?: string) => [...ws(), "users", workspaceId ?? "all"] as const,
+  // §14 single-user profile row (`/api/v1/users/{id}`). Workspace-scoped
+  // like every other key so a workspace switch cannot re-serve the prior
+  // tenant's `/users/{id}` payload from cache (cd-1agic).
+  user: (uid: string) => [...ws(), "user", uid] as const,
   workspaces: () => [...ws(), "workspaces"] as const,
   // `/api/v1/me/workspaces` switcher rows. Distinct slot from
   // `workspaces()` so pages that map raw rows into a richer

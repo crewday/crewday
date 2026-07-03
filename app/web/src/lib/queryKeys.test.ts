@@ -210,6 +210,19 @@ describe("qk — every key is a first-class readonly tuple", () => {
     expect(qk.users()).toEqual(["w", "acme", "users", "all"]);
     expect(qk.users("ws-1")).toEqual(["w", "acme", "users", "ws-1"]);
   });
+
+  it("scopes the single-user profile key to the active workspace (cd-1agic)", () => {
+    // §14 tenant isolation — `/api/v1/users/{id}` must never re-serve
+    // one tenant's payload to another slug's page. The raw `["user", id]`
+    // key ClientLayout used bypassed the workspace prefix; this pins the
+    // corrected shape so a revert fails loudly.
+    let slug: string | null = "acme";
+    registerQueryKeyWorkspaceGetter(() => slug);
+    expect(qk.user("u1")).toEqual(["w", "acme", "user", "u1"]);
+    slug = "other";
+    expect(qk.user("u1")).toEqual(["w", "other", "user", "u1"]);
+    expect(qk.user("u1")[1]).not.toBe("acme");
+  });
 });
 
 // cd-z1vj regression guard. The whole point of `mySchedulePrefix()` /
