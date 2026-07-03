@@ -833,6 +833,21 @@ class Occurrence(Base):
             "workspace_id",
             "asset_action_id",
         ),
+        # cd-1hgd4: property-filter hot paths (occurrences list,
+        # approvals, issues, assignment) plus the property-purge
+        # cascade scan on the ``ON DELETE CASCADE`` ``property_id`` FK.
+        # ``id`` trails so the index covers the common
+        # ``(workspace_id, property_id)`` predicate and stays ordered.
+        Index(
+            "ix_occurrence_workspace_property",
+            "workspace_id",
+            "property_id",
+            "id",
+        ),
+        # cd-1hgd4: the ``RESTRICT`` ``template_id`` FK was unindexed,
+        # unlike sibling ``ix_schedule_template``; template soft-delete
+        # scans occurrences by this column.
+        Index("ix_occurrence_template", "template_id"),
         # cd-22e idempotency guard: two generator runs over the same
         # window must not materialise the same ``(schedule_id,
         # scheduled_for_local)`` twice. Scoped to ``schedule_id IS
