@@ -547,8 +547,18 @@ def _movement_cursor(view: InventoryMovementView) -> str:
 def build_inventory_router() -> APIRouter:
     # code-health: ignore[nloc] Router owns auth, deps, and route registration.  # noqa: E501
     api = APIRouter(tags=["inventory"])
-    view_gate = Depends(Permission("scope.view", scope_kind="workspace"))
-    edit_gate = Depends(Permission("scope.edit_settings", scope_kind="workspace"))
+    view_gate = Depends(
+        Permission(
+            "scope.view", scope_kind="workspace", required_scope="inventory:read"
+        )
+    )
+    edit_gate = Depends(
+        Permission(
+            "scope.edit_settings",
+            scope_kind="workspace",
+            required_scope="inventory:write",
+        )
+    )
 
     @api.get(
         "/properties/{property_id}/items",

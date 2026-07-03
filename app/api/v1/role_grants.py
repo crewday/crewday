@@ -619,7 +619,9 @@ def build_users_role_grants_router() -> APIRouter:
         responses=IDENTITY_PROBLEM_RESPONSES,
     )
 
-    view_gate = Depends(Permission("scope.view", scope_kind="workspace"))
+    view_gate = Depends(
+        Permission("scope.view", scope_kind="workspace", required_scope="users:read")
+    )
 
     @api.get(
         "/{user_id}/role_grants",

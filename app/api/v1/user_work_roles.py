@@ -273,7 +273,9 @@ def build_users_user_work_roles_router() -> APIRouter:
     # allow (includes ``all_workers``). Cross-user reads by a worker
     # are not a security concern at workspace scope — the roster is
     # visible to every grant role.
-    view_gate = Depends(Permission("scope.view", scope_kind="workspace"))
+    view_gate = Depends(
+        Permission("scope.view", scope_kind="workspace", required_scope="users:read")
+    )
 
     @api.get(
         "/{user_id}/user_work_roles",

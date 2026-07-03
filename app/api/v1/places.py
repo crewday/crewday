@@ -979,7 +979,11 @@ def build_properties_router() -> APIRouter:
         responses=IDENTITY_PROBLEM_RESPONSES,
     )
 
-    read_gate = Depends(Permission("scope.view", scope_kind="workspace"))
+    read_gate = Depends(
+        Permission(
+            "scope.view", scope_kind="workspace", required_scope="properties:read"
+        )
+    )
     create_gate = Depends(Permission("properties.create", scope_kind="workspace"))
     edit_gate = Depends(Permission("properties.edit", scope_kind="workspace"))
     archive_gate = Depends(Permission("properties.archive", scope_kind="workspace"))
@@ -1135,6 +1139,7 @@ def build_properties_router() -> APIRouter:
                 action_key="scope.edit_settings",
                 scope_kind="property",
                 scope_id=property_id,
+                required_scope="properties:write",
             )
         except PermissionDenied as exc:
             raise _property_not_found() from exc

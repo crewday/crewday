@@ -128,6 +128,7 @@ def Permission(
     *,
     scope_kind: str,
     scope_id_from_path: str | None = None,
+    required_scope: str | None = None,
     rule_repo: PermissionRuleRepository | None = None,
 ) -> Callable[..., None]:
     """Build a FastAPI dependency that enforces ``action_key``.
@@ -157,6 +158,16 @@ def Permission(
       one ``approval_request`` row and commits before returning).
     * Missing path param → 500 ``scope_id_unresolved`` (caller wired
       the dep incorrectly).
+
+    ``required_scope`` is the resource scope a scoped API token must
+    hold for this route (cd-821v1). The resource-agnostic generic gates
+    ``scope.view`` / ``scope.edit_settings`` (§05) can't map their action
+    key to one §03 scope, so a route reading properties passes
+    ``required_scope="properties:read"`` and one editing inventory
+    settings passes ``required_scope="inventory:write"``. It steers the
+    scoped-token gate only — the role walk is unchanged, and leaving it
+    ``None`` keeps the action→scope map's deny-by-default for families
+    the §03 taxonomy doesn't name (assets, billing, permissions, …).
 
     ``rule_repo`` is threaded through so an app factory (cd-ika7) can
     inject a SQL-backed repo process-wide. Unit tests usually leave
@@ -221,6 +232,7 @@ def Permission(
                 action_key=action_key,
                 scope_kind=scope_kind,
                 scope_id=scope_id,
+                required_scope=required_scope,
                 rule_repo=rule_repo,
             )
         except UnknownActionKey as exc:

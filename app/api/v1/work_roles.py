@@ -182,7 +182,9 @@ def build_work_roles_router() -> APIRouter:
     )
 
     manage_gate = Depends(Permission("work_roles.manage", scope_kind="workspace"))
-    view_gate = Depends(Permission("scope.view", scope_kind="workspace"))
+    view_gate = Depends(
+        Permission("scope.view", scope_kind="workspace", required_scope="users:read")
+    )
 
     @api.get(
         "",

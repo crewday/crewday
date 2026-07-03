@@ -514,7 +514,9 @@ def build_employees_router() -> APIRouter:
     read_gate = Depends(Permission("employees.read", scope_kind="workspace"))
     leave_view_gate = Depends(Permission("leaves.view_others", scope_kind="workspace"))
     edit_settings_gate = Depends(
-        Permission("scope.edit_settings", scope_kind="workspace")
+        Permission(
+            "scope.edit_settings", scope_kind="workspace", required_scope="users:write"
+        )
     )
 
     @api.get(

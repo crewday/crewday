@@ -970,6 +970,27 @@ narrow escape hatch. `me:*` implies nothing outside `me:*` — the
 subject narrowing is enforced at the row level regardless of which
 `me:*` verb the caller asked for.
 
+**Generic entry gates map to a resource scope per route.** A handful of
+routes are gated by the resource-agnostic §05 actions `scope.view` and
+`scope.edit_settings` (a shared "any grant role may read" / "owners &
+managers may edit settings" role check) rather than a resource-specific
+action like `properties.read`. Because the action key alone names no
+resource, each such route declares, at its gate, the single scope taxonomy
+verb a scoped token must hold to reach it — the route's module makes the
+resource unambiguous (the property list requires `properties:read`, the
+inventory settings edit requires `inventory:write`, the identity reads
+— role grants, work roles, engagements — require `users:read`, and the
+per-employee settings cascade — an engagement surface — requires
+`users:write` to match its manager-tier role gate). This
+steers the scoped-token gate only; the role check is unchanged, and
+sessions, owner principals, delegated tokens, and PATs never touch it.
+Where the route's resource has **no** verb in the taxonomy above
+(assets, billing, quotes, vendor invoices, permission governance, LLM /
+webhook / workspace settings), the gate names none and stays
+deny-by-default for scoped tokens — a scoped credential must never pass
+an action whose authority the operator could not have granted it at mint
+time; adding one of those requires extending the taxonomy here first.
+
 ### Usage
 
 `Authorization: Bearer mip_<key_id>_<secret>`

@@ -491,19 +491,33 @@ def _enforce_scoped_token(
     action_key: str,
     scope_kind: str,
     scope_id: str,
+    required_scope: str | None,
 ) -> None:
     """Raise :class:`InsufficientScope` when a scoped token lacks the scope.
 
-    No-op for every non-scoped-token principal. For a scoped token, map
-    the action to its §03 scope (:func:`app.authz.scopes.required_scope_for`)
-    and require the token to hold it (honouring the ``*:read`` ⊂
-    ``*:write`` implication). An action with no mapped scope denies by
-    default — a scoped credential must not pass an action whose authority
-    the operator could not have granted it (see :mod:`app.authz.scopes`).
+    No-op for every non-scoped-token principal. For a scoped token, the
+    §03 scope it must hold is resolved in this order:
+
+    * ``required_scope`` when the call site passed one. This is how the
+      resource-agnostic generic gates (``scope.view`` /
+      ``scope.edit_settings``, §05) declare the resource scope their
+      route actually reads or writes — the action key alone can't map to
+      one resource scope, so the route names it (cd-821v1). Passing
+      ``required_scope=None`` (the default) means "no override".
+    * otherwise :func:`app.authz.scopes.required_scope_for` maps the
+      action key to its scope (the normal resource-specific action path).
+
+    Either way the token must hold the resolved scope (honouring the
+    ``*:read`` ⊂ ``*:write`` implication). A scope that resolves to
+    ``None`` denies by default — a scoped credential must not pass an
+    action whose authority the operator could not have granted it (see
+    :mod:`app.authz.scopes`).
     """
     if ctx.principal_kind != "token" or ctx.token_kind != "scoped":
         return
-    required = required_scope_for(action_key)
+    required = (
+        required_scope if required_scope is not None else required_scope_for(action_key)
+    )
     if required is not None and scope_satisfied(ctx.token_scopes, required):
         return
     _log_denied(
@@ -524,6 +538,7 @@ def require(
     action_key: str,
     scope_kind: str,
     scope_id: str,
+    required_scope: str | None = None,
     rule_repo: PermissionRuleRepository | None = None,
 ) -> None:
     """Enforce the permission check or raise.
@@ -540,7 +555,11 @@ def require(
     * :class:`InsufficientScope` when the caller is a scoped API token
       whose granted scopes do not cover the action's §03 scope (or the
       action has no scoped-token scope at all). Checked before the role
-      walk; other principals never trip it.
+      walk; other principals never trip it. ``required_scope`` lets a
+      resource-agnostic generic gate (``scope.view`` /
+      ``scope.edit_settings``) name the resource scope its route reads
+      or writes, overriding the action→scope map for the scoped-token
+      gate only (cd-821v1); it never touches the role walk.
     * :class:`PermissionDenied` on deny.
     * :class:`ApprovalRequired` when the resolver decided ``allow``
       but the action's :class:`~app.domain.identity._action_catalog.ActionSpec`
@@ -571,7 +590,11 @@ def require(
     # delegated / personal) leaves ``token_kind`` unset and skips this
     # entirely, so their authority is unchanged.
     _enforce_scoped_token(
-        ctx, action_key=action_key, scope_kind=scope_kind, scope_id=scope_id
+        ctx,
+        action_key=action_key,
+        scope_kind=scope_kind,
+        scope_id=scope_id,
+        required_scope=required_scope,
     )
 
     repo = rule_repo if rule_repo is not None else _DEFAULT_RULE_REPO

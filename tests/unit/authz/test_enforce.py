@@ -1162,9 +1162,7 @@ class TestScopedTokenScopeGate:
     authority and never fires for non-scoped principals.
     """
 
-    def test_matching_scope_allows(
-        self, factory: sessionmaker[Session]
-    ) -> None:
+    def test_matching_scope_allows(self, factory: sessionmaker[Session]) -> None:
         """A scoped token with the mapped scope passes the matching action."""
         with factory() as s:
             seeded = _seed(s)
@@ -1240,9 +1238,7 @@ class TestScopedTokenScopeGate:
                 )
             assert exc.value.required_scope is None
 
-    def test_read_implied_by_write(
-        self, factory: sessionmaker[Session]
-    ) -> None:
+    def test_read_implied_by_write(self, factory: sessionmaker[Session]) -> None:
         """Holding ``properties:write`` satisfies a ``properties:read`` action."""
         with factory() as s:
             seeded = _seed(s)
@@ -1290,9 +1286,7 @@ class TestScopedTokenScopeGate:
                     scope_id=seeded.workspace_id,
                 )
 
-    def test_session_principal_unaffected(
-        self, factory: sessionmaker[Session]
-    ) -> None:
+    def test_session_principal_unaffected(self, factory: sessionmaker[Session]) -> None:
         """A session (non-token) manager is never scope-gated."""
         with factory() as s:
             seeded = _seed(s)
@@ -1314,9 +1308,7 @@ class TestScopedTokenScopeGate:
                 is None
             )
 
-    def test_delegated_token_unaffected(
-        self, factory: sessionmaker[Session]
-    ) -> None:
+    def test_delegated_token_unaffected(self, factory: sessionmaker[Session]) -> None:
         """A delegated token (scope-less) resolves on grants, not scopes."""
         with factory() as s:
             seeded = _seed(s)
@@ -1345,3 +1337,167 @@ class TestScopedTokenScopeGate:
                 )
                 is None
             )
+
+
+class TestResourceAwareGenericGate:
+    """cd-821v1 — ``required_scope`` steers the generic ``scope.view`` /
+    ``scope.edit_settings`` gates.
+
+    The resource-agnostic actions map to no scope, so a route names the
+    §03 scope its resource reads/writes explicitly. The override drives
+    the scoped-token gate only — it never touches the role walk, and
+    leaving it ``None`` keeps deny-by-default for unmapped families.
+    """
+
+    def test_override_lets_documented_scope_pass_generic_gate(
+        self, factory: sessionmaker[Session]
+    ) -> None:
+        """A properties:read token reaches a ``scope.view`` route that names it."""
+        with factory() as s:
+            seeded = _seed(s)
+            s.commit()
+            ctx = _scoped_ctx(
+                workspace_id=seeded.workspace_id,
+                actor_id=seeded.manager_user_id,
+                scopes=frozenset({"properties:read"}),
+            )
+            assert (
+                require(
+                    s,
+                    ctx,
+                    action_key="scope.view",
+                    scope_kind="workspace",
+                    scope_id=seeded.workspace_id,
+                    required_scope="properties:read",
+                )
+                is None
+            )
+
+    def test_override_wrong_scope_denies_with_named_scope(
+        self, factory: sessionmaker[Session]
+    ) -> None:
+        """A tasks:read token is refused; the challenge names the override scope."""
+        with factory() as s:
+            seeded = _seed(s)
+            s.commit()
+            ctx = _scoped_ctx(
+                workspace_id=seeded.workspace_id,
+                actor_id=seeded.manager_user_id,
+                scopes=frozenset({"tasks:read"}),
+            )
+            with pytest.raises(InsufficientScope) as exc:
+                require(
+                    s,
+                    ctx,
+                    action_key="scope.view",
+                    scope_kind="workspace",
+                    scope_id=seeded.workspace_id,
+                    required_scope="properties:read",
+                )
+            assert exc.value.required_scope == "properties:read"
+            assert exc.value.action_key == "scope.view"
+
+    def test_override_honours_read_implied_by_write(
+        self, factory: sessionmaker[Session]
+    ) -> None:
+        """properties:write satisfies a ``required_scope='properties:read'`` gate."""
+        with factory() as s:
+            seeded = _seed(s)
+            s.commit()
+            ctx = _scoped_ctx(
+                workspace_id=seeded.workspace_id,
+                actor_id=seeded.manager_user_id,
+                scopes=frozenset({"properties:write"}),
+            )
+            assert (
+                require(
+                    s,
+                    ctx,
+                    action_key="scope.view",
+                    scope_kind="workspace",
+                    scope_id=seeded.workspace_id,
+                    required_scope="properties:read",
+                )
+                is None
+            )
+
+    def test_override_does_not_bypass_role_walk(
+        self, factory: sessionmaker[Session]
+    ) -> None:
+        """The override gates scopes only — a scope-holder with no role still denies.
+
+        A stranger (no grant) holding ``users:write`` clears the scope
+        gate on a ``scope.edit_settings`` route, then the role walk denies
+        with ``PermissionDenied`` (not ``InsufficientScope``) — proving the
+        override never widened role authority.
+        """
+        with factory() as s:
+            seeded = _seed(s)
+            s.commit()
+            ctx = _scoped_ctx(
+                workspace_id=seeded.workspace_id,
+                actor_id=seeded.stranger_user_id,
+                scopes=frozenset({"users:write"}),
+                grant_role="guest",
+            )
+            with pytest.raises(PermissionDenied):
+                require(
+                    s,
+                    ctx,
+                    action_key="scope.edit_settings",
+                    scope_kind="workspace",
+                    scope_id=seeded.workspace_id,
+                    required_scope="users:write",
+                )
+
+    def test_override_ignored_for_session_principal(
+        self, factory: sessionmaker[Session]
+    ) -> None:
+        """A session principal never hits the gate, override or not."""
+        with factory() as s:
+            seeded = _seed(s)
+            s.commit()
+            ctx = _ctx(
+                workspace_id=seeded.workspace_id,
+                actor_id=seeded.manager_user_id,
+            )
+            assert (
+                require(
+                    s,
+                    ctx,
+                    action_key="scope.view",
+                    scope_kind="workspace",
+                    scope_id=seeded.workspace_id,
+                    required_scope="properties:read",
+                )
+                is None
+            )
+
+    def test_no_override_still_deny_by_default(
+        self, factory: sessionmaker[Session]
+    ) -> None:
+        """Without an override, a generic gate stays deny-by-default (regression).
+
+        Guards the unmapped families (assets, billing, …): their
+        ``scope.view`` sites pass no ``required_scope``, so even a
+        broadly-scoped token is refused.
+        """
+        with factory() as s:
+            seeded = _seed(s)
+            s.commit()
+            ctx = _scoped_ctx(
+                workspace_id=seeded.workspace_id,
+                actor_id=seeded.manager_user_id,
+                scopes=frozenset(
+                    {"properties:write", "inventory:write", "users:write"}
+                ),
+            )
+            with pytest.raises(InsufficientScope) as exc:
+                require(
+                    s,
+                    ctx,
+                    action_key="scope.view",
+                    scope_kind="workspace",
+                    scope_id=seeded.workspace_id,
+                )
+            assert exc.value.required_scope is None
