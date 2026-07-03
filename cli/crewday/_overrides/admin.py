@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import base64
-import json
 import os
 import pathlib
 from importlib.resources import files
@@ -15,10 +14,41 @@ from alembic.config import Config as AlembicConfig
 from sqlalchemy import JSON, bindparam, text
 from sqlalchemy.orm import Session
 
+from crewday._emit import emit
+from crewday._globals import DEFAULT_OUTPUT, CrewdayContext
 from crewday._main import ConfigError
 from crewday._overrides import cli_override
 
 __all__ = ["register"]
+
+
+#: Fallback context for admin verbs invoked standalone (unit tests call
+#: ``CliRunner().invoke(command, ...)`` without the root group, so
+#: ``click`` sets ``ctx.obj`` to ``None``). Host operators run through
+#: the root group, whose ``CrewdayContext`` carries the real ``--jq`` /
+#: ``--no-color`` values.
+_DEFAULT_ADMIN_CONTEXT: CrewdayContext = CrewdayContext(
+    profile=None,
+    workspace=None,
+    output=DEFAULT_OUTPUT,
+)
+
+
+def _emit_admin(payload: object) -> None:
+    """Emit an admin JSON payload through the shared emit path.
+
+    Routes host-only operator output through :func:`crewday._emit.emit`
+    so ``--jq`` (and, vacuously for these table-less verbs,
+    ``--no-color``) apply the same way they do for generated commands —
+    instead of the previous hand-rolled ``click.echo(json.dumps(...))``.
+    The active :class:`~crewday._globals.CrewdayContext` rides on the
+    Click root context; a standalone invocation falls back to a default
+    JSON context.
+    """
+    click_ctx = click.get_current_context(silent=True)
+    obj = click_ctx.obj if click_ctx is not None else None
+    context = obj if isinstance(obj, CrewdayContext) else _DEFAULT_ADMIN_CONTEXT
+    emit(payload, ctx=context)
 
 
 _REPO_ROOT = pathlib.Path(__file__).resolve().parents[3]
@@ -214,7 +244,7 @@ def init(
             err=True,
         )
         payload["generated_root_key"] = result.generated_root_key
-    click.echo(json.dumps(payload, sort_keys=True))
+    _emit_admin(payload)
 
 
 init = cli_override("admin", "init", covers=[])(init)
@@ -305,15 +335,12 @@ def workspace_purge_due(_ctx: object, *, limit: int | None) -> None:
         ) from exc
 
     result = purge_due_workspace_deletions(limit=limit, require_storage=True)
-    click.echo(
-        json.dumps(
-            {
-                "purged": result.purged,
-                "workspace_ids": list(result.workspace_ids),
-                "deleted_blob_hashes": list(result.deleted_blob_hashes),
-            },
-            sort_keys=True,
-        )
+    _emit_admin(
+        {
+            "purged": result.purged,
+            "workspace_ids": list(result.workspace_ids),
+            "deleted_blob_hashes": list(result.deleted_blob_hashes),
+        }
     )
 
 
@@ -388,29 +415,26 @@ def workspace_import(
             target_workspace_id=target_workspace_id,
             storage=storage,
         )
-    click.echo(
-        json.dumps(
-            {
-                "mode": report.mode,
-                "workspace_id": report.workspace_id,
-                "workspace_slug": report.workspace_slug,
-                "source_workspace_id": report.source_workspace_id,
-                "source_workspace_slug": report.source_workspace_slug,
-                "restored_tables": report.restored_tables,
-                "restored_files": report.restored_files,
-                "skipped_permissions": [
-                    {
-                        "table": skip.table,
-                        "reason": skip.reason,
-                        "row_id": skip.row_id,
-                        "user_id": skip.user_id,
-                    }
-                    for skip in report.skipped_permissions
-                ],
-                "manual_follow_up_required": report.manual_follow_up_required,
-            },
-            sort_keys=True,
-        )
+    _emit_admin(
+        {
+            "mode": report.mode,
+            "workspace_id": report.workspace_id,
+            "workspace_slug": report.workspace_slug,
+            "source_workspace_id": report.source_workspace_id,
+            "source_workspace_slug": report.source_workspace_slug,
+            "restored_tables": report.restored_tables,
+            "restored_files": report.restored_files,
+            "skipped_permissions": [
+                {
+                    "table": skip.table,
+                    "reason": skip.reason,
+                    "row_id": skip.row_id,
+                    "user_id": skip.user_id,
+                }
+                for skip in report.skipped_permissions
+            ],
+            "manual_follow_up_required": report.manual_follow_up_required,
+        }
     )
 
 
@@ -452,22 +476,19 @@ def purge(
             workspace_id=workspace_id,
             dry_run=dry_run,
         )
-    click.echo(
-        json.dumps(
-            {
-                "person_id": result.person_id,
-                "workspace_ids": list(result.workspace_ids),
-                "anonymized_users": result.anonymized_users,
-                "scrubbed_occurrences": result.scrubbed_occurrences,
-                "scrubbed_comments": result.scrubbed_comments,
-                "scrubbed_expenses": result.scrubbed_expenses,
-                "scrubbed_payout_destinations": result.scrubbed_payout_destinations,
-                "scrubbed_payslips": result.scrubbed_payslips,
-                "deleted_secret_envelopes": result.deleted_secret_envelopes,
-                "dry_run": dry_run,
-            },
-            sort_keys=True,
-        )
+    _emit_admin(
+        {
+            "person_id": result.person_id,
+            "workspace_ids": list(result.workspace_ids),
+            "anonymized_users": result.anonymized_users,
+            "scrubbed_occurrences": result.scrubbed_occurrences,
+            "scrubbed_comments": result.scrubbed_comments,
+            "scrubbed_expenses": result.scrubbed_expenses,
+            "scrubbed_payout_destinations": result.scrubbed_payout_destinations,
+            "scrubbed_payslips": result.scrubbed_payslips,
+            "deleted_secret_envelopes": result.deleted_secret_envelopes,
+            "dry_run": dry_run,
+        }
     )
 
 
@@ -513,18 +534,15 @@ def backup(
         keep_daily=keep_daily,
         keep_monthly=keep_monthly,
     )
-    click.echo(
-        json.dumps(
-            {
-                "archive_path": str(result.archive_path),
-                "kind": result.manifest.kind,
-                "content_sha256": result.manifest.content_sha256,
-                "row_counts": result.manifest.row_counts,
-                "secret_envelope_count": result.manifest.secret_envelope_count,
-                "pruned": [str(path) for path in result.pruned],
-            },
-            sort_keys=True,
-        )
+    _emit_admin(
+        {
+            "archive_path": str(result.archive_path),
+            "kind": result.manifest.kind,
+            "content_sha256": result.manifest.content_sha256,
+            "row_counts": result.manifest.row_counts,
+            "secret_envelope_count": result.manifest.secret_envelope_count,
+            "pruned": [str(path) for path in result.pruned],
+        }
     )
 
 
@@ -564,20 +582,17 @@ def restore(
         legacy_key_files=legacy_key_files,
     )
     _run_migrations()
-    click.echo(
-        json.dumps(
-            {
-                "kind": result.manifest.kind,
-                "restored_database": (
-                    str(result.restored_database)
-                    if result.restored_database is not None
-                    else None
-                ),
-                "restored_files": str(result.restored_files),
-                "content_sha256": result.manifest.content_sha256,
-            },
-            sort_keys=True,
-        )
+    _emit_admin(
+        {
+            "kind": result.manifest.kind,
+            "restored_database": (
+                str(result.restored_database)
+                if result.restored_database is not None
+                else None
+            ),
+            "restored_files": str(result.restored_files),
+            "content_sha256": result.manifest.content_sha256,
+        }
     )
 
 
@@ -684,7 +699,7 @@ def rotate_root_key(
                 settings=settings,
                 finalize_now=finalize_now,
             )
-    click.echo(json.dumps(rotate_mod.result_payload(result), sort_keys=True))
+    _emit_admin(rotate_mod.result_payload(result))
 
 
 rotate_root_key = cli_override("admin", "rotate-root-key", covers=[])(rotate_root_key)
@@ -766,7 +781,7 @@ def rotate_smtp(
     finally:
         rotate_mod.zero_key_material(raw)
         rotate_mod.zero_key_material(credentials.password)
-    click.echo(json.dumps(rotate_mod.rotation_result_payload(result), sort_keys=True))
+    _emit_admin(rotate_mod.rotation_result_payload(result))
 
 
 @click.command(name="rotate-openrouter")
@@ -816,7 +831,7 @@ def rotate_openrouter(
             )
     finally:
         rotate_mod.zero_key_material(key)
-    click.echo(json.dumps(rotate_mod.rotation_result_payload(result), sort_keys=True))
+    _emit_admin(rotate_mod.rotation_result_payload(result))
 
 
 @click.command(name="rotate-hmac")
@@ -866,7 +881,7 @@ def rotate_hmac(
             )
     finally:
         rotate_mod.zero_key_material(key)
-    click.echo(json.dumps(rotate_mod.rotation_result_payload(result), sort_keys=True))
+    _emit_admin(rotate_mod.rotation_result_payload(result))
 
 
 @click.command(name="rotate-session-secret")
@@ -916,7 +931,7 @@ def rotate_session_secret(
             )
     finally:
         rotate_mod.zero_key_material(key)
-    click.echo(json.dumps(rotate_mod.rotation_result_payload(result), sort_keys=True))
+    _emit_admin(rotate_mod.rotation_result_payload(result))
 
 
 rotate_smtp = cli_override("admin", "rotate-smtp", covers=[])(rotate_smtp)
@@ -1032,7 +1047,7 @@ def worker_reset_job(_ctx: object, *, job_id: str) -> None:
     """
     clock = _system_clock()
     reset = _reset_worker_job(job_id, clock=clock)
-    click.echo(json.dumps({"job_id": job_id, "reset": reset}, sort_keys=True))
+    _emit_admin({"job_id": job_id, "reset": reset})
 
 
 worker_reset_job = cli_override("admin worker", "reset-job", covers=[])(

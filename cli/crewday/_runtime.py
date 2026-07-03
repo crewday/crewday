@@ -41,9 +41,8 @@ from __future__ import annotations
 
 import json
 import pathlib
-import sys
 import urllib.parse
-from collections.abc import Callable, Iterator, Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, replace
 from functools import cache
 from typing import Any, Final
@@ -59,9 +58,9 @@ from crewday._agent_links import (
     resolve_agent_links,
 )
 from crewday._client import ApiError, CrewdayClient
+from crewday._emit import emit, emit_api_error, emit_ndjson
 from crewday._globals import CrewdayContext
 from crewday._main import ConfigError
-from crewday._output import format_api_error, format_response
 
 __all__ = [
     "DEFAULT_SURFACE_ADMIN_PATH",
@@ -615,30 +614,10 @@ def _attach_pagination_option(
 # ---------------------------------------------------------------------------
 
 
-def _emit(
-    payload: object,
-    *,
-    ctx: CrewdayContext,
-    schema_hint: Mapping[str, Any] | None = None,
-) -> None:
-    """Write ``payload`` to stdout in the active output mode."""
-    rendered = format_response(payload, ctx.output, schema_hint=schema_hint)
-    if rendered:
-        click.echo(rendered)
-
-
-def _emit_ndjson(rows: Iterator[Mapping[str, Any]]) -> None:
-    """Stream ``rows`` to stdout as NDJSON (one JSON object per line)."""
-    for row in rows:
-        sys.stdout.write(format_response(row, "ndjson"))
-        sys.stdout.write("\n")
-        sys.stdout.flush()
-
-
-def _emit_api_error(error: ApiError, *, ctx: CrewdayContext) -> None:
-    """Write a structured API error to stderr and exit with its code."""
-    click.echo(format_api_error(error, ctx.output), err=True)
-    raise click.exceptions.Exit(error.exit_code)
+# Output rendering (``--jq`` / ``--no-color`` / streaming) lives in the
+# shared :mod:`crewday._emit` path so the generated commands here and the
+# hand-written overrides emit through one place. See its module docstring
+# for the jq engine decision.
 
 
 # ---------------------------------------------------------------------------
@@ -835,7 +814,7 @@ def _make_callback(
                     idempotency_key=idempotency_key,
                 )
             except ApiError as exc:
-                _emit_api_error(exc, ctx=resolved_ctx)
+                emit_api_error(exc, ctx=resolved_ctx)
             _emit_response(
                 response,
                 ctx=resolved_ctx,
@@ -869,13 +848,13 @@ def _emit_response(
     """
     text = response.text
     if not text:
-        _emit(_with_agent_links(None, None, ctx=ctx), ctx=ctx, schema_hint=schema_hint)
+        emit(_with_agent_links(None, None, ctx=ctx), ctx=ctx, schema_hint=schema_hint)
         return
     try:
         payload = response.json()
     except ValueError:
         payload = {"raw": text}
-        _emit(
+        emit(
             _with_agent_links(payload, None, ctx=ctx), ctx=ctx, schema_hint=schema_hint
         )
         return
@@ -891,7 +870,7 @@ def _emit_response(
         request_body=request_body,
         response_body=payload,
     )
-    _emit(
+    emit(
         _with_agent_links(payload, agent_links, ctx=ctx),
         ctx=ctx,
         schema_hint=schema_hint,
@@ -932,9 +911,9 @@ def _run_paginated(
     """
     iterator = client.iterate(url, params=params)
     if ctx.output == "ndjson":
-        _emit_ndjson(iterator)
+        emit_ndjson(iterator, ctx=ctx)
         return
-    _emit(list(iterator), ctx=ctx, schema_hint=schema_hint)
+    emit(list(iterator), ctx=ctx, schema_hint=schema_hint)
 
 
 # ---------------------------------------------------------------------------

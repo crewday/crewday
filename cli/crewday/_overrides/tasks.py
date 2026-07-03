@@ -21,7 +21,6 @@ have every piece.
 
 from __future__ import annotations
 
-import json
 import mimetypes
 import pathlib
 from typing import Final
@@ -29,6 +28,7 @@ from typing import Final
 import click
 
 from crewday._client import CrewdayClient
+from crewday._emit import emit
 from crewday._globals import CrewdayContext
 from crewday._main import ConfigError, CrewdayError
 from crewday._overrides import cli_override
@@ -202,7 +202,7 @@ def complete(
     click.echo(
         f"Task {task_id} → state={state_label} (evidence uploaded: {len(evidence_ids)})"
     )
-    click.echo(json.dumps(payload, indent=2, sort_keys=False, default=str))
+    emit(payload, ctx=resolved_ctx)
 
 
 _client_factory_for = _default_client_factory

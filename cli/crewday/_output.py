@@ -41,8 +41,16 @@ def format_response(
     value: object,
     mode: OutputMode,
     schema_hint: Mapping[str, Any] | None = None,
+    *,
+    no_color: bool = False,
 ) -> str:
-    """Return ``value`` formatted for the requested CLI output mode."""
+    """Return ``value`` formatted for the requested CLI output mode.
+
+    ``no_color`` (from ``--no-color`` / ``CrewdayContext.no_color``)
+    forces ANSI colour off in table mode regardless of TTY or the
+    ``NO_COLOR`` env var; it is a no-op for the structured modes, which
+    never emit colour.
+    """
     if mode == "json":
         return json.dumps(value, indent=2, sort_keys=False, default=_json_default)
     if mode == "yaml":
@@ -52,10 +60,15 @@ def format_response(
             json.dumps(row, sort_keys=False, default=_json_default)
             for row in _rows_for_ndjson(value)
         )
-    return _format_table(value, schema_hint=schema_hint)
+    return _format_table(value, schema_hint=schema_hint, no_color=no_color)
 
 
-def format_api_error(error: ApiError, mode: OutputMode) -> str:
+def format_api_error(
+    error: ApiError,
+    mode: OutputMode,
+    *,
+    no_color: bool = False,
+) -> str:
     """Return an API error formatted for stderr in the active mode."""
     payload = {
         "status": error.status,
@@ -66,17 +79,18 @@ def format_api_error(error: ApiError, mode: OutputMode) -> str:
     if mode in ("json", "yaml", "ndjson"):
         return format_response(payload, mode)
 
+    use_color = _resolve_use_color(no_color)
     table = Table(
         box=box.ASCII,
         show_header=True,
-        header_style=_header_style(),
+        header_style=_header_style(use_color),
         expand=False,
     )
     table.add_column("Status", no_wrap=True)
     table.add_column("Code", no_wrap=True)
     table.add_column("Message")
     table.add_row(str(error.status), error.code, error.message)
-    return _render_table(table)
+    return _render_table(table, use_color=use_color)
 
 
 def _format_yaml(value: object) -> str:
@@ -132,6 +146,7 @@ def _format_table(
     value: object,
     *,
     schema_hint: Mapping[str, Any] | None,
+    no_color: bool = False,
 ) -> str:
     rows = _rows_for_table(value)
     if not rows:
@@ -141,17 +156,18 @@ def _format_table(
     if not columns:
         return format_response(value, "json")
 
+    use_color = _resolve_use_color(no_color)
     table = Table(
         box=box.ASCII,
         show_header=True,
-        header_style=_header_style(),
+        header_style=_header_style(use_color),
         expand=True,
     )
     for _key, label in columns:
         table.add_column(label, overflow="fold", max_width=_MAX_CELL_WIDTH)
     for row in rows:
         table.add_row(*[_cell_text(row.get(key)) for key, _label in columns])
-    return _render_table(table)
+    return _render_table(table, use_color=use_color)
 
 
 def _rows_for_table(value: object) -> list[Mapping[str, object]]:
@@ -272,9 +288,8 @@ def _string_key_mapping(row: Mapping[object, object]) -> Mapping[str, object]:
     return {str(key): value for key, value in row.items()}
 
 
-def _render_table(table: Table) -> str:
+def _render_table(table: Table, *, use_color: bool) -> str:
     buffer = StringIO()
-    use_color = _use_color()
     console = Console(
         file=buffer,
         width=shutil.get_terminal_size(fallback=(100, 24)).columns,
@@ -287,8 +302,19 @@ def _render_table(table: Table) -> str:
     return buffer.getvalue().rstrip()
 
 
-def _header_style() -> str:
-    return "bold" if _use_color() else ""
+def _header_style(use_color: bool) -> str:
+    return "bold" if use_color else ""
+
+
+def _resolve_use_color(no_color: bool) -> bool:
+    """Decide whether table output should carry ANSI colour.
+
+    ``--no-color`` (``no_color=True``) forces colour off even on a TTY;
+    otherwise the pre-existing TTY + ``NO_COLOR``-env heuristic decides.
+    """
+    if no_color:
+        return False
+    return _use_color()
 
 
 def _use_color() -> bool:

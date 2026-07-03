@@ -25,7 +25,6 @@ Two notes on shape:
 
 from __future__ import annotations
 
-import json
 import mimetypes
 import pathlib
 from typing import Any, Final
@@ -33,6 +32,7 @@ from typing import Any, Final
 import click
 
 from crewday._client import CrewdayClient
+from crewday._emit import emit
 from crewday._globals import CrewdayContext
 from crewday._main import ConfigError, CrewdayError
 from crewday._overrides import cli_override
@@ -321,7 +321,7 @@ def submit(
     currency = submitted.get("currency", "?")
     vendor = submitted.get("vendor", "?")
     click.echo(f"Claim {claim_id} ({vendor}): {amount} {currency} → state={state}")
-    click.echo(json.dumps(submitted, indent=2, sort_keys=False, default=str))
+    emit(submitted, ctx=ctx)
 
 
 def _client_factory_for(ctx: CrewdayContext) -> CrewdayClient:
