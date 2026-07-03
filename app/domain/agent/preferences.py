@@ -281,40 +281,38 @@ def resolve_preferences(
         scope_kind="workspace",
         scope_id=ctx.workspace_id,
     )
-    rows: list[tuple[str, AgentPreference | None]] = [
-        (_workspace_heading(session, ctx), workspace)
+    property_rows: list[tuple[str, AgentPreference | None]] = [
+        (
+            f"## Property preferences -- {property_id}",
+            read_preference(
+                session,
+                ctx,
+                scope_kind="property",
+                scope_id=property_id,
+            ),
+        )
+        for property_id in property_ids
     ]
-    for property_id in property_ids:
-        rows.append(
-            (
-                f"## Property preferences -- {property_id}",
-                read_preference(
-                    session,
-                    ctx,
-                    scope_kind="property",
-                    scope_id=property_id,
-                ),
-            )
-        )
-    if user_id is not None:
-        rows.append(
-            (
-                f"## Your preferences -- {user_id}",
-                read_preference(
-                    session,
-                    ctx,
-                    scope_kind="user",
-                    scope_id=user_id,
-                ),
-            )
-        )
+    user_row = (
+        read_preference(session, ctx, scope_kind="user", scope_id=user_id)
+        if user_id is not None
+        else None
+    )
 
-    if not any(row is not None and row.body_md for _heading, row in rows):
+    all_rows = [workspace, *(row for _heading, row in property_rows), user_row]
+    if not any(row is not None and row.body_md for row in all_rows):
         text = AGENT_PREFERENCES_EMPTY_HEADER
     else:
-        text = "\n\n".join(_render_section(heading, row) for heading, row in rows)
-    if _estimate_tokens(text) > INJECTION_TOKEN_CAP:
-        text = _truncate_to_budget(text)
+        workspace_section = _render_section(_workspace_heading(session, ctx), workspace)
+        property_sections = [
+            _render_section(heading, row) for heading, row in property_rows
+        ]
+        user_section = (
+            _render_section(f"## Your preferences -- {user_id}", user_row)
+            if user_id is not None
+            else None
+        )
+        text = _fit_to_budget(workspace_section, property_sections, user_section)
 
     return PreferenceBundle(
         text=text,
@@ -409,9 +407,50 @@ def _render_section(heading: str, row: AgentPreference | None) -> str:
     return f"{heading}\n{body}"
 
 
-def _truncate_to_budget(text: str) -> str:
+def _fit_to_budget(
+    workspace_section: str,
+    property_sections: Sequence[str],
+    user_section: str | None,
+) -> str:
+    """Assemble sections within the injection budget, per spec 11 "Size budget".
+
+    When the concatenated stack exceeds the budget, property blobs are
+    dropped first, then the workspace blob is truncated from its end with a
+    ``[truncated]`` marker. The user blob is never truncated -- it survives
+    intact even if that pushes the result slightly over budget.
+    """
+    ordered = [workspace_section, *property_sections]
+    if user_section is not None:
+        ordered.append(user_section)
+    text = "\n\n".join(ordered)
+    if _estimate_tokens(text) <= INJECTION_TOKEN_CAP:
+        return text
+
+    # 1. Drop every property blob.
+    kept = [workspace_section]
+    if user_section is not None:
+        kept.append(user_section)
+    text = "\n\n".join(kept)
+    if _estimate_tokens(text) <= INJECTION_TOKEN_CAP:
+        return text
+
+    # 2. Truncate the workspace blob from its end, leaving the user blob
+    #    intact. Reserve the budget the (untouched) user section consumes.
     max_chars = INJECTION_TOKEN_CAP * 4
-    return f"{text[:max_chars].rstrip()}\n[truncated]"
+    user_overhead = len(user_section) + len("\n\n") if user_section is not None else 0
+    truncated_workspace = _truncate_to_budget(
+        workspace_section, max_chars - user_overhead
+    )
+    kept = [truncated_workspace]
+    if user_section is not None:
+        kept.append(user_section)
+    return "\n\n".join(kept)
+
+
+def _truncate_to_budget(text: str, max_chars: int) -> str:
+    marker = "\n[truncated]"
+    keep = max(0, max_chars - len(marker))
+    return f"{text[:keep].rstrip()}{marker}"
 
 
 def _capability_receives_preferences(capability: str) -> bool:
