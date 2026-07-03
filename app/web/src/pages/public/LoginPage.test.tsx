@@ -30,6 +30,7 @@ import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { type ReactElement, type ReactNode } from "react";
 import LoginPage from "./LoginPage";
+import { I18nProvider } from "@/i18n";
 import { AuthProvider, __resetAuthStoreForTests } from "@/auth";
 import { __resetApiProvidersForTests } from "@/lib/api";
 import { installFetchRoutes, type FakeResponse } from "@/test/helpers";
@@ -94,22 +95,24 @@ function Harness({
   return (
     <QueryClientProvider client={qc}>
       <MemoryRouter initialEntries={[initial]}>
-        <AuthProvider>
-          <Routes>
-            <Route path="/login" element={<LoginPage />} />
-            <Route path="/select-workspace" element={<LocationProbe testid="landed-select-workspace" />} />
-            <Route path="/today" element={<LocationProbe testid="landed-today" />} />
-            <Route path="/dashboard" element={<LocationProbe testid="landed-dashboard" />} />
-            <Route path="/portfolio" element={<LocationProbe testid="landed-portfolio" />} />
-            <Route path="/property/abc" element={<LocationProbe testid="landed-property" />} />
-            <Route path="/w/:slug/today" element={<LocationProbe testid="landed-today" />} />
-            <Route path="/w/:slug/dashboard" element={<LocationProbe testid="landed-dashboard" />} />
-            <Route path="/w/:slug/portfolio" element={<LocationProbe testid="landed-portfolio" />} />
-            <Route path="/w/:slug/property/abc" element={<LocationProbe testid="landed-property" />} />
-            <Route path="*" element={<LocationProbe testid="landed-other" />} />
-          </Routes>
-          {children}
-        </AuthProvider>
+        <I18nProvider>
+          <AuthProvider>
+            <Routes>
+              <Route path="/login" element={<LoginPage />} />
+              <Route path="/select-workspace" element={<LocationProbe testid="landed-select-workspace" />} />
+              <Route path="/today" element={<LocationProbe testid="landed-today" />} />
+              <Route path="/dashboard" element={<LocationProbe testid="landed-dashboard" />} />
+              <Route path="/portfolio" element={<LocationProbe testid="landed-portfolio" />} />
+              <Route path="/property/abc" element={<LocationProbe testid="landed-property" />} />
+              <Route path="/w/:slug/today" element={<LocationProbe testid="landed-today" />} />
+              <Route path="/w/:slug/dashboard" element={<LocationProbe testid="landed-dashboard" />} />
+              <Route path="/w/:slug/portfolio" element={<LocationProbe testid="landed-portfolio" />} />
+              <Route path="/w/:slug/property/abc" element={<LocationProbe testid="landed-property" />} />
+              <Route path="*" element={<LocationProbe testid="landed-other" />} />
+            </Routes>
+            {children}
+          </AuthProvider>
+        </I18nProvider>
       </MemoryRouter>
     </QueryClientProvider>
   );

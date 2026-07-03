@@ -46,6 +46,9 @@ msgstr "See what accepting an invite looks like →"
 msgid "login.passkeyButton"
 msgstr "Use passkey"
 
+msgid "login.passkeyPending"
+msgstr "Contacting your authenticator…"
+
 msgid "login.recoverLink"
 msgstr "Lost your device? Recover access →"
 

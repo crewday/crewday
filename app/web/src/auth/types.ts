@@ -46,6 +46,16 @@ export interface AuthMe {
   available_workspaces: AvailableWorkspace[];
   current_workspace_id: string | null;
   is_deployment_admin: boolean;
+  /**
+   * §18 UI-locale chain first hop — the user's stored locale
+   * preference, or `null` when unset. Feeds `<I18nProvider>` so the
+   * SPA can resolve chrome strings before the workspace-scoped `/me`
+   * fetch lands. The server always sends it (see the `_AUTHME_SHAPE`
+   * contract test); optional here so pre-existing test fixtures that
+   * don't exercise locale can omit it, and consumers read it
+   * defensively.
+   */
+  preferred_locale?: string | null;
 }
 
 /**

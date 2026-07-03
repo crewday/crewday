@@ -30,6 +30,7 @@ import {
   sanitizeNext,
   useAuth,
 } from "@/auth";
+import { useI18n } from "@/i18n";
 import { messageForLoginError } from "./publicAuthMappers";
 
 type FormState =
@@ -43,6 +44,7 @@ type LoginLocationState = {
 
 export default function LoginPage() {
   const { isAuthenticated, loginWithPasskey, user } = useAuth();
+  const { t } = useI18n();
   const { search, state } = useLocation();
   const initialNotice = loginNotice(state);
   const [form, setForm] = useState<FormState>(
@@ -110,8 +112,8 @@ export default function LoginPage() {
             <span className="desk__logo" aria-hidden="true">◈</span>
             <span className="desk__wordmark">crew.day</span>
           </div>
-          <h1 className="login__headline">Sign in with your passkey</h1>
-          <p className="login__sub">No passwords, ever. Tap once to unlock the house.</p>
+          <h1 className="login__headline">{t("login.title")}</h1>
+          <p className="login__sub">{t("login.subtitle")}</p>
           {form.kind === "error" && (
             <p
               className={
@@ -133,13 +135,13 @@ export default function LoginPage() {
             data-testid="login-passkey"
           >
             <KeyRound size={18} strokeWidth={1.8} aria-hidden="true" />
-            {pending ? "Contacting your authenticator…" : "Use passkey"}
+            {pending ? t("login.passkeyPending") : t("login.passkeyButton")}
           </button>
-          <a href={recoverHref} className="login__recover">Lost your device? Recover access →</a>
+          <a href={recoverHref} className="login__recover">{t("login.recoverLink")}</a>
         </div>
         <p className="login__footnote">
-          First time here? Open the invite link your manager sent.{" "}
-          <a href="/accept/demo-abc123" className="link">See what accepting an invite looks like →</a>
+          {t("login.firstTime")}{" "}
+          <a href="/accept/demo-abc123" className="link">{t("login.inviteExampleLink")}</a>
         </p>
       </main>
     </div>

@@ -46,6 +46,9 @@ msgstr ""
 msgid "login.passkeyButton"
 msgstr ""
 
+msgid "login.passkeyPending"
+msgstr ""
+
 msgid "login.recoverLink"
 msgstr ""
 

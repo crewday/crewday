@@ -5274,6 +5274,17 @@
             "title": "Is Deployment Admin",
             "type": "boolean"
           },
+          "preferred_locale": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Preferred Locale"
+          },
           "user_id": {
             "title": "User Id",
             "type": "string"
@@ -5285,6 +5296,7 @@
           "display_name",
           "email",
           "is_deployment_admin",
+          "preferred_locale",
           "user_id"
         ],
         "title": "AuthMeResponse",

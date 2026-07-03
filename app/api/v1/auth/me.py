@@ -134,6 +134,13 @@ class AuthMeResponse(BaseModel):
     available_workspaces: list[AvailableWorkspaceResponse]
     current_workspace_id: str | None
     is_deployment_admin: bool
+    # §18 UI-locale chain — the first hop is the user's stored
+    # preference. Surfaced on the bootstrap envelope so the SPA's
+    # top-level ``<I18nProvider>`` can resolve the locale before the
+    # workspace-scoped ``/me`` fetch lands. ``None`` when the user has
+    # never set one, in which case the SPA falls back to workspace
+    # default → browser → ``en-US``.
+    preferred_locale: str | None
 
 
 class EmployeeProfileResponse(BaseModel):
@@ -859,6 +866,7 @@ def build_me_router() -> APIRouter:
             available_workspaces=_load_available_workspaces(session, user_id=user.id),
             current_workspace_id=None,
             is_deployment_admin=is_deployment_admin(session, user_id=user.id),
+            preferred_locale=user.locale,
         )
 
     return router

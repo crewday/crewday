@@ -10,7 +10,7 @@ import { SseProvider } from "@/context/SseContext";
 import { WorkspaceProvider } from "@/context/WorkspaceContext";
 import { NavHistoryProvider } from "@/context/NavHistoryContext";
 import { AuthProvider } from "@/auth";
-import { I18nProvider } from "@/i18n";
+import { ConnectedI18nProvider } from "@/i18n";
 import { startOfflineQueueReplay } from "@/lib/offlineQueue";
 import { ErrorToastProvider } from "@/components/ErrorToast";
 
@@ -45,23 +45,29 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
     <QueryClientProvider client={queryClient}>
       <ErrorToastProvider>
-        <I18nProvider>
-          <BrowserRouter>
-            <AuthProvider>
-              <NavHistoryProvider>
-                <ThemeProvider>
-                  <RoleProvider>
-                    <WorkspaceProvider>
+        <BrowserRouter>
+          <AuthProvider>
+            <NavHistoryProvider>
+              <ThemeProvider>
+                <RoleProvider>
+                  <WorkspaceProvider>
+                    {/* I18nProvider lives below Auth + Workspace so it
+                        can resolve the UI locale from the signed-in
+                        user's preference and the active workspace
+                        default (§18). It still wraps the whole app —
+                        including the public /login surface — so every
+                        route can call `t()`. */}
+                    <ConnectedI18nProvider>
                       <SseProvider>
                         <App />
                       </SseProvider>
-                    </WorkspaceProvider>
-                  </RoleProvider>
-                </ThemeProvider>
-              </NavHistoryProvider>
-            </AuthProvider>
-          </BrowserRouter>
-        </I18nProvider>
+                    </ConnectedI18nProvider>
+                  </WorkspaceProvider>
+                </RoleProvider>
+              </ThemeProvider>
+            </NavHistoryProvider>
+          </AuthProvider>
+        </BrowserRouter>
       </ErrorToastProvider>
     </QueryClientProvider>
   </React.StrictMode>,

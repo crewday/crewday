@@ -282,10 +282,12 @@ def _seed_owner_workspace(
     default_currency: str = "USD",
     default_country: str = "XX",
     default_locale: str = "en",
+    user_locale: str | None = None,
 ) -> tuple[str, str]:
     """Seed a workspace + owner user; return ``(user_id, workspace_slug)``."""
     with session_factory() as s:
         user = bootstrap_user(s, email=email, display_name=display_name)
+        user.locale = user_locale
         ws = bootstrap_workspace(
             s,
             slug=slug,
@@ -317,6 +319,8 @@ _AUTHME_SHAPE: dict[str, type | tuple[type, ...]] = {
     # current_workspace_id is ``str | null`` in the TS contract.
     "current_workspace_id": (str, type(None)),
     "is_deployment_admin": bool,
+    # §18 UI-locale chain first hop — ``str | null`` in the TS contract.
+    "preferred_locale": (str, type(None)),
 }
 
 # AvailableWorkspace inner shape (TS ``AvailableWorkspace`` /
@@ -413,6 +417,9 @@ class TestAuthMeHappyPath:
         assert body["current_workspace_id"] is None
         # No deployment-scope grant → flag is False.
         assert body["is_deployment_admin"] is False
+        # Seeded user has no stored locale → null first hop; the SPA
+        # falls back through the §18 chain.
+        assert body["preferred_locale"] is None
 
         # available_workspaces shape — exactly one entry for the seeded
         # owner workspace; check both layers of the nested envelope.
@@ -464,6 +471,28 @@ class TestAuthMeHappyPath:
         assert ws["default_currency"] == "JPY"
         assert ws["default_country"] == "JP"
         assert ws["default_locale"] == "ja-JP"
+
+    def test_preferred_locale_round_trips_from_stored_user_preference(
+        self,
+        client: TestClient,
+        session_factory: sessionmaker[Session],
+        settings: Settings,
+    ) -> None:
+        """A stored ``user.locale`` surfaces as the §18 first-hop input."""
+        user_id, _slug = _seed_owner_workspace(
+            session_factory,
+            email="pref@example.com",
+            display_name="Preferred",
+            slug="ws-pref",
+            name="Preferred",
+            user_locale="fr-FR",
+        )
+        cookie = _issue_cookie(session_factory, user_id=user_id, settings=settings)
+        client.cookies.set(SESSION_COOKIE_NAME, cookie)
+
+        r = client.get("/api/v1/auth/me")
+        assert r.status_code == 200, r.text
+        assert r.json()["preferred_locale"] == "fr-FR"
 
     def test_workspace_summary_country_falls_back_when_setting_absent(
         self,
