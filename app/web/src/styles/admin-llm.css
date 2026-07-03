@@ -1182,11 +1182,11 @@
 }
 .llm-playground__mode-button--active {
   background: var(--moss);
-  color: #fff;
+  color: var(--on-primary);
 }
 .llm-playground__mode-button--active:hover,
 .llm-playground__mode-button--active:focus-visible {
-  color: #fff;
+  color: var(--on-primary);
 }
 .llm-playground__status {
   margin: 0;

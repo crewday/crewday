@@ -14,15 +14,14 @@
   margin-bottom: 8px;
   border: 1px solid var(--sand);
   border-left-width: 4px;
-  border-radius: 8px;
+  border-radius: var(--radius-card);
   background: var(--sand-soft);
   color: var(--ink);
   font-size: 14px;
 }
 .schedule-banner__text { flex: 1; min-width: 0; }
 .schedule-banner__detail { color: var(--ink-2); }
-.schedule-banner--pending strong { color: #8A6A22; }
-[data-theme="dark"] .schedule-banner--pending strong { color: var(--sand); }
+.schedule-banner--pending strong { color: var(--sand-ink); }
 
 .scheduler-weeknav {
   display: flex;
@@ -51,7 +50,7 @@
   display: grid;
   grid-template-columns: minmax(140px, 1fr) repeat(7, minmax(110px, 1.2fr));
   border: 1px solid var(--paper-3);
-  border-radius: 8px;
+  border-radius: var(--radius-card);
   overflow: hidden;
   background: var(--paper);
 }
@@ -111,7 +110,7 @@
   background: var(--rota-tint, var(--moss-soft));
   border-left: 3px solid var(--moss);
   padding: 3px 6px;
-  border-radius: 4px;
+  border-radius: var(--radius-tag);
   font-size: 11px;
   color: var(--ink);
 }
@@ -123,14 +122,14 @@
   color: var(--rust);
   padding: 1px 5px;
   border: 1px dashed var(--rust);
-  border-radius: 3px;
+  border-radius: var(--radius-tag);
   align-self: flex-start;
 }
 .rota-task {
   background: var(--paper);
   border-left: 3px solid var(--sand);
   padding: 3px 6px;
-  border-radius: 4px;
+  border-radius: var(--radius-tag);
   font-size: 11px;
   color: var(--ink);
   display: flex;
@@ -166,7 +165,7 @@
   color: var(--ink-2);
   padding: 3px 8px;
   border: 1px solid var(--paper-3);
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
 }
 .scheduler-legend__swatch {
   width: 10px;
@@ -294,7 +293,7 @@
   font-size: 12px;
   font-weight: 600;
   padding: 4px 12px;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   background: var(--moss-soft);
   color: var(--moss);
   border: 1px solid transparent;
@@ -394,7 +393,7 @@
   min-width: 44px;
   min-height: 44px;
   padding: 10px 16px;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   font: inherit;
   font-family: inherit;
   font-size: 13px;

@@ -44,7 +44,7 @@
 .enroll-step { display: flex; gap: 14px; align-items: flex-start; padding: 14px; background: var(--paper-2); border-radius: 10px; opacity: 0.6; }
 .enroll-step--active { opacity: 1; border: 1px solid var(--moss); }
 .enroll-step--done { opacity: 1; }
-.enroll-step--done .enroll-step__num { background: var(--moss); color: #fff; }
+.enroll-step--done .enroll-step__num { background: var(--moss); color: var(--on-primary); }
 .enroll-step__num {
   width: 28px; height: 28px; border-radius: 50%;
   background: var(--paper); border: 1px solid var(--line-strong);
@@ -130,10 +130,10 @@
 .swatch code { font-size: 11px; opacity: 0.85; }
 .swatch--paper  { background: #FAF7F2; color: #1F1A14; }
 .swatch--ink    { background: #1F1A14; color: #FAF7F2; }
-.swatch--moss   { background: #3F6E3B; color: #fff; }
-.swatch--rust   { background: #B04A27; color: #fff; }
+.swatch--moss   { background: #3F6E3B; color: var(--on-primary); }
+.swatch--rust   { background: #B04A27; color: var(--on-primary); }
 .swatch--sand   { background: #D9A441; color: #1F1A14; }
-.swatch--sky    { background: #4F7CA8; color: #fff; }
+.swatch--sky    { background: #4F7CA8; color: var(--on-primary); }
 .swatch--night  { background: #151310; color: #F4EFE6; }
 
 .type-row { padding: 14px 0; border-bottom: 1px dashed var(--line); }

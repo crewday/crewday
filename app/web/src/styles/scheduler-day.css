@@ -10,7 +10,7 @@
   padding: 10px 10px 12px;
   background: var(--card);
   border: 1px solid var(--line);
-  border-radius: 10px;
+  border-radius: var(--radius-card);
   cursor: pointer;
   transition: border-color 140ms ease, box-shadow 160ms ease, transform 140ms ease;
   font-family: inherit;
@@ -142,7 +142,7 @@
   position: absolute;
   left: 3px;
   right: 3px;
-  border-radius: 6px;
+  border-radius: var(--radius-control);
   pointer-events: none;
 }
 .schedule-day__rail-bar--moss {
@@ -190,8 +190,7 @@
   top: 50%;
 }
 .schedule-day__rail--moss  .schedule-day__rail-text { color: var(--moss); }
-.schedule-day__rail--sand  .schedule-day__rail-text { color: #8A6A22; }
-[data-theme="dark"] .schedule-day__rail--sand .schedule-day__rail-text { color: var(--sand); }
+.schedule-day__rail--sand  .schedule-day__rail-text { color: var(--sand-ink); }
 .schedule-day__rail--rust  .schedule-day__rail-text { color: var(--rust); }
 .schedule-day__rail--ghost .schedule-day__rail-text { color: var(--ink-4); }
 
@@ -255,7 +254,7 @@
   right: 4px;
   padding: 4px 6px 4px 8px;
   background: color-mix(in oklab, var(--rota-tint, var(--moss-soft)) 32%, var(--card));
-  border-radius: 4px;
+  border-radius: var(--radius-tag);
   /* `overflow: visible` lets the property-name label float ABOVE the
      block (baseline touching the top border), and lets a task chip
      scheduled at 11:55 inside an 08:00–12:00 booking extend past the
@@ -324,12 +323,11 @@
   font-weight: 700;
   letter-spacing: 0.14em;
   text-transform: uppercase;
-  color: #8A6A22;
+  color: var(--sand-ink);
   background: var(--sand-soft);
   padding: 1px 5px;
-  border-radius: 3px;
+  border-radius: var(--radius-tag);
 }
-[data-theme="dark"] .schedule-day__block-flag { color: var(--sand); }
 .schedule-day__block-flag--rust {
   color: var(--rust);
   background: var(--rust-soft);
@@ -385,7 +383,9 @@
   min-height: 20px;
   padding: 3px 8px 3px 12px;
   background: color-mix(in oklab, var(--rota-tint, var(--sand-soft)) 42%, var(--card-raised));
-  border-radius: 999px 4px 4px 999px;
+  /* Directional chip: pill left edge, tag right edge (reads as pointing
+     into the day). Asymmetric shape, so it can't be a single token. */
+  border-radius: var(--radius-pill) var(--radius-tag) var(--radius-tag) var(--radius-pill);
   display: grid;
   grid-template-columns: auto 1fr;
   gap: 6px;
@@ -491,8 +491,7 @@
   color: var(--ink-4);
 }
 .schedule-day__empty-label--moss { color: var(--moss); }
-.schedule-day__empty-label--sand { color: #8A6A22; }
-[data-theme="dark"] .schedule-day__empty-label--sand { color: var(--sand); }
+.schedule-day__empty-label--sand { color: var(--sand-ink); }
 .schedule-day__empty-label--rust { color: var(--rust); }
 .schedule-day__empty-hours {
   font-family: "JetBrains Mono", ui-monospace, monospace;
@@ -520,8 +519,7 @@
   z-index: 1;
 }
 .schedule-day__rest-word--moss { color: color-mix(in oklab, var(--moss) 60%, var(--ink-4)); }
-.schedule-day__rest-word--sand { color: #8A6A22; }
-[data-theme="dark"] .schedule-day__rest-word--sand { color: var(--sand); }
+.schedule-day__rest-word--sand { color: var(--sand-ink); }
 .schedule-day__rest-word--rust { color: color-mix(in oklab, var(--rust) 65%, var(--ink-4)); }
 
 /* ── Desktop week-grid adjustments ─────────────────────────────────── */
@@ -596,7 +594,9 @@
   right: 2px;
   min-height: 16px;
   padding: 1px 5px 1px 10px;
-  border-radius: 9px 3px 3px 9px;
+  /* Compact week-row variant of the directional chip above; same
+     asymmetry, snapped to card/tag radii. */
+  border-radius: var(--radius-card) var(--radius-tag) var(--radius-tag) var(--radius-card);
   gap: 4px;
   grid-template-columns: auto minmax(0, 1fr);
 }
@@ -662,7 +662,7 @@
   color: var(--ink-2);
   padding: 3px 8px;
   border: 1px solid var(--line);
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
 }
 .schedule__legend-swatch {
   width: 10px;

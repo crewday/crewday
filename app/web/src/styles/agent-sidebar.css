@@ -171,7 +171,7 @@
   background: var(--paper);
 }
 .agent-action .btn--approve {
-  background: var(--moss); color: #fff; border-color: var(--moss);
+  background: var(--moss); color: var(--on-primary); border-color: var(--moss);
 }
 .agent-action .btn--approve:hover { background: var(--moss-2); }
 .agent-action .btn--deny {

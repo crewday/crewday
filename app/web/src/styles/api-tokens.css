@@ -126,10 +126,9 @@
 }
 .tokens-kind--delegated::before { background: var(--sky); }
 .tokens-kind--personal {
-  background: var(--sand-soft); color: #8A6A22;
+  background: var(--sand-soft); color: var(--sand-ink);
   border-color: var(--sand-soft);
 }
-[data-theme="dark"] .tokens-kind--personal { color: var(--sand); }
 .tokens-kind--personal::before { background: var(--sand); }
 
 /* Scope list in a table cell — pills aligned tightly, wrapping. */
@@ -144,10 +143,9 @@
   white-space: nowrap;
 }
 .tokens-scopes__pill--me {
-  background: var(--sand-soft); color: #8A6A22;
+  background: var(--sand-soft); color: var(--sand-ink);
   border-color: transparent;
 }
-[data-theme="dark"] .tokens-scopes__pill--me { color: var(--sand); }
 .tokens-scopes__inherit {
   font-size: 12px; color: var(--ink-3); font-style: italic;
   line-height: 1.35; max-width: 22ch;
@@ -180,8 +178,7 @@
 }
 .tokens-status--active   { color: var(--moss); }
 .tokens-status--active::before   { background: var(--moss); box-shadow: 0 0 0 3px var(--moss-softer); }
-.tokens-status--expiring { color: #8A6A22; }
-[data-theme="dark"] .tokens-status--expiring { color: var(--sand); }
+.tokens-status--expiring { color: var(--sand-ink); }
 .tokens-status--expiring::before { background: var(--sand); box-shadow: 0 0 0 3px var(--sand-soft); }
 .tokens-status--expired  { color: var(--rust); }
 .tokens-status--expired::before  { background: var(--rust); box-shadow: 0 0 0 3px var(--rust-soft); }
@@ -475,10 +472,9 @@
 .tokens-reveal__ribbon-mark {
   display: inline-flex; align-items: center; justify-content: center;
   width: 28px; height: 28px; border-radius: 50%;
-  background: var(--sand-soft); color: #8A6A22;
+  background: var(--sand-soft); color: var(--sand-ink);
   flex-shrink: 0;
 }
-[data-theme="dark"] .tokens-reveal__ribbon-mark { color: var(--sand); }
 .tokens-reveal__ribbon-title {
   font-family: "Fraunces", serif; font-weight: 600;
   font-size: 15px; color: var(--ink);
@@ -574,8 +570,7 @@
   display: inline-flex; align-items: center; justify-content: center;
   color: var(--moss); border: 1px solid var(--moss-soft);
 }
-.callout--sand .callout__mark { color: #8A6A22; border-color: var(--sand-soft); }
-[data-theme="dark"] .callout--sand .callout__mark { color: var(--sand); }
+.callout--sand .callout__mark { color: var(--sand-ink); border-color: var(--sand-soft); }
 .callout--rust .callout__mark { color: var(--rust); border-color: var(--rust-soft); }
 .callout__body { flex: 1; min-width: 0; }
 .callout__title {

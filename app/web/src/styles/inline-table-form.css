@@ -889,12 +889,12 @@
 .inline-table-form__icon-btn--primary {
   border-color: var(--moss);
   background: var(--moss);
-  color: #fff;
+  color: var(--on-primary);
 }
 
 .inline-table-form__icon-btn--primary:hover {
   background: var(--moss-2);
-  color: #fff;
+  color: var(--on-primary);
 }
 
 .inline-table-form__icon-btn--danger {

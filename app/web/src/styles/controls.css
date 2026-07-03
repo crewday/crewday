@@ -275,10 +275,12 @@
 .input--inline {
   padding: 6px 10px;
   border: 1px solid var(--line);
-  border-radius: 6px;
+  border-radius: var(--radius-control);
   background: var(--paper);
   font: inherit;
   min-width: 120px;
+  /* Compact inline variant: override the 44px base .input height. */
+  min-height: 0;
 }
 .input--inline:focus {
   outline: 2px solid var(--moss);

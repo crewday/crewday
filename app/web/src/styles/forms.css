@@ -12,9 +12,9 @@
 .btn:active { transform: scale(0.98); }
 .btn--lg { min-height: 48px; padding: 12px 20px; font-size: 15px; }
 .btn--sm { min-height: 32px; padding: 4px 10px; font-size: 12px; }
-.btn--moss  { background: var(--moss); color: #fff; }
+.btn--moss  { background: var(--moss); color: var(--on-primary); }
 .btn--moss:hover  { background: var(--moss-2); }
-.btn--rust  { background: var(--rust); color: #fff; }
+.btn--rust  { background: var(--rust); color: var(--on-primary); }
 .btn--ghost { background: transparent; border-color: var(--line-strong); color: var(--ink-2); }
 .btn--ghost:hover { background: var(--paper-2); }
 .btn:disabled {
@@ -551,6 +551,7 @@
    radius — so text inputs, selects and textareas read as "slotted into
    the card." Any new control should extend this selector group rather
    than roll its own background/border. */
+.input,
 .field input, .field textarea, .field select,
 .comment__compose textarea,
 .agent-prefs__textarea,
@@ -558,7 +559,7 @@
   padding: 10px 12px;
   background: var(--card);
   border: 1px solid var(--line-strong);
-  border-radius: 6px;
+  border-radius: var(--radius-control);
   min-height: 44px;
   font: inherit; color: inherit;
   font-family: "Inter Tight", sans-serif;
@@ -878,7 +879,7 @@
   transition: background 100ms ease, color 100ms ease, border-color 100ms ease;
 }
 .chip-radio input:checked + span {
-  background: var(--moss); color: #fff; border-color: var(--moss);
+  background: var(--moss); color: var(--on-primary); border-color: var(--moss);
 }
 
 .recovery-code { letter-spacing: 0.18em; font-family: "JetBrains Mono", monospace; text-transform: uppercase; }
@@ -1137,7 +1138,7 @@
 /* ── Avatar ───────────────────────────────────────────── */
 .avatar {
   display: inline-flex; align-items: center; justify-content: center;
-  border-radius: 50%; background: var(--moss); color: #fff;
+  border-radius: 50%; background: var(--moss); color: var(--on-primary);
   font-weight: 600; letter-spacing: 0.04em; flex-shrink: 0;
   overflow: hidden;
 }
@@ -1156,7 +1157,7 @@
 .avatar-trigger__edit {
   position: absolute; right: -2px; bottom: -2px;
   width: 24px; height: 24px; border-radius: 50%;
-  background: var(--moss); color: #fff;
+  background: var(--moss); color: var(--on-primary);
   display: inline-flex; align-items: center; justify-content: center;
   box-shadow: 0 1px 3px rgba(0,0,0,0.2);
 }

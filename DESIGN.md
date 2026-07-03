@@ -153,7 +153,7 @@ components:
   input:
     backgroundColor: "{colors.card}"
     textColor: "{colors.ink}"
-    typography: "{typography.body-md}"
+    typography: "{typography.body-sm}"
     rounded: "{rounded.control}"
     padding: "10px 12px"
     height: 44px
@@ -403,7 +403,7 @@ Don't double-frame.
 ### Inputs (`.input`, `<textarea>`, `<select>`)
 
 44 px tall, 6 px radius, `card` background, `line-strong` border,
-`Inter Tight 15/400`. Focus state inherits the global
+`Inter Tight 13/400`. Focus state inherits the global
 `:focus-visible` ring (2 px Moss outline, 2 px offset).
 
 Labels are always `<label>` elements, never placeholder-only.
