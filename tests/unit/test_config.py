@@ -169,6 +169,79 @@ class TestMissingRequired:
         assert "database_url" in str(excinfo.value).lower()
 
 
+class TestPublicUrlForLinkBuilding:
+    """``public_url`` is required once a link-building feature is wired (§16).
+
+    Email (``smtp_host``) and inbound chat-gateway webhooks both build
+    absolute links from ``public_url``; a deployment that enables one but
+    forgets the public origin would mail broken links or hand operators a
+    relative webhook URL, so :class:`Settings` refuses to construct. The
+    first-boot / admin-init path stays working because it runs with
+    neither feature wired.
+    """
+
+    def test_smtp_without_public_url_raises(self, monkeypatch: MonkeyPatch) -> None:
+        monkeypatch.setenv("CREWDAY_DATABASE_URL", "sqlite:///:memory:")
+        monkeypatch.setenv("CREWDAY_SMTP_HOST", "smtp.example.com")
+        with pytest.raises(ValidationError, match="CREWDAY_PUBLIC_URL"):
+            Settings()
+
+    def test_smtp_with_public_url_ok(self, monkeypatch: MonkeyPatch) -> None:
+        monkeypatch.setenv("CREWDAY_DATABASE_URL", "sqlite:///:memory:")
+        monkeypatch.setenv("CREWDAY_SMTP_HOST", "smtp.example.com")
+        monkeypatch.setenv("CREWDAY_PUBLIC_URL", "https://ops.example.com")
+        s = Settings()
+        assert s.smtp_host == "smtp.example.com"
+        assert s.public_url == "https://ops.example.com"
+
+    def test_no_smtp_no_public_url_ok(self, monkeypatch: MonkeyPatch) -> None:
+        """First boot: no link-building feature and no public_url — must construct."""
+        monkeypatch.setenv("CREWDAY_DATABASE_URL", "sqlite:///:memory:")
+        s = Settings()
+        assert s.smtp_host is None
+        assert s.public_url is None
+
+    def test_chat_gateway_without_public_url_raises(
+        self, monkeypatch: MonkeyPatch
+    ) -> None:
+        """Workspace + a provider secret enables inbound webhooks (§23)."""
+        monkeypatch.setenv("CREWDAY_DATABASE_URL", "sqlite:///:memory:")
+        monkeypatch.setenv(
+            "CREWDAY_CHAT_GATEWAY_WORKSPACE_ID", "01HWORKSPACECHATGATEWAY01"
+        )
+        monkeypatch.setenv("CREWDAY_CHAT_GATEWAY_TWILIO_SECRET", "whsec_test")
+        with pytest.raises(ValidationError, match="chat gateway"):
+            Settings()
+
+    def test_chat_gateway_workspace_only_ok(self, monkeypatch: MonkeyPatch) -> None:
+        """Workspace id without any provider secret routes nothing — no requirement."""
+        monkeypatch.setenv("CREWDAY_DATABASE_URL", "sqlite:///:memory:")
+        monkeypatch.setenv(
+            "CREWDAY_CHAT_GATEWAY_WORKSPACE_ID", "01HWORKSPACECHATGATEWAY01"
+        )
+        s = Settings()
+        assert s.public_url is None
+
+    def test_chat_gateway_secret_without_workspace_ok(
+        self, monkeypatch: MonkeyPatch
+    ) -> None:
+        """A provider secret without a target workspace routes nothing."""
+        monkeypatch.setenv("CREWDAY_DATABASE_URL", "sqlite:///:memory:")
+        monkeypatch.setenv("CREWDAY_CHAT_GATEWAY_TWILIO_SECRET", "whsec_test")
+        s = Settings()
+        assert s.public_url is None
+
+    def test_chat_gateway_with_public_url_ok(self, monkeypatch: MonkeyPatch) -> None:
+        monkeypatch.setenv("CREWDAY_DATABASE_URL", "sqlite:///:memory:")
+        monkeypatch.setenv(
+            "CREWDAY_CHAT_GATEWAY_WORKSPACE_ID", "01HWORKSPACECHATGATEWAY01"
+        )
+        monkeypatch.setenv("CREWDAY_CHAT_GATEWAY_TWILIO_SECRET", "whsec_test")
+        monkeypatch.setenv("CREWDAY_PUBLIC_URL", "https://ops.example.com")
+        s = Settings()
+        assert s.public_url == "https://ops.example.com"
+
+
 class TestTrustedInterfacesParsing:
     def test_comma_separated_env_splits(self, monkeypatch: MonkeyPatch) -> None:
         monkeypatch.setenv("CREWDAY_DATABASE_URL", "sqlite:///:memory:")

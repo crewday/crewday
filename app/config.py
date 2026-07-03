@@ -410,6 +410,65 @@ class Settings(BaseSettings):
             raise ValueError("CREWDAY_ROOT_KEY is required for postgres rate limiting")
         return self
 
+    @property
+    def _chat_gateway_inbound_enabled(self) -> bool:
+        """True when inbound chat-gateway webhooks are operational (§23).
+
+        Mirrors :func:`app.api.chat_gateway.webhooks._providers_from_settings`:
+        routing needs a target workspace *and* at least one provider secret.
+        """
+        if self.chat_gateway_workspace_id is None:
+            return False
+        return any(
+            secret is not None
+            for secret in (
+                self.chat_gateway_twilio_secret,
+                self.chat_gateway_meta_whatsapp_secret,
+                self.chat_gateway_postmark_secret,
+            )
+        )
+
+    @model_validator(mode="after")
+    def _require_public_url_for_link_building(self) -> Settings:
+        """Fail loud when a link-building feature is wired but links can't be built.
+
+        ``public_url`` is the base for every absolute link crew.day emits
+        (§16 "Environment variables": *required for link building*). Two
+        env-toggled feature groups build such links from it, so a deploy
+        that enables one but forgets ``public_url`` would fail late — at
+        send/display time — with a broken link instead of at boot:
+
+        * **Email** — every SMTP message carries an absolute link back into
+          the app (magic-link sign-in, verification, recovery, email-change,
+          quotes). Without ``public_url`` those links would reach real
+          inboxes broken.
+        * **Chat gateway inbound webhooks (§23)** — the admin settings screen
+          shows operators the absolute ``/webhooks/chat/{provider}`` callback
+          URL to register with the provider (WhatsApp/Meta, Twilio, Postmark).
+          Without ``public_url`` that URL degrades to a useless relative path
+          (see :func:`app.api.admin.chat_gateway._webhook_url`).
+
+        The first-boot / admin-init path stays working: it runs before any
+        relay or gateway is wired (neither trigger fires) and falls back to a
+        local magic-link base (see :func:`app.admin.init._public_url`).
+        """
+        if self.public_url is not None:
+            return self
+        if self.smtp_host is not None:
+            raise ValueError(
+                "CREWDAY_PUBLIC_URL is required when CREWDAY_SMTP_HOST is set: "
+                "every outgoing email builds links from it (§16 "
+                '"Environment variables")'
+            )
+        if self._chat_gateway_inbound_enabled:
+            raise ValueError(
+                "CREWDAY_PUBLIC_URL is required when the chat gateway is "
+                "configured (CREWDAY_CHAT_GATEWAY_WORKSPACE_ID plus a provider "
+                "secret): the admin screen builds the provider webhook callback "
+                'URL from it (§16 "Environment variables", §23)'
+            )
+        return self
+
     def safe_dump(self) -> dict[str, Any]:
         """Return a dict with every :class:`SecretStr` masked.
 

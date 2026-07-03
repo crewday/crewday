@@ -1,13 +1,22 @@
 name: crewday
 
+# This is the production full-stack recipe (spec §16 "Recipe B"). The
+# secrets below have NO defaults on purpose: `docker compose config`
+# (and `up`) fail loudly if any is unset, so a prod deploy cannot
+# silently boot on well-known dev credentials or build broken links.
+# Supply them via a gitignored `.env` next to this file or the shell
+# environment before running compose:
+#   CREWDAY_POSTGRES_PASSWORD, MINIO_ROOT_USER, MINIO_ROOT_PASSWORD,
+#   CREWDAY_PUBLIC_URL. The maintainer's dev stack is a separate file
+#   (repo-root docker-compose.dev.yml) and is unaffected.
 x-app-env: &app-env
-  CREWDAY_DATABASE_URL: "postgresql+psycopg://crewday:${CREWDAY_POSTGRES_PASSWORD:-crewday-dev}@postgres:5432/crewday"
+  CREWDAY_DATABASE_URL: "postgresql+psycopg://crewday:${CREWDAY_POSTGRES_PASSWORD:?set a strong Postgres password; no default in prod}@postgres:5432/crewday"
   CREWDAY_DATA_DIR: "/data"
   CREWDAY_BIND_HOST: "0.0.0.0"
   CREWDAY_BIND_PORT: "8000"
   CREWDAY_ALLOW_PUBLIC_BIND: "1"
   CREWDAY_WORKER: "external"
-  CREWDAY_PUBLIC_URL: "${CREWDAY_PUBLIC_URL:-https://localhost:8443}"
+  CREWDAY_PUBLIC_URL: "${CREWDAY_PUBLIC_URL:?set the public origin, e.g. https://ops.example.com; required for link building}"
   CREWDAY_PUBLIC_SITE_URL: "${CREWDAY_PUBLIC_SITE_URL:-}"
   CREWDAY_ROOT_KEY:
   CREWDAY_LOG_LEVEL: "${CREWDAY_LOG_LEVEL:-INFO}"
@@ -100,7 +109,7 @@ services:
     restart: unless-stopped
     environment:
       POSTGRES_USER: crewday
-      POSTGRES_PASSWORD: "${CREWDAY_POSTGRES_PASSWORD:-crewday-dev}"
+      POSTGRES_PASSWORD: "${CREWDAY_POSTGRES_PASSWORD:?set a strong Postgres password; no default in prod}"
       POSTGRES_DB: crewday
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U crewday -d crewday"]
@@ -117,8 +126,8 @@ services:
     command: server /data --console-address ":9001"
     restart: unless-stopped
     environment:
-      MINIO_ROOT_USER: "${MINIO_ROOT_USER:-crewday}"
-      MINIO_ROOT_PASSWORD: "${MINIO_ROOT_PASSWORD:-crewday-minio-dev}"
+      MINIO_ROOT_USER: "${MINIO_ROOT_USER:?set the MinIO root user; no default in prod}"
+      MINIO_ROOT_PASSWORD: "${MINIO_ROOT_PASSWORD:?set a strong MinIO root password; no default in prod}"
     healthcheck:
       test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:9000/minio/health/ready || exit 1"]
       interval: 5s

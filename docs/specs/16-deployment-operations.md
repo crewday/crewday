@@ -315,6 +315,27 @@ ops.example.com {
 }
 ```
 
+### Secrets — fail loud, no dev defaults
+
+The shipped compose (`deploy/compose/docker-compose.yml`) supplies the
+deployment secrets via `${VAR:?…}` interpolation, which has **no
+fallback**: `docker compose config` (and `up`) aborts with an explicit
+message if any is unset. This is deliberate — a prod adaptation that
+forgets one must not silently boot on well-known dev credentials or an
+`https://localhost` public URL. Provide all of the following via a
+gitignored `.env` next to the compose file or the shell environment:
+
+- `CREWDAY_POSTGRES_PASSWORD` — Postgres role password (`db` + app DSN).
+- `MINIO_ROOT_USER` / `MINIO_ROOT_PASSWORD` — MinIO root credentials.
+- `CREWDAY_PUBLIC_URL` — public origin (see the env-var table; also
+  enforced by `Settings` once email or the chat gateway is configured).
+- `CREWDAY_ROOT_KEY` — signing key (already passed through, never
+  defaulted).
+
+The maintainer's local dev stack is a separate file
+(repo-root `docker-compose.dev.yml`) and keeps its own conveniences; it
+is unaffected by these prod-recipe requirements.
+
 ### Backup
 
 - Postgres: `pg_dump -Fc` nightly.
@@ -803,7 +824,7 @@ provisioned per visitor, not per operator.
 | `CREWDAY_DATA_DIR`        | `./data`                       |                          |
 | `CREWDAY_BIND_HOST`       | `127.0.0.1`                    |                          |
 | `CREWDAY_BIND_PORT`       | `8000`                         |                          |
-| `CREWDAY_PUBLIC_URL`      | -                              | required for link building |
+| `CREWDAY_PUBLIC_URL`      | -                              | Public origin used to build every absolute link. May stay unset on first boot / admin bootstrap (magic-link CLI falls back to a local base). **Required once a link-building feature is wired** — `CREWDAY_SMTP_HOST` (email links) or the chat gateway (`CREWDAY_CHAT_GATEWAY_WORKSPACE_ID` plus a provider secret, §23). `Settings` refuses to start otherwise, so an email- or webhook-enabled deploy can never emit broken links. |
 | `CREWDAY_ROOT_KEY`        | -                              | required                 |
 | `CREWDAY_STORAGE_BACKEND` | `localfs`                      | or `s3`                  |
 | `CREWDAY_WORKER`          | `internal`                     | or `external`            |

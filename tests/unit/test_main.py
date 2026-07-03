@@ -178,6 +178,7 @@ class TestCreateApp:
             smtp_port=2525,
             smtp_from="ops@example.com",
             smtp_use_tls=False,
+            public_url="https://ops.example.com",
         )
         app = create_app(settings=cfg)
         assert app.state.mailer is not None
