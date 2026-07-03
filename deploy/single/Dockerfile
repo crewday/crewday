@@ -33,16 +33,36 @@ COPY migrations ./migrations
 COPY deploy/single/entrypoint.sh /usr/local/bin/crewday-server
 COPY --from=web-build /web/dist ./app/web/dist
 
-# ``ffmpeg`` supports server-side media normalization. ``build-essential``
-# is only for source wheels without CPython 3.14 binaries, and is removed
-# before the layer is committed.
+# ``ffmpeg`` supports server-side media normalization; Pango/fontconfig/
+# DejaVu are the runtime pieces WeasyPrint needs to render payslip PDFs.
+# The asset router imports ``weasyprint`` at module load (app/api/assets/
+# assets.py) and is registered unconditionally, so a missing native lib
+# crashes the server at boot — the ``import weasyprint`` smoke below fails
+# the build instead. ``build-essential`` is only for source wheels without
+# CPython 3.14 binaries, and is removed before the layer is committed.
+#
+# Dependencies install from ``uv.lock`` for a reproducible, age-gated
+# build: ``uv export`` materialises the locked prod set (pinned ``==``
+# versions), then ``pip install --no-deps .`` layers on the project itself
+# (the ``crewday`` console script + package remap) without re-resolving.
+# ``uv`` is a self-contained binary, removed after the export.
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         build-essential \
         ffmpeg \
-    && python -m pip install --upgrade pip \
-    && python -m pip install . \
+        fontconfig \
+        fonts-dejavu-core \
+        libpango-1.0-0 \
+        libpangoft2-1.0-0 \
+    && python -m pip install --upgrade pip uv \
+    && uv export --frozen --no-dev --no-emit-project --no-hashes -o /tmp/requirements.txt \
+    && python -m pip install -r /tmp/requirements.txt \
+    && python -m pip install --no-deps . \
+    && python -m pip uninstall -y uv \
+    && python -c 'import weasyprint' \
+    && python -c 'import app.main' \
     && python -m app.adapters.llm.fastembed \
+    && rm -f /tmp/requirements.txt \
     && chmod 0755 /usr/local/bin/crewday-server \
     && mkdir -p /data \
     && chown -R crewday:crewday /app /data \

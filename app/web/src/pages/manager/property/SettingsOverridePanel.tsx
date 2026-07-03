@@ -242,7 +242,6 @@ export default function SettingsOverridePanel({
 
   const rows = useMemo(
     (): InlineTableRow<PropertySettingDraft>[] => propertyScoped.map((def) => {
-      const res = resolved[def.key];
       const editedDraft = editedDrafts.get(def.key);
       const committedValue = propertySettingDraftValue(def.key, def, overrides, resolved);
       const savingThisRow = saveSetting.isPending && saveSetting.variables?.key === def.key;
