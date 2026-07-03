@@ -1,0 +1,132 @@
+# App image CI — build ``deploy/single/Dockerfile`` and smoke-test the
+# resulting single-container prod image.
+#
+# Task: cd-bejvf. Spec: docs/specs/16-deployment-operations.md
+# §"Recipe A — Single container" (the release build must fail CI if the
+# resolved runtime user is ``0``) and docs/specs/17-testing-quality.md
+# §"Release pipeline" ("Image non-root smoke test").
+#
+# The main CI (``ci.yml``) never builds this Dockerfile, so a native-lib
+# gap (e.g. the WeasyPrint boot crash) could ship undetected. This
+# workflow closes that gap:
+#   * build the image on PRs that touch deploy/ or dependency manifests,
+#     and on every release tag push;
+#   * assert the baked-in runtime user is uid 10001 (non-root);
+#   * boot the container and require HTTP 200 from ``/healthz``;
+#   * publish to GHCR on release tags only (never on PRs), mirroring the
+#     login/tagging pattern in ``site-ci.yml``.
+
+name: App Image
+
+on:
+  push:
+    tags:
+      - "v*"
+    branches: [main]
+    paths:
+      - "deploy/**"
+      - "pyproject.toml"
+      - "uv.lock"
+      - "app/web/package-lock.json"
+      - ".github/workflows/app-image.yml"
+  pull_request:
+    paths:
+      - "deploy/**"
+      - "pyproject.toml"
+      - "uv.lock"
+      - "app/web/package-lock.json"
+      - ".github/workflows/app-image.yml"
+
+concurrency:
+  group: app-image-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  image:
+    name: app image build + smoke
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    env:
+      IMAGE: ghcr.io/${{ github.repository_owner }}/crewday
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Build once and load into the local daemon so the smoke checks run
+      # against the exact bytes that would be published. ``push: false``
+      # here; publishing happens in a guarded step below after the smoke
+      # checks pass.
+      - name: Build app image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: deploy/single/Dockerfile
+          load: true
+          push: false
+          tags: ${{ env.IMAGE }}:${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # Spec 16 §"Recipe A": the release build fails CI if the resolved
+      # runtime user is 0. The stock entrypoint must run as uid 10001.
+      - name: Assert runtime user is 10001 (non-root)
+        run: |
+          uid="$(docker run --rm "${IMAGE}:${GITHUB_SHA}" id -u)"
+          echo "runtime uid: ${uid}"
+          if [ "${uid}" != "10001" ]; then
+            echo "::error::image runtime user is ${uid}, expected 10001 (non-root)" >&2
+            exit 1
+          fi
+
+      # Spec 17 §"Release pipeline": a forced ``--user 0`` must be refused
+      # by the entrypoint with a non-zero exit (the §16 root guard).
+      - name: Assert forced root is refused
+        run: |
+          if docker run --rm --user 0 "${IMAGE}:${GITHUB_SHA}" serve; then
+            echo "::error::container started as root but should have refused" >&2
+            exit 1
+          fi
+          echo "root run refused as expected"
+
+      - name: Boot image and smoke-test /healthz
+        run: |
+          cid="$(docker run -d -p 8000:8000 "${IMAGE}:${GITHUB_SHA}")"
+          trap 'docker logs "${cid}" || true; docker rm -f "${cid}" >/dev/null 2>&1 || true' EXIT
+          for i in $(seq 1 30); do
+            code="$(curl -fsS -o /dev/null -w '%{http_code}' http://127.0.0.1:8000/healthz || true)"
+            if [ "${code}" = "200" ]; then
+              echo "/healthz returned 200 after ${i}s"
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "::error::/healthz never returned 200" >&2
+          exit 1
+
+      # Publish only on release tags — never on PRs or branch pushes.
+      - name: Publish app image
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: deploy/single/Dockerfile
+          push: true
+          tags: |
+            ${{ env.IMAGE }}:${{ github.sha }}
+            ${{ env.IMAGE }}:${{ github.ref_name }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
