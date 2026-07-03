@@ -251,6 +251,20 @@ def _http_error(
     return HTTPException(status_code=status_code, detail=detail)
 
 
+# Service errors that legitimately map to a 4xx client response. Only
+# these are caught around service calls; every other exception (a bare
+# ValueError bug-guard, a RuntimeError from a data-integrity check, …)
+# propagates to the app's default 500 handler instead of being masked
+# as a 422 validation error.
+_SERVICE_CLIENT_ERRORS: tuple[type[Exception], ...] = (
+    service.InstructionNotFound,
+    service.InstructionPermissionDenied,
+    service.ArchivedInstructionError,
+    service.ScopeValidationError,
+    service.TagValidationError,
+)
+
+
 def _http_for_service_error(exc: Exception) -> HTTPException:
     if isinstance(exc, HTTPException):
         return exc
@@ -282,12 +296,6 @@ def _http_for_service_error(exc: Exception) -> HTTPException:
                 "field": exc.field,
                 "limit": exc.limit,
             },
-        )
-    if isinstance(exc, ValueError):
-        return _http_error(
-            status.HTTP_422_UNPROCESSABLE_ENTITY,
-            "validation",
-            message=str(exc),
         )
     return _http_error(status.HTTP_500_INTERNAL_SERVER_ERROR, "internal")
 
@@ -462,7 +470,7 @@ def create_instruction_route(
         )
     except IntegrityError as exc:
         raise _http_for_integrity_error(session, exc) from exc
-    except Exception as exc:
+    except _SERVICE_CLIENT_ERRORS as exc:
         raise _http_for_service_error(exc) from exc
     _publish_instruction_event(ctx, InstructionCreated, result.instruction.id)
     return InstructionWithRevisionPayload.from_result(result)
@@ -657,7 +665,7 @@ def patch_instruction_route(
             return InstructionWithRevisionPayload.from_result(result)
     except IntegrityError as exc:
         raise _http_for_integrity_error(session, exc) from exc
-    except Exception as exc:
+    except _SERVICE_CLIENT_ERRORS as exc:
         raise _http_for_service_error(exc) from exc
 
     instruction = _instruction_view(repo, ctx, instruction_id)
@@ -694,7 +702,7 @@ def archive_instruction_route(
 ) -> InstructionPayload:
     try:
         view = service.archive(_repo(session), ctx, instruction_id=instruction_id)
-    except Exception as exc:
+    except _SERVICE_CLIENT_ERRORS as exc:
         raise _http_for_service_error(exc) from exc
     _publish_instruction_event(ctx, InstructionArchived, instruction_id)
     return InstructionPayload.from_view(view)
@@ -729,7 +737,7 @@ def list_instruction_versions_route(
             limit=limit,
             cursor=decode_cursor(cursor),
         )
-    except Exception as exc:
+    except _SERVICE_CLIENT_ERRORS as exc:
         raise _http_for_service_error(exc) from exc
     return InstructionRevisionListResponse(
         data=tuple(InstructionRevisionPayload.from_view(row) for row in page.data),

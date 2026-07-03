@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
+import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session, sessionmaker
 
@@ -18,6 +19,7 @@ from app.events import (
 from app.events import (
     bus as default_event_bus,
 )
+from app.services.instructions import service
 from app.tenancy import WorkspaceContext
 from app.util.ulid import new_ulid
 from tests.unit.api.v1.identity.conftest import build_client
@@ -287,6 +289,45 @@ def test_property_scope_rejects_empty_property_ids(
 
     assert response.status_code == 422, response.text
     assert response.json()["detail"]["field"] == "property_ids"
+
+
+def test_scope_validation_error_maps_to_422(
+    owner_ctx: tuple[WorkspaceContext, sessionmaker[Session], str],
+) -> None:
+    ctx, factory, _ = owner_ctx
+    client = _client(ctx, factory)
+
+    # scope="area" without area_id is a genuine client validation error;
+    # the service raises the typed ScopeValidationError → 422.
+    response = client.post(
+        "/instructions",
+        json={**_create_payload(slug="bad-scope"), "scope": "area"},
+    )
+
+    assert response.status_code == 422, response.text
+    detail = response.json()["detail"]
+    assert detail["error"] == "scope_invalid"
+    assert detail["field"] == "area_id"
+
+
+def test_unexpected_service_valueerror_maps_to_500_not_422(
+    owner_ctx: tuple[WorkspaceContext, sessionmaker[Session], str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    ctx, factory, _ = owner_ctx
+    client = _client(ctx, factory)
+
+    def _boom(*_args: object, **_kwargs: object) -> service.InstructionResult:
+        # A bare ValueError models an unexpected server-side fault (a
+        # bug-guard tripping, a data-integrity check). It must surface
+        # as 500 so operators see it, not be masked as a 422.
+        raise ValueError("simulated server-side bug")
+
+    monkeypatch.setattr(service, "create", _boom)
+
+    response = client.post("/instructions", json=_create_payload(slug="boom"))
+
+    assert response.status_code == 500, response.text
 
 
 def test_versions_list_and_specific_version(
