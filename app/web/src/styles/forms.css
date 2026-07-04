@@ -1023,7 +1023,7 @@
 .expense-row__note { color: var(--ink-3); font-size: var(--text-body-sm); }
 .expense-row__time { color: var(--ink-3); font-size: var(--text-mono-sm); font-family: "JetBrains Mono", monospace; }
 .expense-row__side { text-align: right; display: flex; flex-direction: column; align-items: flex-end; gap: var(--space-2); }
-.expense-row__amount { font-family: "Fraunces", serif; font-weight: 600; }
+.expense-row__amount { font-family: "Fraunces", serif; font-weight: 600; font-variant-numeric: tabular-nums; }
 .expense-row__owed {
   font-size: var(--text-mono-sm);
   color: var(--ink-3);
@@ -1032,7 +1032,7 @@
 
 .reimbursement-totals { list-style: none; padding: 0; margin: var(--space-4) 0 0; display: flex; flex-direction: column; gap: var(--space-3); }
 .reimbursement-totals__row { display: flex; justify-content: space-between; align-items: baseline; padding: var(--space-5) var(--space-6); border: 1px solid var(--line); border-radius: var(--radius-card); background: var(--card); }
-.reimbursement-totals__amount { font-family: "Fraunces", serif; font-weight: 600; font-size: 20px; }
+.reimbursement-totals__amount { font-family: "Fraunces", serif; font-weight: 600; font-size: 20px; font-variant-numeric: tabular-nums; }
 .reimbursement-totals__ccy { font-family: "JetBrains Mono", monospace; font-size: var(--text-mono-sm); color: var(--ink-3); letter-spacing: 0.04em; }
 
 .thread-list { list-style: none; padding: 0; margin: 0; }

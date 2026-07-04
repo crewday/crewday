@@ -21,9 +21,9 @@
 }
 .llm-graph-alert code { font-size: var(--text-label-sm); margin: 0 var(--space-2); }
 .llm-graph-alert__sub { margin-top: var(--space-2); color: var(--ink-3); font-size: var(--text-label-sm); }
-.llm-graph-alert--warn { border-color: var(--sand, #c89a4a); background: var(--sand-soft, #faf2e4); }
+.llm-graph-alert--warn { border-color: var(--sand); background: var(--sand-soft); }
 .llm-graph-alert--error { border-color: var(--rust); background: var(--rust-soft); }
-.llm-graph-alert--info { border-color: var(--sky, #9bb8d9); background: var(--sky-soft, #eaf2fb); }
+.llm-graph-alert--info { border-color: var(--sky); background: var(--sky-soft); }
 
 .llm-graph-toolbar {
   display: flex;
@@ -388,6 +388,7 @@
   color: var(--ink-2);
   font-size: 11.5px;
   white-space: nowrap;
+  font-variant-numeric: tabular-nums;
 }
 .llm-graph-node > .llm-usage-total,
 .llm-graph-node__button > .llm-usage-total {
@@ -1197,9 +1198,9 @@
 .llm-playground__status {
   margin: 0;
   padding: 9px 11px;
-  border: 1px solid var(--sky, #9bb8d9);
+  border: 1px solid var(--sky);
   border-radius: var(--radius-card);
-  background: var(--sky-soft, #eaf2fb);
+  background: var(--sky-soft);
   color: var(--ink-2);
   font-size: var(--text-body-sm);
 }
@@ -1411,9 +1412,9 @@
 .llm-assignment-dialog__empty {
   margin: 0;
   padding: var(--space-5) var(--space-6);
-  border: 1px solid var(--sand, #c89a4a);
+  border: 1px solid var(--sand);
   border-radius: var(--radius-card);
-  background: var(--sand-soft, #faf2e4);
+  background: var(--sand-soft);
   color: var(--ink-2);
   font-size: var(--text-body-sm);
   line-height: 1.45;
@@ -1579,8 +1580,8 @@
   cursor: grabbing;
 }
 .llm-assignment-provider-model.is-incompatible {
-  border-color: var(--rust, #b04a27);
-  background: var(--rust-soft, #f7e9e3);
+  border-color: var(--rust);
+  background: var(--rust-soft);
 }
 .llm-assignment-provider-model__handle {
   display: inline-flex;
@@ -1744,7 +1745,7 @@
 
 .llm-graph__edge {
   fill: none;
-  stroke: var(--ink-3, #8a8679);
+  stroke: var(--ink-3);
   stroke-width: 1.5;
   stroke-opacity: 0.55;
   transition: stroke 120ms ease, stroke-width 120ms ease, stroke-opacity 120ms ease;

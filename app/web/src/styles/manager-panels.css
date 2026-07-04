@@ -166,6 +166,7 @@
   font-family: "Fraunces", serif; font-weight: 700;
   font-size: 1.75rem; line-height: 1; letter-spacing: -0.02em;
   font-variation-settings: "opsz" 72;
+  font-variant-numeric: tabular-nums;
 }
 .expense-approval__currency { color: var(--ink-3); font-size: var(--text-mono-sm); }
 .expense-approval__body { min-width: 0; }

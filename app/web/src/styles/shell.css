@@ -150,7 +150,7 @@
 }
 .field--inline > span { font-size: var(--text-body-sm); color: var(--ink-2); }
 
-.task-card--personal { border-left: 3px solid var(--sky, #9bb8d9); }
+.task-card--personal { border-left: 3px solid var(--sky); }
 
 /* Shared "Me" page container. Renders inside `.phone__body` (worker
    PWA) and `.desk__main` (manager shell) with the same panel
