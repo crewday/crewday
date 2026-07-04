@@ -1226,3 +1226,108 @@ def test_dispatch_caller_content_type_collapses_case_insensitively() -> None:
     assert result.body["content_type"] == "application/json; charset=utf-8"
     # And Authorization is still owned by the dispatcher.
     assert result.body["authorization"] == "Bearer mip_FAKEKEY_FAKESECRET"
+
+
+# ---------------------------------------------------------------------------
+# resolve_underlying_action (cd-9tsjw)
+# ---------------------------------------------------------------------------
+
+
+def _resolver_app() -> FastAPI:
+    """FastAPI app with workspace-, property-, and un-gated agent routes."""
+    app = FastAPI()
+    router = APIRouter()
+    ws_gate = Depends(Permission("tasks.create", scope_kind="workspace"))
+    prop_gate = Depends(
+        Permission(
+            "tasks.create",
+            scope_kind="property",
+            scope_id_from_path="property_id",
+        )
+    )
+
+    @router.post(
+        "/w/{slug}/api/v1/ws-thing",
+        operation_id="ws_thing",
+        dependencies=[ws_gate],
+        openapi_extra={"x-cli": _x_cli("ws", "create")},
+    )
+    def ws_thing(slug: str, body: dict[str, Any]) -> dict[str, str]:
+        return {"slug": slug}
+
+    @router.post(
+        "/w/{slug}/api/v1/props/{property_id}/thing",
+        operation_id="prop_thing",
+        dependencies=[prop_gate],
+        openapi_extra={"x-cli": _x_cli("prop", "create")},
+    )
+    def prop_thing(slug: str, property_id: str, body: dict[str, Any]) -> dict[str, str]:
+        return {"slug": slug, "property_id": property_id}
+
+    @router.post(
+        "/w/{slug}/api/v1/open-thing",
+        operation_id="open_thing",
+        openapi_extra={"x-cli": _x_cli("open", "create")},
+    )
+    def open_thing(slug: str, body: dict[str, Any]) -> dict[str, str]:
+        return {"slug": slug}
+
+    app.include_router(router)
+    return app
+
+
+def _resolver_dispatcher() -> OpenAPIToolDispatcher:
+    app = _resolver_app()
+    return OpenAPIToolDispatcher(
+        app=app,
+        openapi=app.openapi(),
+        workspace_slug="ws",
+        session=object(),
+        ctx=_workspace_ctx(),
+    )
+
+
+def test_resolve_underlying_action_workspace_scope_uses_ctx() -> None:
+    dispatcher = _resolver_dispatcher()
+    ref = dispatcher.resolve_underlying_action(
+        ToolCall(id="c1", name="ws_thing", input={})
+    )
+    assert ref is not None
+    assert ref.action_key == "tasks.create"
+    assert ref.scope_kind == "workspace"
+    assert ref.scope_id == "ws_001"
+
+
+def test_resolve_underlying_action_property_scope_reads_input() -> None:
+    dispatcher = _resolver_dispatcher()
+    ref = dispatcher.resolve_underlying_action(
+        ToolCall(id="c2", name="prop_thing", input={"property_id": "prop_9"})
+    )
+    assert ref is not None
+    assert ref.action_key == "tasks.create"
+    assert ref.scope_kind == "property"
+    assert ref.scope_id == "prop_9"
+
+
+def test_resolve_underlying_action_property_scope_missing_input_is_none() -> None:
+    dispatcher = _resolver_dispatcher()
+    ref = dispatcher.resolve_underlying_action(
+        ToolCall(id="c3", name="prop_thing", input={})
+    )
+    assert ref is None
+
+
+def test_resolve_underlying_action_ungated_route_is_none() -> None:
+    dispatcher = _resolver_dispatcher()
+    ref = dispatcher.resolve_underlying_action(
+        ToolCall(id="c4", name="open_thing", input={})
+    )
+    assert ref is None
+
+
+def test_resolve_underlying_action_unknown_tool_is_none() -> None:
+    dispatcher = _resolver_dispatcher()
+    ref = dispatcher.resolve_underlying_action(
+        ToolCall(id="c5", name="does_not_exist", input={})
+    )
+    assert ref is None

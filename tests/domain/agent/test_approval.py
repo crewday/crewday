@@ -40,6 +40,7 @@ from app.adapters.llm.ports import Tool
 from app.domain.agent.approval import (
     EXPIRED_DECISION_NOTE,
     MAX_PAGE_LIMIT,
+    ApprovalDecisionForbidden,
     ApprovalDecisionOptions,
     ApprovalNotFound,
     ApprovalNotPending,
@@ -56,6 +57,7 @@ from app.domain.agent.runtime import (
     DelegatedToken,
     ToolCall,
     ToolResult,
+    UnderlyingActionRef,
 )
 from app.domain.errors import Validation
 from app.domain.messaging.notifications import NotificationKind
@@ -178,14 +180,24 @@ def _seed_pending(
     inline_channel: str = "web_owner_sidebar",
     expires_at: datetime | None = None,
     created_at: datetime | None = None,
+    underlying_action: UnderlyingActionRef | None = None,
 ) -> ApprovalRequest:
     """Insert one pending :class:`ApprovalRequest` for tests.
 
     Mirrors the runtime's ``_write_approval_request`` shape so the
-    consumer's reads land on the same key set.
+    consumer's reads land on the same key set. ``underlying_action``
+    stamps the cd-9tsjw recorded-capability keys; leaving it ``None``
+    reproduces a pre-cd-9tsjw row (no reference recorded).
     """
     row_id = new_ulid(clock=clock)
     now = created_at or clock.now()
+    recorded: dict[str, str] = {}
+    if underlying_action is not None:
+        recorded = {
+            "underlying_action_key": underlying_action.action_key,
+            "underlying_scope_kind": underlying_action.scope_kind,
+            "underlying_scope_id": underlying_action.scope_id,
+        }
     row = ApprovalRequest(
         id=row_id,
         workspace_id=workspace_id,
@@ -198,6 +210,7 @@ def _seed_pending(
             "card_risk": "low",
             "pre_approval_source": "manual",
             "agent_correlation_id": new_ulid(),
+            **recorded,
         },
         status="pending",
         decided_by=None,
@@ -215,6 +228,46 @@ def _seed_pending(
         session.add(row)
         session.flush()
     return row
+
+
+def _grant_manager(
+    session: Session,
+    *,
+    workspace_id: str,
+    user_id: str,
+    clock: FrozenClock,
+) -> None:
+    """Grant ``user_id`` a live workspace ``manager`` role.
+
+    ``tasks.skip_other`` (the cancel-task capability) has
+    ``default_allow=(owners, managers)``, so a manager grant makes the
+    deciding user *capable* under :func:`app.authz.enforce.require`; a
+    user without any grant is *incapable*.
+    """
+    from app.adapters.db.authz.models import RoleGrant
+
+    row = RoleGrant(
+        id=new_ulid(),
+        workspace_id=workspace_id,
+        user_id=user_id,
+        grant_role="manager",
+        scope_kind="workspace",
+        scope_property_id=None,
+        created_at=clock.now(),
+        created_by_user_id=None,
+    )
+    with tenant_agnostic():
+        session.add(row)
+        session.flush()
+
+
+def _skip_other_ref(workspace_id: str) -> UnderlyingActionRef:
+    """Workspace-scoped ``tasks.skip_other`` reference used by cd-9tsjw tests."""
+    return UnderlyingActionRef(
+        action_key="tasks.skip_other",
+        scope_kind="workspace",
+        scope_id=workspace_id,
+    )
 
 
 def _make_replay(
@@ -1069,3 +1122,173 @@ def test_from_row_falls_back_to_rationale_md_for_legacy_rows(
 
     view = ApprovalView.from_row(pending)
     assert view.decision_note_md == "legacy reviewer note"
+
+
+# ---------------------------------------------------------------------------
+# cd-9tsjw — recorded underlying capability: list pre-filter + deny gate
+# ---------------------------------------------------------------------------
+
+
+def test_list_pending_omits_incapable_own_conversation_card(
+    db_session: Session,
+    clock: FrozenClock,
+) -> None:
+    """A recorded card is shown to a capable decider, hidden from an
+    incapable one — no dead/403 card renders (cd-9tsjw)."""
+    workspace = seed_workspace(db_session)
+    capable_user = seed_user(db_session)
+    incapable_user = seed_user(db_session)
+    _grant_manager(
+        db_session, workspace_id=workspace.id, user_id=capable_user, clock=clock
+    )
+    # One own-conversation card per user, each recording the same
+    # workspace-scoped ``tasks.skip_other`` capability.
+    _seed_pending(
+        db_session,
+        workspace_id=workspace.id,
+        requester_actor_id=capable_user,
+        for_user_id=capable_user,
+        clock=clock,
+        underlying_action=_skip_other_ref(workspace.id),
+    )
+    _seed_pending(
+        db_session,
+        workspace_id=workspace.id,
+        requester_actor_id=incapable_user,
+        for_user_id=incapable_user,
+        clock=clock,
+        underlying_action=_skip_other_ref(workspace.id),
+    )
+
+    capable_ctx = build_context(
+        workspace.id, slug=workspace.slug, actor_id=capable_user
+    )
+    set_current(capable_ctx)
+    capable_page = list_pending(capable_ctx, session=db_session)
+    assert [v.for_user_id for v in capable_page.data] == [capable_user]
+
+    incapable_ctx = build_context(
+        workspace.id, slug=workspace.slug, actor_id=incapable_user
+    )
+    set_current(incapable_ctx)
+    incapable_page = list_pending(incapable_ctx, session=db_session)
+    # The incapable user owns their card but cannot perform the
+    # underlying action → the card is pre-filtered out.
+    assert incapable_page.data == ()
+
+
+def test_list_pending_keeps_card_without_recorded_action(
+    db_session: Session,
+    clock: FrozenClock,
+) -> None:
+    """A pre-cd-9tsjw row (no recorded reference) still renders even for
+    a user who lacks the underlying capability — backward-compat."""
+    workspace = seed_workspace(db_session)
+    incapable_user = seed_user(db_session)
+    row = _seed_pending(
+        db_session,
+        workspace_id=workspace.id,
+        requester_actor_id=incapable_user,
+        for_user_id=incapable_user,
+        clock=clock,
+        # No ``underlying_action`` → no recorded keys.
+    )
+    ctx = build_context(workspace.id, slug=workspace.slug, actor_id=incapable_user)
+    set_current(ctx)
+    page = list_pending(ctx, session=db_session)
+    assert [v.id for v in page.data] == [row.id]
+
+
+def test_deny_forbidden_for_incapable_user(
+    db_session: Session,
+    bus: EventBus,
+    clock: FrozenClock,
+) -> None:
+    """deny() 403s when the recorded capability is one the deciding user
+    cannot perform (cd-9tsjw), leaving the row pending."""
+    workspace = seed_workspace(db_session)
+    incapable_user = seed_user(db_session)
+    pending = _seed_pending(
+        db_session,
+        workspace_id=workspace.id,
+        requester_actor_id=incapable_user,
+        for_user_id=incapable_user,
+        clock=clock,
+        underlying_action=_skip_other_ref(workspace.id),
+    )
+    ctx = build_context(workspace.id, slug=workspace.slug, actor_id=incapable_user)
+    set_current(ctx)
+
+    with pytest.raises(ApprovalDecisionForbidden):
+        deny(
+            ctx,
+            session=db_session,
+            approval_request_id=pending.id,
+            options=ApprovalDecisionOptions(clock=clock, event_bus=bus),
+        )
+    refreshed = db_session.get(ApprovalRequest, pending.id)
+    assert refreshed is not None
+    assert refreshed.status == "pending"
+
+
+def test_deny_allowed_for_capable_user(
+    db_session: Session,
+    bus: EventBus,
+    clock: FrozenClock,
+) -> None:
+    """deny() succeeds when the deciding user holds the recorded
+    capability (cd-9tsjw)."""
+    workspace = seed_workspace(db_session)
+    capable_user = seed_user(db_session)
+    _grant_manager(
+        db_session, workspace_id=workspace.id, user_id=capable_user, clock=clock
+    )
+    pending = _seed_pending(
+        db_session,
+        workspace_id=workspace.id,
+        requester_actor_id=capable_user,
+        for_user_id=capable_user,
+        clock=clock,
+        underlying_action=_skip_other_ref(workspace.id),
+    )
+    ctx = build_context(workspace.id, slug=workspace.slug, actor_id=capable_user)
+    set_current(ctx)
+
+    view = deny(
+        ctx,
+        session=db_session,
+        approval_request_id=pending.id,
+        decision_note_md="not now",
+        options=ApprovalDecisionOptions(clock=clock, event_bus=bus),
+    )
+    assert view.status == "rejected"
+
+
+def test_deny_without_recorded_action_stays_own_conversation_only(
+    db_session: Session,
+    bus: EventBus,
+    clock: FrozenClock,
+) -> None:
+    """A pre-cd-9tsjw row (no recorded reference) is deniable by its
+    conversation owner even without the underlying capability —
+    backward-compat (the safe legacy own-conversation-only behaviour)."""
+    workspace = seed_workspace(db_session)
+    incapable_user = seed_user(db_session)
+    pending = _seed_pending(
+        db_session,
+        workspace_id=workspace.id,
+        requester_actor_id=incapable_user,
+        for_user_id=incapable_user,
+        clock=clock,
+        # No recorded reference.
+    )
+    ctx = build_context(workspace.id, slug=workspace.slug, actor_id=incapable_user)
+    set_current(ctx)
+
+    view = deny(
+        ctx,
+        session=db_session,
+        approval_request_id=pending.id,
+        options=ApprovalDecisionOptions(clock=clock, event_bus=bus),
+    )
+    assert view.status == "rejected"

@@ -45,7 +45,9 @@ from app.domain.agent.preferences import PreferenceUpdate, save_preference
 from app.domain.agent.runtime import (
     APPROVAL_REQUEST_TTL,
     GateDecision,
+    ToolCall,
     ToolResult,
+    UnderlyingActionRef,
     _default_system_prompt,
     run_turn,
 )
@@ -834,6 +836,107 @@ def test_gated_write_tool_creates_approval_request_and_pauses(
     )
     assert isinstance(finished, AgentTurnFinished)
     assert finished.outcome == "action"
+
+
+class _ResolvingDispatcher(FakeToolDispatcher):
+    """A :class:`FakeToolDispatcher` that also resolves the underlying
+    action (cd-9tsjw), mirroring the production OpenAPI dispatcher."""
+
+    def resolve_underlying_action(self, call: ToolCall) -> UnderlyingActionRef | None:
+        return UnderlyingActionRef(
+            action_key="payroll.issue_payslip",
+            scope_kind="workspace",
+            scope_id="ws-payroll-scope",
+        )
+
+
+def test_gated_approval_records_underlying_action_from_resolver(
+    db_session: Session,
+    bus: EventBus,
+    clock: FrozenClock,
+) -> None:
+    """When the dispatcher can resolve the call's underlying capability,
+    the runtime stamps it onto the approval row so the consumer can
+    pre-filter + gate deny without a replay (cd-9tsjw)."""
+    _ws, ctx, channel_id = _bind_and_seed(db_session)
+    llm = ScriptedLLMClient(
+        replies=[make_tool_call_response("payroll.issue", {"engagement_id": "we_001"})]
+    )
+    dispatcher = _ResolvingDispatcher(
+        gates={
+            "payroll.issue": GateDecision(
+                gated=True,
+                card_summary="Issue payroll for we_001?",
+                card_risk="high",
+                pre_approval_source="workspace_always",
+            )
+        }
+    )
+    outcome = run_turn(
+        ctx,
+        session=db_session,
+        scope="manager",
+        thread_id=channel_id,
+        user_message="Issue payroll",
+        trigger="event",
+        llm_client=llm,
+        tool_dispatcher=dispatcher,
+        token_factory=FakeTokenFactory(),
+        agent_label=_AGENT_LABEL,
+        capability=_CAPABILITY,
+        event_bus=bus,
+        clock=clock,
+    )
+    assert outcome.approval_request_id is not None
+    approval = db_session.get(ApprovalRequest, outcome.approval_request_id)
+    assert approval is not None
+    payload = approval.action_json
+    assert payload["underlying_action_key"] == "payroll.issue_payslip"
+    assert payload["underlying_scope_kind"] == "workspace"
+    assert payload["underlying_scope_id"] == "ws-payroll-scope"
+
+
+def test_gated_approval_omits_underlying_action_without_resolver(
+    db_session: Session,
+    bus: EventBus,
+    clock: FrozenClock,
+) -> None:
+    """A dispatcher that cannot resolve the underlying action leaves the
+    keys off the row — the consumer falls back to the replay check
+    (cd-9tsjw backward-compat)."""
+    _ws, ctx, channel_id = _bind_and_seed(db_session)
+    llm = ScriptedLLMClient(
+        replies=[make_tool_call_response("payroll.issue", {"engagement_id": "we_001"})]
+    )
+    dispatcher = FakeToolDispatcher(
+        gates={
+            "payroll.issue": GateDecision(
+                gated=True,
+                card_summary="Issue payroll for we_001?",
+                card_risk="high",
+                pre_approval_source="workspace_always",
+            )
+        }
+    )
+    outcome = run_turn(
+        ctx,
+        session=db_session,
+        scope="manager",
+        thread_id=channel_id,
+        user_message="Issue payroll",
+        trigger="event",
+        llm_client=llm,
+        tool_dispatcher=dispatcher,
+        token_factory=FakeTokenFactory(),
+        agent_label=_AGENT_LABEL,
+        capability=_CAPABILITY,
+        event_bus=bus,
+        clock=clock,
+    )
+    assert outcome.approval_request_id is not None
+    approval = db_session.get(ApprovalRequest, outcome.approval_request_id)
+    assert approval is not None
+    assert "underlying_action_key" not in approval.action_json
 
 
 # ---------------------------------------------------------------------------

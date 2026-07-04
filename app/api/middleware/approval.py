@@ -19,6 +19,7 @@ from app.adapters.db.llm.models import ApprovalRequest
 from app.adapters.db.messaging.audiences import list_owner_manager_user_ids
 from app.adapters.db.messaging.repositories import SqlAlchemyEmailDeliveryRepository
 from app.adapters.db.session import make_uow
+from app.adapters.db.tasks.models import Occurrence
 from app.adapters.llm.ports import Tool
 from app.adapters.mail.null import NullMailer
 from app.api.errors import problem_response
@@ -33,6 +34,7 @@ from app.domain.agent.runtime import (
     ToolCall,
     ToolDispatcher,
     ToolResult,
+    UnderlyingActionRef,
 )
 from app.domain.errors import Validation
 from app.domain.messaging.broadcasts import (
@@ -106,6 +108,7 @@ class AgentApprovalMiddleware(BaseHTTPMiddleware):
             ctx,
             actor=actor,
             action=action,
+            target=target,
         )
         return _approval_required_response(request, approval_id, expires_at)
 
@@ -174,11 +177,49 @@ def _approval_mode(actor_id: str) -> str:
         return mode if mode in {"bypass", "auto", "strict"} else "auto"
 
 
+def _cancel_task_underlying_action(
+    session: Session,
+    *,
+    ctx: WorkspaceContext,
+    task_id: str,
+) -> UnderlyingActionRef | None:
+    """Resolve the §05 capability a ``cancel_task`` approval exercises (cd-9tsjw).
+
+    Mirrors ``cancel_task_route`` in
+    :mod:`app.api.v1.tasks.occurrences`: task cancellation enforces
+    ``tasks.skip_other`` scoped to the task's property (workspace scope
+    when the task carries no property). Returns ``None`` when the task
+    row is gone (a stale strict-mode queue attempt) so the consumer
+    falls back to own-conversation ownership + the approve-time replay.
+    """
+    row = session.execute(
+        select(Occurrence.property_id).where(
+            Occurrence.id == task_id,
+            Occurrence.workspace_id == ctx.workspace_id,
+        )
+    ).one_or_none()
+    if row is None:
+        return None
+    property_id = row[0]
+    if property_id is None:
+        return UnderlyingActionRef(
+            action_key="tasks.skip_other",
+            scope_kind="workspace",
+            scope_id=ctx.workspace_id,
+        )
+    return UnderlyingActionRef(
+        action_key="tasks.skip_other",
+        scope_kind="property",
+        scope_id=property_id,
+    )
+
+
 def _write_pending_approval(
     ctx: WorkspaceContext,
     *,
     actor: ActorIdentity,
     action: _ApprovalAction,
+    target: _ApprovalTarget,
 ) -> tuple[str, datetime]:
     clock = SystemClock()
     created_at = clock.now()
@@ -188,6 +229,11 @@ def _write_pending_approval(
         make_uow() as session
     ):  # code-health: ignore[duplicate] Approval tools keep replay branches explicit.  # noqa: E501
         assert isinstance(session, Session)
+        underlying_action = _cancel_task_underlying_action(
+            session,
+            ctx=ctx,
+            task_id=target.task_id,
+        )
         row = ApprovalRequest(
             id=approval_id,
             workspace_id=ctx.workspace_id,
@@ -200,6 +246,7 @@ def _write_pending_approval(
                 "card_risk": action.card_risk,
                 "pre_approval_source": "user_strict_mutation",
                 "requested_by_token_id": actor.token_id,
+                **(underlying_action.to_action_json() if underlying_action else {}),
             },
             status="pending",
             decided_by=None,

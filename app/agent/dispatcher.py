@@ -73,6 +73,7 @@ from app.domain.agent.runtime import (
     GateDecision,
     ToolCall,
     ToolResult,
+    UnderlyingActionRef,
 )
 from app.tenancy import WorkspaceContext
 
@@ -893,6 +894,59 @@ class OpenAPIToolDispatcher:
         if entry is None:
             return _humanize_identifier(call.name)
         return _tool_activity_label(call.name, entry.operation)
+
+    def resolve_underlying_action(self, call: ToolCall) -> UnderlyingActionRef | None:
+        """Resolve the §05 capability ``call`` would exercise (cd-9tsjw).
+
+        Reads the route's declarative :func:`app.authz.dep.Permission`
+        metadata off :attr:`_permission_index`. Returns ``None`` —
+        deferring to the approve-time replay capability check — when the
+        tool is unknown / off the workspace-agent surface, carries no
+        declarative permission gate (a route that calls
+        :func:`app.authz.require` inline cannot be mapped statically),
+        declares more than one gate (multi-action route, no single key),
+        or targets a scope this dispatcher cannot resolve without a DB
+        read. The recorded reference feeds
+        :func:`app.authz.enforce.require` verbatim, so it must name the
+        exact scope the route would gate.
+        """
+        entry = self._index.get(call.name)
+        if entry is None or _workspace_agent_rejection(entry) is not None:
+            return None
+        requirements = self._permission_index.get(call.name)
+        if requirements is None or len(requirements) != 1:
+            return None
+        requirement = requirements[0]
+        scope_id = self._resolve_underlying_scope_id(requirement, call)
+        if scope_id is None:
+            return None
+        return UnderlyingActionRef(
+            action_key=requirement.action_key,
+            scope_kind=requirement.scope_kind,
+            scope_id=scope_id,
+        )
+
+    def _resolve_underlying_scope_id(
+        self,
+        requirement: _PermissionRequirement,
+        call: ToolCall,
+    ) -> str | None:
+        """Resolve a requirement's ``scope_id`` for ``call``, or ``None``.
+
+        Mirrors :func:`app.authz.dep.Permission`'s scope resolution: a
+        ``scope_id_from_path`` gate reads the target id from the call
+        input (the same value the route would pull off its path param);
+        a bare workspace gate uses the dispatcher's pinned
+        :class:`WorkspaceContext`. Any other shape (non-workspace gate
+        without a path source, missing input, no ctx) is unresolvable
+        here and falls back to the approve-time replay check.
+        """
+        if requirement.scope_id_from_path is not None:
+            raw = call.input.get(requirement.scope_id_from_path)
+            return raw if isinstance(raw, str) and raw else None
+        if requirement.scope_kind == "workspace" and self._ctx is not None:
+            return self._ctx.workspace_id
+        return None
 
     # -- internals -----------------------------------------------------
 

@@ -156,12 +156,20 @@ def _scoped_sweep(
             workspace_ids=(workspace_id,),
             user_ids=user_ids,
         )
-        # Workspace-scoped governance / membership.
+        # Workspace-scoped governance / membership. ``ApprovalRequest``
+        # + ``Notification`` are swept explicitly (the strict-mode gate
+        # commits both to the shared engine): the ORM ``Workspace``
+        # delete below does not cascade to them under SQLite's default
+        # FK-off pragma, so a leftover approval row would leak into a
+        # sibling test that snapshots this engine file and asserts a
+        # global approval count.
         for model in (
             RoleGrant,
             PermissionGroupMember,
             PermissionGroup,
             UserWorkspace,
+            ApprovalRequest,
+            Notification,
         ):
             for row in s.scalars(
                 select(model).where(model.workspace_id == workspace_id)

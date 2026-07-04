@@ -39,9 +39,12 @@ from app.adapters.db.places.models import Property
 from app.adapters.db.session import FilteredSession, make_engine
 from app.adapters.db.tasks.models import Occurrence
 from app.adapters.db.workspace.models import Workspace
-from app.api.middleware.approval import InProcessApprovalDispatcher
+from app.api.middleware.approval import (
+    InProcessApprovalDispatcher,
+    _cancel_task_underlying_action,
+)
 from app.domain.agent.runtime import DelegatedToken, ToolCall, ToolResult
-from app.tenancy import tenant_agnostic
+from app.tenancy import WorkspaceContext, tenant_agnostic
 from app.util.ulid import new_ulid
 from tests.factories.identity import bootstrap_user
 
@@ -182,6 +185,122 @@ def _seed_task(
         )
         s.commit()
         return oid
+
+
+def _seed_scoped_task(
+    factory: sessionmaker[Session],
+    *,
+    workspace_id: str,
+    with_property: bool,
+) -> tuple[str, str | None]:
+    """Insert a task; return ``(task_id, property_id)`` (pid ``None`` when
+    workspace-scoped)."""
+    with factory() as s, tenant_agnostic():
+        pid: str | None = None
+        if with_property:
+            pid = new_ulid()
+            s.add(
+                Property(
+                    id=pid,
+                    address="1 Villa Sud Way",
+                    timezone="Europe/Paris",
+                    tags_json=[],
+                    created_at=_PINNED,
+                )
+            )
+        oid = new_ulid()
+        s.add(
+            Occurrence(
+                id=oid,
+                workspace_id=workspace_id,
+                schedule_id=None,
+                template_id=None,
+                property_id=pid,
+                assignee_user_id=None,
+                starts_at=_PINNED,
+                ends_at=_PINNED + timedelta(minutes=30),
+                scheduled_for_local="2026-05-05T14:00",
+                originally_scheduled_for="2026-05-05T14:00",
+                state="pending",
+                overdue_since=None,
+                due_by_utc=None,
+                completion_note_md=None,
+                skipped_reason=None,
+                cancellation_reason=None,
+                title="Pool clean",
+                description_md="",
+                priority="normal",
+                photo_evidence="disabled",
+                duration_minutes=30,
+                area_id=None,
+                unit_id=None,
+                expected_role_id=None,
+                asset_id=None,
+                asset_action_id=None,
+                linked_instruction_ids=[],
+                inventory_consumption_json={},
+                is_personal=False,
+                created_by_user_id=None,
+                created_at=_PINNED,
+            )
+        )
+        s.commit()
+        return oid, pid
+
+
+def _cancel_ctx(workspace_id: str, slug: str) -> WorkspaceContext:
+    return WorkspaceContext(
+        workspace_id=workspace_id,
+        workspace_slug=slug,
+        actor_id=new_ulid(),
+        actor_kind="user",
+        actor_grant_role="manager",
+        actor_was_owner_member=True,
+        audit_correlation_id=new_ulid(),
+    )
+
+
+def test_cancel_task_underlying_action_workspace_scoped(
+    factory: sessionmaker[Session],
+) -> None:
+    """A workspace-scoped task cancel records ``tasks.skip_other`` at
+    workspace scope (cd-9tsjw path-2 resolution)."""
+    ws_id, _owner = _seed_workspace(factory, slug="cancel-ws")
+    task_id, _pid = _seed_scoped_task(factory, workspace_id=ws_id, with_property=False)
+    ctx = _cancel_ctx(ws_id, "cancel-ws")
+    with factory() as s:
+        ref = _cancel_task_underlying_action(s, ctx=ctx, task_id=task_id)
+    assert ref is not None
+    assert ref.action_key == "tasks.skip_other"
+    assert ref.scope_kind == "workspace"
+    assert ref.scope_id == ws_id
+
+
+def test_cancel_task_underlying_action_property_scoped(
+    factory: sessionmaker[Session],
+) -> None:
+    """A property-scoped task cancel records ``tasks.skip_other`` scoped to
+    the task's property (cd-9tsjw path-2 resolution)."""
+    ws_id, _owner = _seed_workspace(factory, slug="cancel-prop")
+    task_id, pid = _seed_scoped_task(factory, workspace_id=ws_id, with_property=True)
+    ctx = _cancel_ctx(ws_id, "cancel-prop")
+    with factory() as s:
+        ref = _cancel_task_underlying_action(s, ctx=ctx, task_id=task_id)
+    assert ref is not None
+    assert ref.scope_kind == "property"
+    assert ref.scope_id == pid
+
+
+def test_cancel_task_underlying_action_missing_task_is_none(
+    factory: sessionmaker[Session],
+) -> None:
+    """A cancel targeting a nonexistent task resolves to ``None`` — the
+    consumer falls back to own-conversation ownership + replay."""
+    ws_id, _owner = _seed_workspace(factory, slug="cancel-missing")
+    ctx = _cancel_ctx(ws_id, "cancel-missing")
+    with factory() as s:
+        ref = _cancel_task_underlying_action(s, ctx=ctx, task_id=new_ulid())
+    assert ref is None
 
 
 def _dispatch(call: ToolCall, *, headers: dict[str, str]) -> ToolResult:

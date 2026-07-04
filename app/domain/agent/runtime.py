@@ -123,7 +123,7 @@ import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime, timedelta
-from typing import Final, Literal, Protocol
+from typing import Final, Literal, Protocol, runtime_checkable
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -197,6 +197,8 @@ __all__ = [
     "ToolResult",
     "TurnOutcome",
     "TurnTrigger",
+    "UnderlyingActionRef",
+    "UnderlyingActionResolver",
     "run_turn",
 ]
 
@@ -401,9 +403,95 @@ class GateDecision:
     pre_approval_source: str = ""
 
 
+@dataclass(frozen=True, slots=True)
+class UnderlyingActionRef:
+    """The §05 capability a gated tool call would exercise (cd-9tsjw).
+
+    An agent HITL card is decidable *iff the deciding user could perform
+    the same underlying action through the normal UI* (§11 "Approval
+    decisions"). To pre-filter dead cards and gate ``deny`` by that rule
+    without a full tool-call replay, the runtime records the resolved
+    ``(action_key, scope_kind, scope_id)`` on the approval row at gate
+    time; the consumer feeds it straight to
+    :func:`app.authz.enforce.require`.
+
+    Resolved by :meth:`UnderlyingActionResolver.resolve_underlying_action`
+    at creation time. ``None`` there (unknown tool, multi-action, or a
+    scope only knowable after a DB read) leaves the fields off the row —
+    the consumer falls back to own-conversation ownership + the
+    approve-time replay check.
+    """
+
+    action_key: str
+    scope_kind: str
+    scope_id: str
+
+    def to_action_json(self) -> dict[str, str]:
+        """Project the reference into ``ApprovalRequest.action_json`` keys.
+
+        Single source of the on-row key names shared by both creation
+        paths (runtime + strict-mutation middleware) and the consumer
+        reader :meth:`from_action_json`.
+        """
+        return {
+            "underlying_action_key": self.action_key,
+            "underlying_scope_kind": self.scope_kind,
+            "underlying_scope_id": self.scope_id,
+        }
+
+    @classmethod
+    def from_action_json(
+        cls, action_json: Mapping[str, object]
+    ) -> UnderlyingActionRef | None:
+        """Read a reference back off ``action_json``, or ``None``.
+
+        Returns ``None`` when any key is missing or mistyped — a row
+        minted before cd-9tsjw, or a creation path that could not
+        resolve the action. Callers keep their safe fallback in that
+        case (own-conversation ownership + the approve-time replay).
+        """
+        action_key = action_json.get("underlying_action_key")
+        scope_kind = action_json.get("underlying_scope_kind")
+        scope_id = action_json.get("underlying_scope_id")
+        if (
+            isinstance(action_key, str)
+            and action_key
+            and isinstance(scope_kind, str)
+            and scope_kind
+            and isinstance(scope_id, str)
+            and scope_id
+        ):
+            return cls(
+                action_key=action_key,
+                scope_kind=scope_kind,
+                scope_id=scope_id,
+            )
+        return None
+
+
 # ---------------------------------------------------------------------------
 # Protocol seams
 # ---------------------------------------------------------------------------
+
+
+@runtime_checkable
+class UnderlyingActionResolver(Protocol):
+    """Optional dispatcher capability: resolve a call's underlying action.
+
+    A :class:`ToolDispatcher` that can map a :class:`ToolCall` back to
+    the §05 ``(action_key, scope_kind, scope_id)`` its route enforces
+    implements this so the runtime can stamp the reference on the
+    approval row (cd-9tsjw). The production
+    :class:`app.agent.dispatcher.OpenAPIToolDispatcher` resolves it from
+    the route's declarative :func:`app.authz.dep.Permission` metadata;
+    dispatchers that cannot (test doubles, replay-only dispatchers)
+    simply do not implement the method — ``isinstance`` narrows them out
+    and the row is written without the reference.
+    """
+
+    def resolve_underlying_action(self, call: ToolCall) -> UnderlyingActionRef | None:
+        """Return the call's underlying action, or ``None`` if unknowable."""
+        ...
 
 
 class TokenFactory(Protocol):
@@ -1106,6 +1194,12 @@ def _finish_approval_required(
     decision: GateDecision,
 ) -> TurnOutcome:
     run = turn.run
+    dispatcher = run.tool_dispatcher
+    underlying_action = (
+        dispatcher.resolve_underlying_action(tool_call)
+        if isinstance(dispatcher, UnderlyingActionResolver)
+        else None
+    )
     approval_id, _ = _write_approval_request(
         run.session,
         ctx=run.ctx,
@@ -1116,6 +1210,7 @@ def _finish_approval_required(
         inline_channel=_channel_header_value(run.scope),
         for_user_id=run.ctx.actor_id,
         resolved_user_mode=None,
+        underlying_action=underlying_action,
         clock=run.clock,
     )
     _notify_approval_if_requested(run, approval_id)
@@ -2050,6 +2145,7 @@ def _write_approval_request(
     inline_channel: str,
     for_user_id: str | None,
     resolved_user_mode: str | None,
+    underlying_action: UnderlyingActionRef | None = None,
     clock: Clock,
 ) -> tuple[str, datetime]:
     """Persist a ``pending`` approval row and return ``(id, expires_at)``.
@@ -2084,6 +2180,16 @@ def _write_approval_request(
       future cd-cm5 follow-up; the column is ready for the
       promotion).
 
+    ``underlying_action`` (cd-9tsjw) — the §05 capability the gated
+    call would exercise, resolved from the dispatcher at gate time.
+    When present its ``action_key`` / ``scope_kind`` / ``scope_id`` are
+    stamped into ``action_json`` so the consumer can pre-filter the
+    list and gate ``deny`` by the deciding user's capability without a
+    replay. ``None`` (unknown tool, multi-action route, or a scope only
+    knowable after a DB read) leaves the keys off; the consumer then
+    falls back to own-conversation ownership + the approve-time replay
+    capability check.
+
     The :class:`ApprovalRequest` row is written under
     :func:`tenant_agnostic` because the new row's ``workspace_id``
     matches ``ctx.workspace_id`` already; the tenant filter is
@@ -2108,6 +2214,12 @@ def _write_approval_request(
             "card_risk": decision.card_risk,
             "pre_approval_source": decision.pre_approval_source,
             "agent_correlation_id": correlation_id,
+            # The §05 capability this card exercises (cd-9tsjw). Recorded
+            # only when the dispatcher could resolve it; the consumer
+            # reads these back to pre-filter the list + gate ``deny`` by
+            # the deciding user's capability. Absent keys → fall back to
+            # own-conversation ownership + the approve-time replay check.
+            **(underlying_action.to_action_json() if underlying_action else {}),
         },
         status="pending",
         decided_by=None,

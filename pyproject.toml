@@ -544,14 +544,16 @@ ignore_imports = [
     "app.domain.time.shifts -> app.authz",
     # v1 stopgap (cd-y1ge): ``app.domain.messaging.notifications``
     # reads :class:`Notification`, :class:`PushToken`,
-    # :class:`EmailOptOut` from ``app.adapters.db.messaging.models``
-    # and :class:`User` from ``app.adapters.db.identity.models``
-    # (to resolve the recipient's locale for template rendering).
-    # Same Protocol-seam pattern as the other domain stopgaps;
-    # tracked by cd-duv6 (extended scope) — drops once the messaging
-    # repositories land.
+    # :class:`EmailOptOut` from ``app.adapters.db.messaging.models``,
+    # :class:`User` from ``app.adapters.db.identity.models``, and
+    # :attr:`Workspace.default_locale` from
+    # ``app.adapters.db.workspace.models`` (to resolve the recipient's /
+    # workspace's locale for template rendering). Same Protocol-seam
+    # pattern as the other domain stopgaps; tracked by cd-duv6 (extended
+    # scope) — drops once the messaging repositories land.
     "app.domain.messaging.notifications -> app.adapters.db.messaging.models",
     "app.domain.messaging.notifications -> app.adapters.db.identity.models",
+    "app.domain.messaging.notifications -> app.adapters.db.workspace.models",
     # v1 stopgap (cd-k0qf): ``app.domain.llm.router`` reads
     # :class:`ModelAssignment` / :class:`LlmCapabilityInheritance`
     # from ``app.adapters.db.llm.models`` directly. Same Protocol-
@@ -565,6 +567,13 @@ ignore_imports = [
     # tracked by cd-duv6 — drops once the agent runtime has repository
     # ports.
     "app.domain.agent.approval -> app.adapters.db.llm.models",
+    # cd-9tsjw: the HITL consumer runs :func:`app.authz.enforce.require`
+    # (via the ``app.authz`` facade) to pre-filter the list + gate deny
+    # by the deciding user's underlying capability. ``app.authz`` is not
+    # ``app.domain`` but transitively reaches adapters through its owners
+    # / membership SELECTs — same ``-> app.authz`` stopgap shape as the
+    # other domain services below.
+    "app.domain.agent.approval -> app.authz",
     "app.domain.agent.runtime -> app.adapters.db.llm.models",
     "app.domain.agent.runtime -> app.adapters.db.messaging.models",
     # v1 stopgap (cd-irng): ``app.domain.llm.budget`` reads

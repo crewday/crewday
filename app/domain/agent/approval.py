@@ -56,6 +56,14 @@ from app.adapters.db.llm.models import (
     ApprovalRequest,
 )
 from app.audit import write_audit
+from app.authz import (
+    ApprovalRequired,
+    InsufficientScope,
+    InvalidScope,
+    PermissionDenied,
+    UnknownActionKey,
+    require,
+)
 from app.domain.agent.notifications import (
     ApprovalNotificationSink,
     notify_approval_decided,
@@ -65,6 +73,7 @@ from app.domain.agent.runtime import (
     ToolCall,
     ToolDispatcher,
     ToolResult,
+    UnderlyingActionRef,
 )
 from app.domain.errors import Conflict, Forbidden, NotFound, Validation
 from app.events.bus import EventBus
@@ -375,8 +384,12 @@ def list_pending(
     caller may actually decide — no dead/403 cards:
 
     * **Own-conversation rows** — agent (and per-user ``strict``)
-      approvals whose ``for_user_id`` is the caller. These are always
-      included; the caller owns the conversation that proposed them.
+      approvals whose ``for_user_id`` is the caller. Included when the
+      caller could perform the card's recorded underlying action
+      themselves; a card for an action they can no longer perform is
+      pre-filtered out so no dead/403 card renders (cd-9tsjw). Rows
+      minted before that recording (no reference) are still included —
+      the approve-time replay gates them.
     * **Desk-only rows** — direct-human ``409 approval_required``
       rows (``for_user_id IS NULL``), the manager approvals desk
       queue. Included only when ``include_desk`` is true, which the
@@ -462,13 +475,24 @@ def list_pending(
 
     rows = list(session.scalars(stmt).all())
     has_more = len(rows) > effective_limit
-    if has_more:
-        rows = rows[:effective_limit]
+    scanned = rows[:effective_limit] if has_more else rows
 
-    next_cursor: str | None = rows[-1].id if has_more and rows else None
+    # Cursor rides the last *scanned* row, not the last *rendered* one:
+    # the capability pre-filter below drops rows post-fetch, so the
+    # cursor must mark where the scan reached (independent of filtering)
+    # or a filtered-out boundary row would be re-scanned / skipped on
+    # the next page. A page may therefore return fewer than ``limit``
+    # rendered cards while ``has_more`` is true — the caller pages until
+    # ``has_more`` is false (§11 "Approval decisions").
+    next_cursor: str | None = scanned[-1].id if has_more and scanned else None
+
+    # Capability pre-filter (cd-9tsjw): omit own-conversation cards whose
+    # recorded underlying action the caller can no longer perform. Desk
+    # rows and rows without a recorded reference are kept unchanged.
+    visible = [r for r in scanned if _row_is_actionable_for_caller(session, ctx, r)]
 
     return ApprovalsPage(
-        data=tuple(ApprovalView.from_row(r) for r in rows),
+        data=tuple(ApprovalView.from_row(r) for r in visible),
         next_cursor=next_cursor,
         has_more=has_more,
     )
@@ -695,6 +719,13 @@ def deny(
     Mirrors :func:`approve` minus the replay step. Writes one
     ``audit.approval.denied`` row attributed to ``ctx.actor_id``.
 
+    §11 capability gate (cd-9tsjw): beyond own-conversation ownership
+    (enforced by :func:`_load_pending`), a caller may only deny a card
+    whose recorded underlying action they could perform themselves — an
+    incapable caller raises :class:`ApprovalDecisionForbidden` (403). A
+    row minted before cd-9tsjw (no recorded reference) keeps the safe
+    own-conversation-only behaviour.
+
     A second :func:`deny` (or :func:`approve`) on the already-
     rejected row raises :class:`ApprovalNotPending`.
     """
@@ -711,6 +742,24 @@ def deny(
     )
 
     row = _load_pending(session, ctx=ctx, approval_request_id=approval_request_id)
+
+    # Capability half of the §11 rule (cd-9tsjw): a card is decidable
+    # iff the deciding user could perform the underlying action through
+    # the normal UI. ``_load_pending`` already enforced own-conversation
+    # ownership; this gates by the recorded capability via the same
+    # :func:`app.authz.enforce.require` the UI runs. A row with no
+    # recorded reference (pre-cd-9tsjw / unresolved) stays
+    # own-conversation-only — the safe legacy behaviour.
+    ref = UnderlyingActionRef.from_action_json(row.action_json)
+    if ref is not None and not _deciding_user_can_perform(session, ctx, ref):
+        raise ApprovalDecisionForbidden(
+            "the deciding user is not permitted to perform the underlying "
+            "action for this agent approval",
+            extra={
+                "approval_request_id": row.id,
+                "underlying_action_key": ref.action_key,
+            },
+        )
 
     note = _validate_decision_note(decision_note_md)
     tool_call = _tool_call_from_action(row.action_json)
@@ -910,6 +959,70 @@ def _load_pending(
             status=row.status,
         )
     return row
+
+
+def _deciding_user_can_perform(
+    session: Session,
+    ctx: WorkspaceContext,
+    ref: UnderlyingActionRef,
+) -> bool:
+    """Return whether ``ctx``'s caller may perform the recorded action.
+
+    The §11 rule (an agent is the delegating user's alternate UI) reduces
+    to: a card is decidable iff the deciding user holds the underlying
+    action's capability against its target scope. This runs the *same*
+    :func:`app.authz.enforce.require` the normal UI would, off the
+    recorded reference — no tool-call replay needed.
+
+    * allow (``None``) or ``ApprovalRequired`` (allowed but itself
+      HITL-gated) → the user *can* perform it → ``True``.
+    * :class:`PermissionDenied` / :class:`InsufficientScope` → the user
+      lacks the capability → ``False``.
+    * :class:`UnknownActionKey` / :class:`InvalidScope` → the recorded
+      reference is stale/corrupt (catalog drift), not a permission
+      verdict. We cannot prove incapability, so fail *open* (``True``)
+      and let the approve-time replay remain the backstop — hiding a
+      card from a possibly-capable user is worse than showing a rare
+      dead one.
+    """
+    try:
+        require(
+            session,
+            ctx,
+            action_key=ref.action_key,
+            scope_kind=ref.scope_kind,
+            scope_id=ref.scope_id,
+        )
+    except ApprovalRequired:
+        return True
+    except PermissionDenied, InsufficientScope:
+        return False
+    except UnknownActionKey, InvalidScope:
+        return True
+    return True
+
+
+def _row_is_actionable_for_caller(
+    session: Session,
+    ctx: WorkspaceContext,
+    row: ApprovalRequest,
+) -> bool:
+    """Return whether ``row`` should render for ``ctx``'s caller (cd-9tsjw).
+
+    Desk-only rows (``for_user_id IS NULL``) are unchanged — the API
+    seam already gated them on ``approvals.read``. Own-conversation rows
+    are pre-filtered by the recorded underlying capability: a card for an
+    action the caller can no longer perform is omitted so no dead/403
+    card renders. A row with no recorded reference (pre-cd-9tsjw or an
+    unresolved creation path) is kept — the approve-time replay still
+    gates it.
+    """
+    if row.for_user_id is None:
+        return True
+    ref = UnderlyingActionRef.from_action_json(row.action_json)
+    if ref is None:
+        return True
+    return _deciding_user_can_perform(session, ctx, ref)
 
 
 def _assert_conversation_owner(ctx: WorkspaceContext, row: ApprovalRequest) -> None:
