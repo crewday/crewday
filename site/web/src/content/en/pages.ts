@@ -162,7 +162,7 @@ export const pricingCopy = {
   intro:
     "crew.day starts with a self-hostable path for teams that want their data on their own infrastructure. Managed SaaS pricing will be published when that service is ready.",
   primaryCta: appLinks.signup,
-  secondaryCta: { label: "Read the roadmap", href: "/changelog" },
+  secondaryCta: { label: "Read the changelog", href: "/changelog" },
   sections: [
     {
       eyebrow: "Self-host",
