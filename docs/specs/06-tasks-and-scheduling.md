@@ -105,7 +105,7 @@ the no-RRULE items, if any); the task is not itself skipped.
 **Authoring UI (§14).** The template editor exposes two views:
 *Simple* (photo-required toggle + "appears every N occurrences /
 every N weeks / monthly / …") that compiles to an RRULE, and
-*Advanced* (raw RRULE field with a live "next 8 occurrences"
+*Advanced* (raw RRULE field with a live "next 5 occurrences"
 preview). Monthly simple rules support both fixed day-of-month
 patterns (`BYMONTHDAY`, e.g. day 1) and ordinal weekday patterns
 for first, second, third, fourth, or last weekday of the month

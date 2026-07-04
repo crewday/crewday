@@ -134,7 +134,6 @@ def _factory(
         return CrewdayClient(
             base_url="https://api.test.local",
             token="test-token",
-            workspace=ctx.workspace,
             transport=httpx.MockTransport(handler),
             rng=random.Random(0),
             sleep=_no_sleep,
@@ -267,7 +266,6 @@ def test_override_tasks_complete_jq_filters_output(
         return CrewdayClient(
             base_url="https://api.test.local",
             token="test-token",
-            workspace="smoke",
             transport=httpx.MockTransport(handler),
             rng=random.Random(0),
             sleep=_no_sleep,

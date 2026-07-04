@@ -2,12 +2,15 @@
 
 The root group exposes the v1 global flags from §13 "Global flags"
 and hands a fully-populated :class:`~crewday._globals.CrewdayContext`
-down to every subcommand via ``click.pass_obj``. Subcommands are not
-registered yet — the codegen pipeline (Beads ``cd-1cfg``) loads
-``_surface.json`` at import time and builds them dynamically. Until
-that lands, ``crewday --help`` lists only the globals and
-``crewday --version``, which is sufficient to verify the entry-point
-wiring end-to-end.
+down to every subcommand via ``click.pass_obj``. :func:`main` mounts
+three command layers on the root group on first invocation: the
+hand-written ``config`` profile group, the codegen-driven command tree
+that :func:`crewday._runtime.register_generated_commands` builds from
+``_surface.json`` / ``_surface_admin.json``, and the hand-written
+overrides (e.g. ``tasks complete``) that shadow generated verbs where
+the descriptor cannot model the call. Registration is lazy and
+idempotent so importing this module (for the error classes alone) does
+not pay the descriptor-load + Click-registration cost.
 
 Error handling: Click's own :class:`click.ClickException` already
 maps to a non-zero exit; :func:`main` additionally traps

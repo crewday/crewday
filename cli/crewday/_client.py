@@ -1,13 +1,11 @@
 """Sync HTTP client used by every codegen command and override.
 
 :class:`CrewdayClient` wraps :class:`httpx.Client` (sync — Click is sync,
-the future async pivot can wrap this surface) and centralises five
+the future async pivot can wrap this surface) and centralises four
 behaviours every CLI command needs:
 
 * **Auth** — adds ``Authorization: Bearer <token>`` from the active
   profile (§13 "Auth & profiles").
-* **Workspace addressing** — adds ``X-Workspace: <slug>`` for verbs that
-  target a workspace (§01 "Workspace addressing", §13 "Global flags").
 * **Retries** — three attempts on transient transport / 5xx-gateway
   errors with exponential backoff + jitter, *only* when the verb is
   idempotent or the caller supplied an explicit ``Idempotency-Key``
@@ -283,9 +281,11 @@ class CrewdayClient(AbstractContextManager["CrewdayClient"]):
     """Sync HTTP client wrapping :class:`httpx.Client`.
 
     Constructed once per ``crewday`` invocation from the active profile
-    (base URL + token) and the global ``--workspace`` slug. Every
-    request inherits the auth + workspace + user-agent headers; per-call
-    overrides go through ``json``, ``params``, and ``idempotency_key``.
+    (base URL + token). Every request inherits the auth + user-agent
+    headers; the workspace slug is addressed through the ``/w/<slug>/``
+    URL path (substituted by :mod:`crewday._runtime`), not a header.
+    Per-call overrides go through ``json``, ``params``, and
+    ``idempotency_key``.
 
     Tests inject :class:`httpx.MockTransport` via the ``transport``
     parameter to skip the real network — see ``cli/tests/test_client.py``.
@@ -296,7 +296,6 @@ class CrewdayClient(AbstractContextManager["CrewdayClient"]):
         *,
         base_url: str,
         token: str | None,
-        workspace: str | None = None,
         user_agent: str = "crewday-cli",
         timeout: float = 30.0,
         transport: httpx.BaseTransport | None = None,
@@ -316,7 +315,6 @@ class CrewdayClient(AbstractContextManager["CrewdayClient"]):
         self._base_url = base_url
         self._base_path = httpx.URL(base_url).path.rstrip("/")
         self._token = token
-        self._workspace = workspace
         # §12 "Agent audit headers" — forwarded on mutating requests
         # only, when the operator/agent supplied them via the global
         # flags. §13 "Global flags" ``--dry-run`` / ``--explain`` are
@@ -342,8 +340,6 @@ class CrewdayClient(AbstractContextManager["CrewdayClient"]):
         headers: dict[str, str] = {"User-Agent": self._user_agent}
         if token:
             headers["Authorization"] = f"Bearer {token}"
-        if workspace:
-            headers["X-Workspace"] = workspace
 
         self._client = httpx.Client(
             base_url=base_url,
@@ -394,10 +390,10 @@ class CrewdayClient(AbstractContextManager["CrewdayClient"]):
         (and the body); :meth:`download` handles that path.
 
         ``extra_headers`` is the seam for per-call additions (e.g.
-        ``Range`` from :meth:`download``). Auth / workspace / user-agent
-        headers are inherited from the constructor and cannot be
-        overridden here — that's intentional, profile resolution is the
-        sole source of truth.
+        ``Range`` from :meth:`download``). Auth / user-agent headers are
+        inherited from the constructor and cannot be overridden here —
+        that's intentional, profile resolution is the sole source of
+        truth.
 
         ``data`` + ``files`` enable ``multipart/form-data`` uploads
         (task evidence, expense scan). They are mutually exclusive with
@@ -790,7 +786,7 @@ class CrewdayClient(AbstractContextManager["CrewdayClient"]):
 
         Uses :meth:`httpx.Client.build_request` so the URL and header
         merge match what an actual send would produce (base-URL join,
-        query encoding, inherited auth/workspace/user-agent headers).
+        query encoding, inherited auth/user-agent headers).
         The ``Authorization`` value is redacted — §15 forbids leaking
         the bearer token into operator-visible output.
         """

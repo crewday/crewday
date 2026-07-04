@@ -41,7 +41,6 @@ def _wire_factory(
         return CrewdayClient(
             base_url="https://api.test.local",
             token="test-token",
-            workspace="smoke",
             transport=httpx.MockTransport(recording),
             rng=random.Random(0),
             sleep=_no_sleep,

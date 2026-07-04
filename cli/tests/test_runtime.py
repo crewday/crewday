@@ -64,7 +64,6 @@ def _client_factory(
         return CrewdayClient(
             base_url=base_url,
             token="test-token",
-            workspace=ctx.workspace,
             transport=httpx.MockTransport(handler),
             rng=random.Random(0),
             sleep=_no_sleep,

@@ -48,7 +48,6 @@ def _make_client(
     handler: Any,
     *,
     token: str | None = "test-token",
-    workspace: str | None = "smoke",
     base_url: str = "https://api.test.local",
 ) -> CrewdayClient:
     """Build a :class:`CrewdayClient` wired to a :class:`MockTransport`.
@@ -62,7 +61,6 @@ def _make_client(
     return CrewdayClient(
         base_url=base_url,
         token=token,
-        workspace=workspace,
         transport=transport,
         rng=random.Random(0),
         sleep=_no_sleep,
@@ -100,37 +98,30 @@ def test_no_auth_header_when_token_unset() -> None:
         captured["headers"] = request.headers
         return httpx.Response(200, json={"ok": True})
 
-    with _make_client(handler, token=None, workspace=None) as client:
+    with _make_client(handler, token=None) as client:
         client.get("/api/v1/auth/login")
 
     assert "authorization" not in {k.lower() for k in captured["headers"]}
 
 
-def test_workspace_header_when_set() -> None:
-    """``X-Workspace`` is sent when the global ``--workspace`` is set."""
-    captured: dict[str, httpx.Headers] = {}
+def test_workspace_addressed_via_url_path_not_header() -> None:
+    """The workspace slug rides in the ``/w/<slug>/`` URL path, not a header.
+
+    §01 / §12 address workspace-scoped verbs by URL prefix; the CLI
+    substitutes ``{slug}`` in :mod:`crewday._runtime`. The client sends
+    no ``X-Workspace`` header — the server does not read one.
+    """
+    captured: dict[str, Any] = {}
 
     def handler(request: httpx.Request) -> httpx.Response:
         captured["headers"] = request.headers
+        captured["path"] = request.url.path
         return httpx.Response(200, json={"ok": True})
 
-    with _make_client(handler, workspace="acme") as client:
+    with _make_client(handler) as client:
         client.get("/w/acme/api/v1/tasks")
 
-    assert captured["headers"]["X-Workspace"] == "acme"
-
-
-def test_no_workspace_header_when_unset() -> None:
-    """``X-Workspace`` is absent for host-level verbs (``auth``, ``admin``)."""
-    captured: dict[str, httpx.Headers] = {}
-
-    def handler(request: httpx.Request) -> httpx.Response:
-        captured["headers"] = request.headers
-        return httpx.Response(200, json={"ok": True})
-
-    with _make_client(handler, workspace=None) as client:
-        client.get("/api/v1/admin/health")
-
+    assert captured["path"] == "/w/acme/api/v1/tasks"
     assert "x-workspace" not in {k.lower() for k in captured["headers"]}
 
 
@@ -145,7 +136,7 @@ def test_user_agent_always_sent() -> None:
         captured["headers"] = request.headers
         return httpx.Response(200, json={"ok": True})
 
-    with _make_client(handler, token=None, workspace=None) as client:
+    with _make_client(handler, token=None) as client:
         client.get("/api/v1/whoami")
 
     user_agent = captured["headers"]["User-Agent"]
@@ -992,7 +983,6 @@ def _audit_client(
     return CrewdayClient(
         base_url="https://api.test.local",
         token="tok",
-        workspace="acme",
         transport=httpx.MockTransport(handler),
         rng=random.Random(0),
         sleep=_no_sleep,

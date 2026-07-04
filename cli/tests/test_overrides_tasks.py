@@ -47,7 +47,6 @@ def _wire_factory(
         return CrewdayClient(
             base_url="https://api.test.local",
             token="test-token",
-            workspace="smoke",
             transport=httpx.MockTransport(recording),
             rng=random.Random(0),
             sleep=_no_sleep,
@@ -302,12 +301,10 @@ def test_complete_uses_profile_default_workspace(
             *,
             base_url: str,
             token: str | None,
-            workspace: str | None,
             **_kwargs: object,
         ) -> None:
             assert base_url == "https://api.test.local"
             assert token == "test-token"
-            assert workspace == "smoke"
 
         def __enter__(self) -> FakeClient:
             return self

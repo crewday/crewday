@@ -265,7 +265,7 @@ export function recurrencePreview(
   const parsed = parseRecurrenceRrule(value);
   if (!parsed.valid || !parsed.parts) return [];
   if (parsed.parts.unsupported.length > 0) return [];
-  const count = options.count ?? 4;
+  const count = options.count ?? 5;
   const startDate = stripTime(options.startDate ?? new Date());
   const dates: Date[] = [];
   let cursor = new Date(startDate);

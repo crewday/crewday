@@ -368,8 +368,9 @@ Demo is an unauthenticated surface; it will be scraped and fuzzed.
   the workspace budget cap.
 - **Upload cap:** 5 MiB per file, 10 files per workspace lifetime, 25
   MiB per IP per day.
-- **Payload cap:** every text field has a 32 KiB hard max — demo
-  doesn't need a place to paste a book.
+- **Payload cap:** every non-upload request body has a 32 KiB hard max,
+  enforced against `Content-Length` — demo doesn't need a place to paste
+  a book. (Upload requests use the 5 MiB per-file cap above instead.)
 - Requests from IPs on the operator's deny-list (`CREWDAY_DEMO_BLOCK_CIDR`)
   are refused at the edge.
 

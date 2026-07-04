@@ -820,7 +820,7 @@ provisioned per visitor, not per operator.
 
 | var                         | default                        | notes                    |
 |-----------------------------|--------------------------------|--------------------------|
-| `CREWDAY_DATABASE_URL`    | sqlite+aiosqlite:///./data/db  |                          |
+| `CREWDAY_DATABASE_URL`    | **required**                   | No default; boot fails if unset. SQLAlchemy async URL, e.g. `sqlite+aiosqlite:///data/crewday.db` or `postgresql+psycopg://…`. See `.env.example`. |
 | `CREWDAY_DATA_DIR`        | `./data`                       |                          |
 | `CREWDAY_BIND_HOST`       | `127.0.0.1`                    |                          |
 | `CREWDAY_BIND_PORT`       | `8000`                         |                          |
@@ -858,7 +858,7 @@ Environment differences (DB engine, storage backend, LLM
 provider) surface via capabilities probed at boot; the code does
 not branch on a deployment-mode switch.
 
-A full env reference lives in `deploy/.env.example`.
+A full env reference lives in `.env.example` at the repo root.
 
 ## Migrations
 
