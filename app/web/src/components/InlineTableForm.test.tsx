@@ -400,12 +400,12 @@ describe("InlineTableForm", () => {
       inlineTableCss,
       ".inline-table-form__cell--temporal",
       "padding-right",
-    )).toBe("6px");
+    )).toBe("var(--space-3)");
     expect(cssDeclarationValue(
       inlineTableCss,
       ".inline-table-form__cell--temporal",
       "padding-left",
-    )).toBe("6px");
+    )).toBe("var(--space-3)");
   });
 
   it("lets wide inline tables scroll horizontally to keep row actions reachable", () => {

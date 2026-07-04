@@ -1279,9 +1279,9 @@ describe("<PropertyDetailPage>", () => {
 
   it("keeps standalone panel subtitles spaced from following table and form content", () => {
     expect(managerPanelsCss).toContain(
-      ".panel > .panel__sub + :where(.inline-table-form, .form-layout, form, table, ul, ol, .settings-kv, .settings-list) {\n  margin-top: 12px;\n}",
+      ".panel > .panel__sub + :where(.inline-table-form, .form-layout, form, table, ul, ol, .settings-kv, .settings-list) {\n  margin-top: var(--space-6);\n}",
     );
-    expect(managerPanelsCss).toContain(".panel__head-stack {\n  display: flex; flex-direction: column; gap: 4px;");
+    expect(managerPanelsCss).toContain(".panel__head-stack {\n  display: flex; flex-direction: column; gap: var(--space-2);");
   });
 
   it("renders existing property setting overrides distinctly without saving unchanged rows", async () => {
