@@ -768,7 +768,11 @@ use a short-TTL local cache.
 - Data to stdout (JSON by default); errors to stderr as RFC 7807 so
   agents can parse stdout without filtering.
 - `--dry-run` returns the resolved request the server would execute,
-  so agents can plan multi-step flows without touching state.
+  so agents can plan multi-step flows without touching state. The plan
+  is written through the same output path as a real response, so
+  `--jq`, `--no-color`, and `-o json|yaml|ndjson` all apply to it;
+  `-o table` falls back to JSON because the plan is a nested request
+  object that a flat table would truncate.
 - `--explain` dumps the underlying HTTP call (method, URL,
   redacted headers, body) to stderr.
 - `--agent-reason` / `--conversation-ref` populate audit headers on

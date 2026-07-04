@@ -29,7 +29,6 @@ picture".
 
 from __future__ import annotations
 
-import json
 import logging
 import sys
 from collections.abc import Callable, Mapping
@@ -120,14 +119,27 @@ class DryRunComplete(Exception):
     Not an error: §13 "Global flags" ``--dry-run`` plans a mutating
     call without executing it. :meth:`crewday._client.CrewdayClient.request`
     raises this instead of sending, carrying the resolved request
-    (method, URL, redacted headers, body). :func:`main` catches it,
-    prints the plan as JSON to stdout, and exits ``0`` — the command
-    never touches server state.
+    (method, URL, redacted headers, body) plus the §13 output controls
+    (``--jq`` / ``--no-color`` / ``-o``) captured from the client so the
+    catch site can render the plan the same way a real response would.
+    :func:`main` catches it, emits the plan to stdout through the shared
+    ``crewday._emit`` path, and exits ``0`` — the command never touches
+    server state.
     """
 
-    def __init__(self, plan: Mapping[str, Any]) -> None:
+    def __init__(
+        self,
+        plan: Mapping[str, Any],
+        *,
+        jq: str | None = None,
+        no_color: bool = False,
+        output: OutputMode = "json",
+    ) -> None:
         super().__init__("dry-run: request planned, not sent")
         self.plan = dict(plan)
+        self.jq = jq
+        self.no_color = no_color
+        self.output = output
 
 
 def _resolve_version() -> str:
@@ -535,10 +547,47 @@ def main() -> None:
         root(prog_name="crewday")
     except DryRunComplete as planned:
         # ``--dry-run`` planned a mutating call instead of sending it.
-        # Emit the resolved request as JSON to stdout and exit clean so
-        # an agent can parse the plan without touching server state.
-        click.echo(json.dumps(planned.plan, indent=2, sort_keys=False))
+        # Route the resolved request through the shared emit path so the
+        # plan honours ``--jq`` / ``--no-color`` / ``-o`` exactly like a
+        # real response would, then exit clean so an agent can parse the
+        # plan without touching server state. The Click context has
+        # already unwound here, so the output controls ride on the
+        # exception (set by the client) rather than a live ctx.
+        #
+        # A bad ``--jq`` expression or a missing jq engine raises a
+        # :class:`CrewdayError` / :class:`ConfigError` from the emit path.
+        # Those are :class:`click.ClickException`s, but we are *outside*
+        # ``root()`` now, so Click's standalone machinery never sees them
+        # to print + set the exit code. Replicate that handling here so a
+        # dry-run ``--jq`` failure exits with the spec code (1 / 5) and a
+        # clean stderr message instead of an uncaught traceback + exit 1.
+        try:
+            _emit_dry_run_plan(planned)
+        except click.ClickException as err:
+            err.show()
+            sys.exit(err.exit_code)
         sys.exit(ExitCode.SUCCESS)
+
+
+def _emit_dry_run_plan(planned: DryRunComplete) -> None:
+    """Write a ``--dry-run`` plan to stdout via the shared emit path.
+
+    The plan is a nested request object, so ``-o table`` (which flattens
+    to scalar columns) would silently drop ``headers`` / ``params`` /
+    ``body``; we fall back to JSON for table to keep the plan lossless.
+    ``--jq``, ``--no-color``, and ``-o json|yaml|ndjson`` are honoured.
+    """
+    from crewday._emit import emit
+
+    output: OutputMode = "json" if planned.output == "table" else planned.output
+    plan_ctx = CrewdayContext(
+        profile=None,
+        workspace=None,
+        output=output,
+        jq=planned.jq,
+        no_color=planned.no_color,
+    )
+    emit(planned.plan, ctx=plan_ctx)
 
 
 if __name__ == "__main__":  # pragma: no cover — ``python -m crewday._main`` path.

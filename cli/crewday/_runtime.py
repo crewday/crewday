@@ -979,6 +979,9 @@ def _default_client_factory(ctx: CrewdayContext) -> CrewdayClient:
         correlation_id=ctx.correlation_id,
         dry_run=ctx.dry_run,
         explain=ctx.explain,
+        jq=ctx.jq,
+        no_color=ctx.no_color,
+        output=ctx.output,
     )
 
 

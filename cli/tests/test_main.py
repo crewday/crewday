@@ -21,6 +21,7 @@ the suite.
 
 from __future__ import annotations
 
+import json
 import logging
 import sys
 from collections.abc import Iterator
@@ -424,8 +425,6 @@ def test_main_emits_dry_run_plan_and_exits_zero(
     """``main()`` catches :class:`DryRunComplete`, prints the resolved
     request as JSON to stdout, and exits 0 (§13 "plan without
     executing")."""
-    import json
-
     from crewday._main import DryRunComplete, root
 
     plan = {"method": "POST", "url": "https://x/y", "body": {"a": 1}, "dry_run": True}
@@ -444,6 +443,174 @@ def test_main_emits_dry_run_plan_and_exits_zero(
     assert exc_info.value.code == ExitCode.SUCCESS
     out = capsys.readouterr().out
     assert json.loads(out) == plan
+
+
+def test_main_dry_run_plan_honors_jq(
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``--dry-run --jq`` filters the plan JSON at the shared emit path."""
+    from crewday._main import DryRunComplete, root
+
+    plan = {"method": "POST", "url": "https://x/y", "body": {"a": 1}, "dry_run": True}
+
+    @root.command(name="_dry_capture")
+    def _dry() -> None:
+        raise DryRunComplete(plan, jq=".method")
+
+    monkeypatch.setattr(sys, "argv", ["crewday", "_dry_capture"])
+    try:
+        with pytest.raises(SystemExit) as exc_info:
+            main()
+    finally:
+        del root.commands["_dry_capture"]
+
+    assert exc_info.value.code == ExitCode.SUCCESS
+    assert json.loads(capsys.readouterr().out) == "POST"
+
+
+def test_main_dry_run_plan_honors_yaml_output(
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``--dry-run -o yaml`` renders the plan as YAML, not pretty JSON."""
+    from crewday._main import DryRunComplete, root
+
+    plan = {"method": "POST", "url": "https://x/y", "dry_run": True}
+
+    @root.command(name="_dry_capture")
+    def _dry() -> None:
+        raise DryRunComplete(plan, output="yaml")
+
+    monkeypatch.setattr(sys, "argv", ["crewday", "_dry_capture"])
+    try:
+        with pytest.raises(SystemExit) as exc_info:
+            main()
+    finally:
+        del root.commands["_dry_capture"]
+
+    assert exc_info.value.code == ExitCode.SUCCESS
+    out = capsys.readouterr().out
+    assert "method: POST" in out
+    assert "dry_run: true" in out
+
+
+def test_main_dry_run_plan_table_falls_back_to_json(
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``-o table`` on a nested plan would drop headers/body; the handler
+    falls back to lossless JSON so the whole plan survives."""
+    from crewday._main import DryRunComplete, root
+
+    plan = {
+        "method": "POST",
+        "url": "https://x/y",
+        "headers": {"authorization": "Bearer <redacted>"},
+        "body": {"a": 1},
+        "dry_run": True,
+    }
+
+    @root.command(name="_dry_capture")
+    def _dry() -> None:
+        raise DryRunComplete(plan, output="table")
+
+    monkeypatch.setattr(sys, "argv", ["crewday", "_dry_capture"])
+    try:
+        with pytest.raises(SystemExit) as exc_info:
+            main()
+    finally:
+        del root.commands["_dry_capture"]
+
+    assert exc_info.value.code == ExitCode.SUCCESS
+    # Lossless: the nested body/headers survive because we render JSON.
+    assert json.loads(capsys.readouterr().out) == plan
+
+
+def test_main_dry_run_plan_no_color_is_colourless(
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``--dry-run --no-color`` never emits ANSI (the plan is JSON, so it
+    is colourless regardless; this pins the consistency guarantee)."""
+    from crewday._main import DryRunComplete, root
+
+    plan = {"method": "POST", "url": "https://x/y", "dry_run": True}
+
+    @root.command(name="_dry_capture")
+    def _dry() -> None:
+        raise DryRunComplete(plan, no_color=True)
+
+    monkeypatch.setattr(sys, "argv", ["crewday", "_dry_capture"])
+    try:
+        with pytest.raises(SystemExit) as exc_info:
+            main()
+    finally:
+        del root.commands["_dry_capture"]
+
+    assert exc_info.value.code == ExitCode.SUCCESS
+    out = capsys.readouterr().out
+    assert "\x1b[" not in out
+    assert json.loads(out) == plan
+
+
+def test_main_dry_run_plan_bad_jq_exits_client_error(
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A bad ``--dry-run --jq`` expression exits 1 with a clean stderr
+    message, not an uncaught traceback. The emit-path ``CrewdayError`` is
+    raised *outside* ``root()``, so ``main()`` must replicate Click's
+    ClickException handling (show + exit code) itself."""
+    from crewday._main import DryRunComplete, root
+
+    plan = {"method": "POST", "url": "https://x/y", "dry_run": True}
+
+    @root.command(name="_dry_capture")
+    def _dry() -> None:
+        raise DryRunComplete(plan, jq=".[")
+
+    monkeypatch.setattr(sys, "argv", ["crewday", "_dry_capture"])
+    try:
+        with pytest.raises(SystemExit) as exc_info:
+            main()
+    finally:
+        del root.commands["_dry_capture"]
+
+    assert exc_info.value.code == ExitCode.CLIENT_ERROR
+    captured = capsys.readouterr()
+    assert captured.out == ""  # nothing emitted to stdout on jq failure
+    assert "invalid --jq expression" in captured.err
+
+
+def test_main_dry_run_plan_missing_jq_engine_exits_config_error(
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``--dry-run --jq`` with no ``jq`` binary on PATH surfaces the
+    ConfigError (exit 5, "engine unavailable"), not a bare exit-1
+    traceback — the exit code must survive the out-of-``root()`` raise."""
+    from crewday import _emit
+    from crewday._main import DryRunComplete, root
+
+    monkeypatch.setattr(_emit.shutil, "which", lambda _binary: None)
+    plan = {"method": "POST", "url": "https://x/y", "dry_run": True}
+
+    @root.command(name="_dry_capture")
+    def _dry() -> None:
+        raise DryRunComplete(plan, jq=".method")
+
+    monkeypatch.setattr(sys, "argv", ["crewday", "_dry_capture"])
+    try:
+        with pytest.raises(SystemExit) as exc_info:
+            main()
+    finally:
+        del root.commands["_dry_capture"]
+
+    assert exc_info.value.code == ExitCode.CONFIG_ERROR
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "jq engine unavailable" in captured.err
 
 
 def test_python_dash_m_entry_point_module_exists() -> None:

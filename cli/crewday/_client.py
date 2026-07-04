@@ -45,6 +45,7 @@ from typing import Any, Final
 
 import httpx
 
+from crewday._globals import OutputMode
 from crewday._main import (
     ConfigError,
     CrewdayError,
@@ -306,6 +307,9 @@ class CrewdayClient(AbstractContextManager["CrewdayClient"]):
         correlation_id: str | None = None,
         dry_run: bool = False,
         explain: bool = False,
+        jq: str | None = None,
+        no_color: bool = False,
+        output: OutputMode = "json",
     ) -> None:
         if not base_url:
             # Profile resolution should reject empty base URLs; this is
@@ -324,6 +328,14 @@ class CrewdayClient(AbstractContextManager["CrewdayClient"]):
         self._correlation_id = correlation_id
         self._dry_run = dry_run
         self._explain = explain
+        # §13 "Global flags" output controls carried so the ``--dry-run``
+        # plan can honour ``--jq`` / ``--no-color`` / ``-o`` at the catch
+        # site in :func:`crewday._main.main`, where the Click context has
+        # already unwound. The client is the last place these values live
+        # alongside the raise of :class:`DryRunComplete`.
+        self._jq = jq
+        self._no_color = no_color
+        self._output = output
         self._user_agent = _resolve_user_agent(user_agent)
         # ``rng`` is injectable so tests can pin jitter; default RNG is
         # the module random because retries don't need cryptographic
@@ -458,7 +470,12 @@ class CrewdayClient(AbstractContextManager["CrewdayClient"]):
                 self._emit_explain(plan)
             if self._dry_run and is_mutating:
                 plan["dry_run"] = True
-                raise DryRunComplete(plan)
+                raise DryRunComplete(
+                    plan,
+                    jq=self._jq,
+                    no_color=self._no_color,
+                    output=self._output,
+                )
 
         # Each iteration of the loop either ``return``s a 2xx response,
         # raises (transport budget exhausted or non-retriable HTTP
