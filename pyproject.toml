@@ -777,6 +777,25 @@ ignore_imports = [
     "app.domain.workspace.ownership_verification -> app.auth.magic_link",
     "app.domain.workspace.ownership_verification -> app.authz.owners",
     "app.domain.workspace.settings_service -> app.authz.owners",
+    # cd-seack: ``app.abuse.window_store`` is the sliding-window hit store
+    # behind the self-serve abuse throttles (§15). Its DB-backed variant
+    # ``DbWindowStore`` legitimately reaches ``app.adapters.db`` — the
+    # deployment-wide ``throttle_window`` table, the ``make_uow`` unit of
+    # work, and the ``DbSession`` port — the same way
+    # ``app.api.middleware.rate_limit.PersistentRateLimitBackend`` reaches
+    # its ``rate_limit_bucket`` table. The default self-host store
+    # (``MemoryWindowStore``) touches no adapter, but ``app.auth._throttle``
+    # imports the module so ``app.domain.identity.{invite,email_change_ports}``
+    # transitively reach these edges. Whitelisting the store's own outgoing
+    # adapter edges — not a domain wildcard — breaks the chain without
+    # loosening the top-level rule (grimp counts function-local and
+    # ``TYPE_CHECKING`` imports, so relocating them cannot remove the edge).
+    # Same shared-kernel-seam shape as the ``-> app.authz`` stopgaps above;
+    # drops when cd-9gu9q relocates ``DbWindowStore`` under ``app.adapters.db``
+    # so ``app.abuse.window_store`` carries no adapter edge.
+    "app.abuse.window_store -> app.adapters.db.ops.models",
+    "app.abuse.window_store -> app.adapters.db.ports",
+    "app.abuse.window_store -> app.adapters.db.session",
 ]
 unmatched_ignore_imports_alerting = "none"
 
