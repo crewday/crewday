@@ -23,6 +23,7 @@ from app.events.bus import bus as default_event_bus
 from app.tenancy import WorkspaceContext, tenant_agnostic
 from app.util.clock import Clock, SystemClock
 from app.util.clock import aware_utc as _as_utc
+from app.util.isoformat import iso_or_none
 from app.util.ulid import new_ulid
 
 __all__ = [
@@ -377,7 +378,7 @@ def _audit_dict(row: AssetDocument) -> dict[str, object | None]:
         "filename": row.filename,
         "kind": row.kind,
         "title": row.title,
-        "deleted_at": row.deleted_at.isoformat() if row.deleted_at else None,
+        "deleted_at": iso_or_none(row.deleted_at),
     }
 
 

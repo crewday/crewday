@@ -22,6 +22,7 @@ from app.events.types import AssetChanged
 from app.tenancy import WorkspaceContext, tenant_agnostic
 from app.util.clock import Clock, SystemClock
 from app.util.clock import aware_utc as _as_utc
+from app.util.isoformat import iso_or_none
 from app.util.tokens import short_token
 from app.util.ulid import new_ulid
 
@@ -949,13 +950,11 @@ def _audit_dict(row: Asset) -> dict[str, object | None]:
         "name": row.name,
         "condition": row.condition,
         "status": row.status,
-        "installed_on": row.installed_on.isoformat() if row.installed_on else None,
-        "purchased_on": row.purchased_on.isoformat() if row.purchased_on else None,
-        "warranty_expires_on": (
-            row.warranty_expires_on.isoformat() if row.warranty_expires_on else None
-        ),
+        "installed_on": iso_or_none(row.installed_on),
+        "purchased_on": iso_or_none(row.purchased_on),
+        "warranty_expires_on": iso_or_none(row.warranty_expires_on),
         "qr_token": row.qr_token,
-        "deleted_at": row.deleted_at.isoformat() if row.deleted_at else None,
+        "deleted_at": iso_or_none(row.deleted_at),
     }
 
 

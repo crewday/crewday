@@ -18,6 +18,7 @@ from app.domain.inventory.movement_service import InventoryMovementView
 from app.events.bus import EventBus
 from app.tenancy import WorkspaceContext
 from app.util.clock import Clock, SystemClock
+from app.util.isoformat import iso_or_none
 from app.util.ulid import new_ulid
 
 __all__ = [
@@ -513,7 +514,7 @@ def _stocktake_audit(row: Stocktake) -> dict[str, object]:
         "id": row.id,
         "property_id": row.property_id,
         "started_at": row.started_at.isoformat(),
-        "completed_at": row.completed_at.isoformat() if row.completed_at else None,
+        "completed_at": iso_or_none(row.completed_at),
         "actor_kind": row.actor_kind,
         "actor_id": row.actor_id,
         "note_md": row.note_md,

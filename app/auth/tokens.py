@@ -114,6 +114,7 @@ from app.audit import write_audit
 from app.auth.audit import AGNOSTIC_WORKSPACE_ID as _AGNOSTIC_WORKSPACE_ID
 from app.tenancy import WorkspaceContext, tenant_agnostic
 from app.util.clock import Clock, SystemClock
+from app.util.isoformat import iso_or_none
 from app.util.ulid import new_ulid
 
 __all__ = [
@@ -1112,9 +1113,7 @@ def mint(
                 "label": label,
                 "prefix": prefix,
                 "scopes": sorted(scopes.keys()),
-                "expires_at": (
-                    expires_at.isoformat() if expires_at is not None else None
-                ),
+                "expires_at": iso_or_none(expires_at),
                 "kind": kind,
                 "delegate_for_user_id": (
                     delegate_for_user_id if kind == "delegated" else None
@@ -1140,9 +1139,7 @@ def mint(
                 "label": label,
                 "prefix": prefix,
                 "scopes": sorted(scopes.keys()),
-                "expires_at": (
-                    expires_at.isoformat() if expires_at is not None else None
-                ),
+                "expires_at": iso_or_none(expires_at),
                 "kind": kind,  # always "personal" on this branch
             },
             clock=clock,

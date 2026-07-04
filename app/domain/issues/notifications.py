@@ -8,6 +8,7 @@ from typing import Protocol
 
 from app.domain.issues.service import IssueView
 from app.domain.messaging.notifications import NotificationKind
+from app.util.isoformat import iso_or_none
 
 __all__ = [
     "IssueNotificationSink",
@@ -70,7 +71,7 @@ def _issue_payload(issue: IssueView) -> dict[str, object | None]:
         "category": issue.category,
         "state": issue.state,
         "resolution_note": issue.resolution_note,
-        "resolved_at": issue.resolved_at.isoformat() if issue.resolved_at else None,
+        "resolved_at": iso_or_none(issue.resolved_at),
         "resolved_by": issue.resolved_by,
         "reported_at": issue.reported_at.isoformat(),
     }

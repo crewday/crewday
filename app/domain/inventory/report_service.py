@@ -15,6 +15,7 @@ from app.adapters.db.inventory.models import Item, Movement, Stocktake
 from app.adapters.db.places.models import PropertyWorkspace
 from app.tenancy import WorkspaceContext
 from app.util.clock import Clock, SystemClock
+from app.util.isoformat import iso_or_none
 
 __all__ = [
     "InventoryRateReportRow",
@@ -238,7 +239,7 @@ def stocktake_activity(
             stocktake_id=row[0],
             property_id=row[1],
             started_at=row[2].isoformat(),
-            completed_at=row[3].isoformat() if row[3] is not None else None,
+            completed_at=iso_or_none(row[3]),
             actor_kind=row[4],
             actor_id=row[5],
             movement_count=int(row[6]),

@@ -70,6 +70,7 @@ from app.domain.time.geofence import (
 from app.events import ShiftChanged, ShiftEnded, ShiftGeofenceWarning, bus
 from app.tenancy import WorkspaceContext
 from app.util.clock import Clock, SystemClock
+from app.util.isoformat import iso_or_none
 from app.util.ulid import new_ulid
 
 __all__ = [
@@ -329,15 +330,13 @@ def _view_to_diff_dict(view: ShiftView) -> dict[str, Any]:
         "workspace_id": view.workspace_id,
         "user_id": view.user_id,
         "starts_at": view.starts_at.isoformat(),
-        "ends_at": view.ends_at.isoformat() if view.ends_at is not None else None,
+        "ends_at": iso_or_none(view.ends_at),
         "property_id": view.property_id,
         "source_occurrence_id": view.source_occurrence_id,
         "source": view.source,
         "notes_md": view.notes_md,
         "approved_by": view.approved_by,
-        "approved_at": (
-            view.approved_at.isoformat() if view.approved_at is not None else None
-        ),
+        "approved_at": iso_or_none(view.approved_at),
     }
 
 

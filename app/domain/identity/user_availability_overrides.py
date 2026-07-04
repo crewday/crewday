@@ -135,6 +135,7 @@ from app.domain.identity.availability_ports import (
 from app.events import UserAvailabilityOverrideUpserted, bus
 from app.tenancy import WorkspaceContext
 from app.util.clock import Clock, SystemClock
+from app.util.isoformat import iso_or_none
 from app.util.ulid import new_ulid
 
 __all__ = [
@@ -400,17 +401,11 @@ def _view_to_diff_dict(view: UserAvailabilityOverrideView) -> dict[str, Any]:
         "user_id": view.user_id,
         "date": view.date.isoformat(),
         "available": view.available,
-        "starts_local": (
-            view.starts_local.isoformat() if view.starts_local is not None else None
-        ),
-        "ends_local": (
-            view.ends_local.isoformat() if view.ends_local is not None else None
-        ),
+        "starts_local": iso_or_none(view.starts_local),
+        "ends_local": iso_or_none(view.ends_local),
         "reason": view.reason,
         "approval_required": view.approval_required,
-        "approved_at": (
-            view.approved_at.isoformat() if view.approved_at is not None else None
-        ),
+        "approved_at": iso_or_none(view.approved_at),
         "approved_by": view.approved_by,
     }
 

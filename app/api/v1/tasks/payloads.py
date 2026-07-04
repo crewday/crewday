@@ -24,6 +24,7 @@ from app.domain.tasks.completion import (
 from app.domain.tasks.oneoff import TaskView
 from app.domain.tasks.schedules import ScheduleView
 from app.domain.tasks.templates import TaskTemplateView
+from app.util.isoformat import iso_or_none
 
 from .derived import (
     _aware_utc,
@@ -186,12 +187,8 @@ class SchedulePayload(BaseModel):
             duration_minutes=view.duration_minutes,
             rdate_local=view.rdate_local,
             exdate_local=view.exdate_local,
-            active_from=(
-                view.active_from.isoformat() if view.active_from is not None else None
-            ),
-            active_until=(
-                view.active_until.isoformat() if view.active_until is not None else None
-            ),
+            active_from=iso_or_none(view.active_from),
+            active_until=iso_or_none(view.active_until),
             paused_at=view.paused_at,
             created_at=view.created_at,
             deleted_at=view.deleted_at,

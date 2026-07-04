@@ -13,6 +13,7 @@ from app.audit import write_audit
 from app.tenancy import WorkspaceContext
 from app.util.clock import Clock, SystemClock
 from app.util.currency import is_valid_currency, normalise_currency
+from app.util.isoformat import iso_or_none
 from app.util.ulid import new_ulid
 
 __all__ = [
@@ -478,5 +479,5 @@ def _audit_shape(view: RateCardView) -> dict[str, object]:
         "currency": view.currency,
         "rates": dict(view.rates),
         "active_from": view.active_from.isoformat(),
-        "active_to": view.active_to.isoformat() if view.active_to is not None else None,
+        "active_to": iso_or_none(view.active_to),
     }

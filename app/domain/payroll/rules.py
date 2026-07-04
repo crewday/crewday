@@ -94,6 +94,7 @@ from app.domain.payroll.ports import PayRuleRepository, PayRuleRow
 from app.tenancy import WorkspaceContext
 from app.util.clock import Clock, SystemClock
 from app.util.currency import is_valid_currency, normalise_currency
+from app.util.isoformat import iso_or_none
 from app.util.ulid import new_ulid
 
 __all__ = [
@@ -355,9 +356,7 @@ def _view_to_diff_dict(view: PayRuleView) -> dict[str, Any]:
         "night_multiplier": str(view.night_multiplier),
         "weekend_multiplier": str(view.weekend_multiplier),
         "effective_from": view.effective_from.isoformat(),
-        "effective_to": (
-            view.effective_to.isoformat() if view.effective_to is not None else None
-        ),
+        "effective_to": iso_or_none(view.effective_to),
         "created_by": view.created_by,
         "created_at": view.created_at.isoformat(),
     }

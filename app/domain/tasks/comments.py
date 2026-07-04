@@ -138,6 +138,7 @@ from app.events.bus import bus as default_event_bus
 from app.events.types import TaskCommentAdded
 from app.tenancy import WorkspaceContext
 from app.util.clock import Clock, SystemClock
+from app.util.isoformat import iso_or_none
 from app.util.ulid import new_ulid
 
 __all__ = [
@@ -660,10 +661,8 @@ def _view_to_diff_dict(view: CommentView) -> dict[str, Any]:
         "mentioned_user_ids": list(view.mentioned_user_ids),
         "attachments": [dict(item) for item in view.attachments],
         "created_at": view.created_at.isoformat(),
-        "edited_at": view.edited_at.isoformat() if view.edited_at is not None else None,
-        "deleted_at": (
-            view.deleted_at.isoformat() if view.deleted_at is not None else None
-        ),
+        "edited_at": iso_or_none(view.edited_at),
+        "deleted_at": iso_or_none(view.deleted_at),
         "llm_call_id": view.llm_call_id,
     }
 

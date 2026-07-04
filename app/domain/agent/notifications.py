@@ -9,6 +9,7 @@ from datetime import datetime
 from typing import Any, Literal, Protocol
 
 from app.domain.messaging.notifications import NotificationKind
+from app.util.isoformat import iso_or_none
 
 __all__ = [
     "AgentMessageNotificationSink",
@@ -219,9 +220,9 @@ def _approval_payload(approval: ApprovalNotificationView) -> dict[str, object | 
         "for_user_id": approval.for_user_id,
         "status": approval.status,
         "decided_by": approval.decided_by,
-        "decided_at": approval.decided_at.isoformat() if approval.decided_at else None,
+        "decided_at": iso_or_none(approval.decided_at),
         "decision_note_md": approval.decision_note_md,
-        "expires_at": approval.expires_at.isoformat() if approval.expires_at else None,
+        "expires_at": iso_or_none(approval.expires_at),
         "created_at": approval.created_at.isoformat(),
         "tool_name": approval.action_json.get("tool_name"),
         "card_summary": approval.action_json.get("card_summary"),

@@ -23,6 +23,7 @@ from app.events import bus as default_bus
 from app.tenancy import WorkspaceContext
 from app.util.clock import Clock, SystemClock
 from app.util.currency import is_valid_currency, normalise_currency
+from app.util.isoformat import iso_or_none
 from app.util.ulid import new_ulid
 
 __all__ = [
@@ -948,10 +949,8 @@ def _audit_shape(view: QuoteView) -> dict[str, object]:
         "currency": view.currency,
         "status": view.status,
         "superseded_by_quote_id": view.superseded_by_quote_id,
-        "sent_at": view.sent_at.isoformat() if view.sent_at is not None else None,
-        "decided_at": (
-            view.decided_at.isoformat() if view.decided_at is not None else None
-        ),
+        "sent_at": iso_or_none(view.sent_at),
+        "decided_at": iso_or_none(view.decided_at),
     }
 
 

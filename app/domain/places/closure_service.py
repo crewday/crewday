@@ -32,6 +32,7 @@ from app.events.bus import bus as default_event_bus
 from app.events.types import PropertyClosureCreated, PropertyClosureUpdated
 from app.tenancy import WorkspaceContext
 from app.util.clock import Clock, SystemClock
+from app.util.isoformat import iso, iso_or_none
 from app.util.ulid import new_ulid
 
 __all__ = [
@@ -525,13 +526,13 @@ def _view_to_diff_dict(view: PropertyClosureView) -> dict[str, Any]:
         "id": view.id,
         "property_id": view.property_id,
         "unit_id": view.unit_id,
-        "starts_at": _iso(view.starts_at),
-        "ends_at": _iso(view.ends_at),
+        "starts_at": iso(view.starts_at),
+        "ends_at": iso(view.ends_at),
         "reason": view.reason,
         "source_ical_feed_id": view.source_ical_feed_id,
         "created_by_user_id": view.created_by_user_id,
-        "created_at": _iso(view.created_at),
-        "deleted_at": _iso(view.deleted_at) if view.deleted_at is not None else None,
+        "created_at": iso(view.created_at),
+        "deleted_at": iso_or_none(view.deleted_at),
     }
 
 
@@ -572,7 +573,3 @@ def _covered_dates(
     starts_local = starts_at.astimezone(property_timezone)
     ends_local = ends_at.astimezone(property_timezone)
     return starts_local.date(), (ends_local - timedelta(microseconds=1)).date()
-
-
-def _iso(value: datetime) -> str:
-    return value.isoformat()

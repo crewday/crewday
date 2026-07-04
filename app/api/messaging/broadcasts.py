@@ -40,6 +40,7 @@ from app.domain.messaging.broadcasts import (
 )
 from app.tenancy import WorkspaceContext, tenant_agnostic
 from app.util.clock import Clock
+from app.util.isoformat import iso_or_none
 from app.util.ulid import new_ulid
 
 __all__ = ["SqlAlchemyBroadcastGateway"]
@@ -342,5 +343,5 @@ class SqlAlchemyBroadcastGateway:
             )
         return BroadcastApprovalOutcome(
             approval_request_id=row.id,
-            expires_at_iso=row.expires_at.isoformat() if row.expires_at else None,
+            expires_at_iso=iso_or_none(row.expires_at),
         )

@@ -88,6 +88,7 @@ from app.config import Settings, get_settings
 from app.security.hmac_signer import HmacSigner
 from app.tenancy import WorkspaceContext, tenant_agnostic
 from app.util.clock import Clock, SystemClock
+from app.util.isoformat import iso_or_none
 from app.util.ulid import new_ulid
 
 __all__ = [
@@ -567,12 +568,10 @@ def revoke_link(
         action="revoked",
         diff={
             "before": {
-                "revoked_at": (
-                    before_revoked_at.isoformat() if before_revoked_at else None
-                ),
+                "revoked_at": iso_or_none(before_revoked_at),
             },
             "after": {
-                "revoked_at": row.revoked_at.isoformat() if row.revoked_at else None,
+                "revoked_at": iso_or_none(row.revoked_at),
             },
         },
         clock=resolved_clock,

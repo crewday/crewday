@@ -81,6 +81,7 @@ from app.audit import write_audit
 from app.domain.settings.cascade import SettingScopeChain, resolve_most_specific
 from app.tenancy import WorkspaceContext
 from app.util.clock import Clock, SystemClock
+from app.util.isoformat import iso_or_none
 from app.util.ulid import new_ulid
 
 _log = logging.getLogger(__name__)
@@ -866,9 +867,7 @@ def _view_to_diff_dict(view: IcalFeedView) -> dict[str, Any]:
         "url_preview": view.url_preview,
         "enabled": view.enabled,
         "poll_cadence": view.poll_cadence,
-        "last_polled_at": (
-            view.last_polled_at.isoformat() if view.last_polled_at else None
-        ),
+        "last_polled_at": iso_or_none(view.last_polled_at),
         "last_etag": view.last_etag,
         "last_error": view.last_error,
         "created_at": view.created_at.isoformat(),

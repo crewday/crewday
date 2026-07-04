@@ -13,6 +13,7 @@ from app.audit import write_audit
 from app.tenancy import WorkspaceContext
 from app.util.clock import Clock, SystemClock
 from app.util.currency import is_valid_currency, normalise_currency
+from app.util.isoformat import iso_or_none
 from app.util.ulid import new_ulid
 
 __all__ = [
@@ -555,7 +556,5 @@ def _audit_shape(view: OrganizationView) -> dict[str, object]:
         "contact_phone": view.contact_phone,
         "notes_md": view.notes_md,
         "created_at": view.created_at.isoformat(),
-        "archived_at": (
-            view.archived_at.isoformat() if view.archived_at is not None else None
-        ),
+        "archived_at": iso_or_none(view.archived_at),
     }

@@ -17,6 +17,7 @@ from app.adapters.db.places.models import PropertyWorkspace
 from app.audit import write_audit
 from app.tenancy import WorkspaceContext
 from app.util.clock import Clock, SystemClock
+from app.util.isoformat import iso_or_none
 from app.util.ulid import new_ulid
 
 __all__ = [
@@ -626,5 +627,5 @@ def _audit_dict(row: Item) -> dict[str, object]:
         "barcode_ean13": row.barcode_ean13,
         "tags": _list(row.tags_json or []),
         "notes_md": row.notes_md,
-        "deleted_at": row.deleted_at.isoformat() if row.deleted_at else None,
+        "deleted_at": iso_or_none(row.deleted_at),
     }

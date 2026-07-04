@@ -19,6 +19,7 @@ from app.events import bus as default_event_bus
 from app.events.types import PayPeriodLocked, PayPeriodPaid
 from app.tenancy import WorkspaceContext
 from app.util.clock import Clock, SystemClock
+from app.util.isoformat import iso_or_none
 from app.util.ulid import new_ulid
 
 __all__ = [
@@ -81,7 +82,7 @@ def _view_to_diff_dict(view: PayPeriodView) -> dict[str, Any]:
         "starts_at": view.starts_at.isoformat(),
         "ends_at": view.ends_at.isoformat(),
         "state": view.state,
-        "locked_at": view.locked_at.isoformat() if view.locked_at else None,
+        "locked_at": iso_or_none(view.locked_at),
         "locked_by": view.locked_by,
         "created_at": view.created_at.isoformat(),
     }

@@ -72,6 +72,7 @@ from app.audit import write_audit
 from app.events import TaskTemplateDeleted, TaskTemplateUpserted, bus
 from app.tenancy import WorkspaceContext
 from app.util.clock import Clock, SystemClock
+from app.util.isoformat import iso_or_none
 from app.util.ulid import new_ulid
 
 __all__ = [
@@ -686,9 +687,7 @@ def _view_to_diff_dict(view: TaskTemplateView) -> dict[str, Any]:
         "inventory_consumption_json": dict(view.inventory_consumption_json),
         "llm_hints_md": view.llm_hints_md,
         "created_at": view.created_at.isoformat(),
-        "deleted_at": (
-            view.deleted_at.isoformat() if view.deleted_at is not None else None
-        ),
+        "deleted_at": iso_or_none(view.deleted_at),
     }
 
 

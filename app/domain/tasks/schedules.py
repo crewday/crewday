@@ -88,6 +88,7 @@ from app.adapters.db.tasks.models import Occurrence, Schedule, TaskTemplate
 from app.audit import write_audit
 from app.tenancy import WorkspaceContext
 from app.util.clock import Clock, SystemClock
+from app.util.isoformat import iso_or_none
 from app.util.ulid import new_ulid
 
 __all__ = [
@@ -547,17 +548,11 @@ def _view_to_diff_dict(view: ScheduleView) -> dict[str, Any]:
         "duration_minutes": view.duration_minutes,
         "rdate_local": view.rdate_local,
         "exdate_local": view.exdate_local,
-        "active_from": (
-            view.active_from.isoformat() if view.active_from is not None else None
-        ),
-        "active_until": (
-            view.active_until.isoformat() if view.active_until is not None else None
-        ),
-        "paused_at": view.paused_at.isoformat() if view.paused_at is not None else None,
+        "active_from": iso_or_none(view.active_from),
+        "active_until": iso_or_none(view.active_until),
+        "paused_at": iso_or_none(view.paused_at),
         "created_at": view.created_at.isoformat(),
-        "deleted_at": (
-            view.deleted_at.isoformat() if view.deleted_at is not None else None
-        ),
+        "deleted_at": iso_or_none(view.deleted_at),
     }
 
 
@@ -648,9 +643,7 @@ def _apply_body(
     row.rdate_local = body.rdate_local or ""
     row.exdate_local = body.exdate_local or ""
     row.active_from = body.active_from.isoformat()
-    row.active_until = (
-        body.active_until.isoformat() if body.active_until is not None else None
-    )
+    row.active_until = iso_or_none(body.active_until)
     # Preserve cd-chd legacy ``enabled`` — callers use ``paused_at``
     # in cd-k4l; ``enabled = True`` by default and flipped only via
     # :func:`pause` / :func:`resume` below.
@@ -980,8 +973,8 @@ def pause(
         entity_id=row.id,
         action="pause",
         diff={
-            "before": {"paused_at": _iso(before.paused_at)},
-            "after": {"paused_at": _iso(after.paused_at)},
+            "before": {"paused_at": iso_or_none(before.paused_at)},
+            "after": {"paused_at": iso_or_none(after.paused_at)},
         },
         clock=clock,
     )
@@ -1013,8 +1006,8 @@ def resume(
         entity_id=row.id,
         action="resume",
         diff={
-            "before": {"paused_at": _iso(before.paused_at)},
-            "after": {"paused_at": _iso(after.paused_at)},
+            "before": {"paused_at": iso_or_none(before.paused_at)},
+            "after": {"paused_at": iso_or_none(after.paused_at)},
         },
         clock=clock,
     )
@@ -1219,14 +1212,3 @@ def preview_occurrences(
 # ---------------------------------------------------------------------------
 # Tiny helpers
 # ---------------------------------------------------------------------------
-
-
-def _iso(value: datetime | None) -> str | None:
-    """Stringify a ``datetime`` for JSON-safe audit payloads.
-
-    Extracted so the audit payload shape on :func:`pause` /
-    :func:`resume` stays compact; the full
-    :func:`_view_to_diff_dict` would re-emit every column on every
-    toggle, which is noise in the audit feed.
-    """
-    return value.isoformat() if value is not None else None

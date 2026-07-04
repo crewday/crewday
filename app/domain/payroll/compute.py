@@ -21,6 +21,7 @@ from app.events import bus as default_event_bus
 from app.events.types import PayslipComputed
 from app.tenancy import WorkspaceContext
 from app.util.clock import Clock, SystemClock
+from app.util.isoformat import iso_or_none
 from app.util.ulid import new_ulid
 
 __all__ = [
@@ -506,7 +507,7 @@ def _reimbursement_to_json(claim: PayslipReimbursableClaimRow) -> dict[str, obje
         "claim_id": claim.claim_id,
         "work_engagement_id": claim.work_engagement_id,
         "purchased_at": claim.purchased_at.isoformat(),
-        "decided_at": claim.decided_at.isoformat() if claim.decided_at else None,
+        "decided_at": iso_or_none(claim.decided_at),
         "description": claim.description,
         "currency": claim.currency,
         "amount_cents": claim.amount_cents,

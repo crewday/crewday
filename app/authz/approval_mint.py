@@ -60,6 +60,7 @@ from app.audit import write_audit
 from app.authz.enforce import ApprovalRequired
 from app.tenancy import WorkspaceContext
 from app.util.clock import Clock, SystemClock
+from app.util.isoformat import iso_or_none
 from app.util.ulid import new_ulid
 
 __all__ = ["mint_and_envelope_for_http", "mint_approval_request"]
@@ -201,8 +202,6 @@ def mint_and_envelope_for_http(
         detail={
             "error": "approval_required",
             "approval_request_id": row.id,
-            "expires_at": (
-                row.expires_at.isoformat() if row.expires_at is not None else None
-            ),
+            "expires_at": iso_or_none(row.expires_at),
         },
     )

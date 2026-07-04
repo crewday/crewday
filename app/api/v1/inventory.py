@@ -30,6 +30,7 @@ from app.domain.inventory.item_service import (
 )
 from app.domain.inventory.movement_service import InventoryMovementView
 from app.tenancy import WorkspaceContext
+from app.util.isoformat import iso_or_none
 
 __all__ = [
     "InventoryItemCreateRequest",
@@ -180,8 +181,8 @@ class InventoryItemResponse(BaseModel):
             tags=list(view.tags),
             notes_md=view.notes_md,
             created_at=view.created_at.isoformat(),
-            updated_at=view.updated_at.isoformat() if view.updated_at else None,
-            deleted_at=view.deleted_at.isoformat() if view.deleted_at else None,
+            updated_at=iso_or_none(view.updated_at),
+            deleted_at=iso_or_none(view.deleted_at),
         )
 
 

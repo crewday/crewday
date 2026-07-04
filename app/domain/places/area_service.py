@@ -25,6 +25,7 @@ from app.adapters.db.places.models import Area, Property, PropertyWorkspace, Uni
 from app.audit import write_audit
 from app.tenancy import WorkspaceContext
 from app.util.clock import Clock, SystemClock
+from app.util.isoformat import iso_or_none
 from app.util.ulid import new_ulid
 
 __all__ = [
@@ -161,12 +162,8 @@ def _view_to_diff_dict(view: AreaView) -> dict[str, Any]:
         "parent_area_id": view.parent_area_id,
         "notes_md": view.notes_md,
         "created_at": view.created_at.isoformat(),
-        "updated_at": (
-            view.updated_at.isoformat() if view.updated_at is not None else None
-        ),
-        "deleted_at": (
-            view.deleted_at.isoformat() if view.deleted_at is not None else None
-        ),
+        "updated_at": iso_or_none(view.updated_at),
+        "deleted_at": iso_or_none(view.deleted_at),
     }
 
 

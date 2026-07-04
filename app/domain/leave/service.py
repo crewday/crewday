@@ -98,6 +98,7 @@ from app.events.bus import bus as default_event_bus
 from app.events.types import LeaveDecided
 from app.tenancy import WorkspaceContext
 from app.util.clock import Clock, SystemClock
+from app.util.isoformat import iso_or_none
 from app.util.time_zone import snap_to_day
 from app.util.ulid import new_ulid
 
@@ -457,9 +458,7 @@ def _view_to_diff_dict(view: LeaveView) -> dict[str, Any]:
         "status": view.status,
         "reason_md": view.reason_md,
         "decided_by": view.decided_by,
-        "decided_at": (
-            view.decided_at.isoformat() if view.decided_at is not None else None
-        ),
+        "decided_at": iso_or_none(view.decided_at),
         "created_at": view.created_at.isoformat(),
     }
 

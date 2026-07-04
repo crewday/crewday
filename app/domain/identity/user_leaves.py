@@ -119,6 +119,7 @@ from app.domain.identity.availability_ports import (
 from app.events import UserLeaveUpserted, bus
 from app.tenancy import WorkspaceContext
 from app.util.clock import Clock, SystemClock
+from app.util.isoformat import iso_or_none
 from app.util.ulid import new_ulid
 
 __all__ = [
@@ -375,9 +376,7 @@ def _view_to_diff_dict(view: UserLeaveView) -> dict[str, Any]:
         "starts_on": view.starts_on.isoformat(),
         "ends_on": view.ends_on.isoformat(),
         "category": view.category,
-        "approved_at": (
-            view.approved_at.isoformat() if view.approved_at is not None else None
-        ),
+        "approved_at": iso_or_none(view.approved_at),
         "approved_by": view.approved_by,
         "note_md": view.note_md,
     }

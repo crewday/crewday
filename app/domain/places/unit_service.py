@@ -73,6 +73,7 @@ from app.adapters.db.places.models import Property, PropertyWorkspace, Unit
 from app.audit import write_audit
 from app.tenancy import WorkspaceContext
 from app.util.clock import Clock, SystemClock
+from app.util.isoformat import iso_or_none
 from app.util.ulid import new_ulid
 
 __all__ = [
@@ -301,12 +302,8 @@ def _view_to_diff_dict(view: UnitView) -> dict[str, Any]:
         ),  # code-health: ignore[duplicate] Boundary field list kept explicit.  # noqa: E501
         "notes_md": view.notes_md,  # code-health: ignore[duplicate] Boundary field list kept explicit.  # noqa: E501
         "created_at": view.created_at.isoformat(),
-        "updated_at": (
-            view.updated_at.isoformat() if view.updated_at is not None else None
-        ),
-        "deleted_at": (
-            view.deleted_at.isoformat() if view.deleted_at is not None else None
-        ),
+        "updated_at": iso_or_none(view.updated_at),
+        "deleted_at": iso_or_none(view.deleted_at),
     }
 
 

@@ -22,6 +22,7 @@ from app.events import (
 )
 from app.tenancy import WorkspaceContext
 from app.util.clock import Clock, SystemClock
+from app.util.isoformat import iso_or_none
 from app.util.ulid import new_ulid
 
 __all__ = [
@@ -719,7 +720,7 @@ def _audit_shape(view: WorkOrderView) -> dict[str, object]:
         "title": view.title,
         "status": view.status,
         "starts_at": view.starts_at.isoformat(),
-        "ends_at": view.ends_at.isoformat() if view.ends_at is not None else None,
+        "ends_at": iso_or_none(view.ends_at),
         "rate_card_id": view.rate_card_id,
         "total_hours_decimal": str(view.total_hours_decimal),
         "total_cents": view.total_cents,

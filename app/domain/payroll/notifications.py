@@ -8,6 +8,7 @@ from typing import Protocol
 
 from app.domain.messaging.notifications import NotificationKind
 from app.domain.payroll.ports import PayslipReadRow
+from app.util.isoformat import iso_or_none
 
 __all__ = ["PayslipNotificationSink", "notify_payslip_issued"]
 
@@ -47,8 +48,8 @@ def _payslip_payload(payslip: PayslipReadRow) -> dict[str, object | None]:
         "expense_reimbursements_cents": payslip.expense_reimbursements_cents,
         "net_cents": payslip.net_cents,
         "status": payslip.status,
-        "issued_at": payslip.issued_at.isoformat() if payslip.issued_at else None,
-        "paid_at": payslip.paid_at.isoformat() if payslip.paid_at else None,
+        "issued_at": iso_or_none(payslip.issued_at),
+        "paid_at": iso_or_none(payslip.paid_at),
         "created_at": payslip.created_at.isoformat(),
     }
 

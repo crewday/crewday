@@ -28,6 +28,7 @@ from app.events.bus import bus as default_event_bus
 from app.events.types import TaskEvidenceAdded
 from app.tenancy import WorkspaceContext
 from app.util.clock import Clock, SystemClock
+from app.util.isoformat import iso_or_none
 from app.util.ulid import new_ulid
 
 EvidenceKind = Literal["photo", "voice", "note", "checklist_snapshot", "gps"]
@@ -648,7 +649,7 @@ def checklist_item_snapshot(item: ChecklistItem) -> dict[str, object | None]:
         "position": item.position,
         "required": item.requires_photo,
         "checked": item.checked,
-        "checked_at": item.checked_at.isoformat() if item.checked_at else None,
+        "checked_at": iso_or_none(item.checked_at),
         "evidence_blob_hash": item.evidence_blob_hash,
     }
 

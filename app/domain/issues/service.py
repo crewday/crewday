@@ -21,6 +21,7 @@ from app.events.types import IssueReported
 from app.tenancy import WorkspaceContext, tenant_agnostic
 from app.util.clock import Clock, SystemClock
 from app.util.clock import aware_utc as _as_utc
+from app.util.isoformat import iso_or_none
 from app.util.ulid import new_ulid
 
 __all__ = [
@@ -440,9 +441,9 @@ def _audit_dict(row: IssueReport) -> dict[str, object | None]:
         "category": row.category,
         "state": row.state,
         "converted_to_task_id": row.converted_to_task_id,
-        "resolved_at": row.resolved_at.isoformat() if row.resolved_at else None,
+        "resolved_at": iso_or_none(row.resolved_at),
         "resolved_by": row.resolved_by,
-        "deleted_at": row.deleted_at.isoformat() if row.deleted_at else None,
+        "deleted_at": iso_or_none(row.deleted_at),
     }
 
 

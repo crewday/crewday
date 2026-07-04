@@ -14,6 +14,7 @@ from app.events import EventBus, VendorInvoiceChanged, VendorInvoicePaid
 from app.events import bus as default_bus
 from app.tenancy import WorkspaceContext
 from app.util.clock import Clock, SystemClock
+from app.util.isoformat import iso_or_none
 from app.util.ulid import new_ulid
 
 __all__ = [
@@ -536,20 +537,16 @@ def _audit_shape(view: VendorInvoiceView) -> dict[str, object]:
         "vendor_org_id": view.vendor_org_id,
         "invoice_number": view.invoice_number,
         "issued_at": view.issued_at.isoformat(),
-        "due_at": view.due_at.isoformat() if view.due_at is not None else None,
+        "due_at": iso_or_none(view.due_at),
         "total_cents": view.total_cents,
         "currency": view.currency,
         "status": view.status,
         "pdf_blob_hash": view.pdf_blob_hash,
-        "approved_at": (
-            view.approved_at.isoformat() if view.approved_at is not None else None
-        ),
-        "paid_at": view.paid_at.isoformat() if view.paid_at is not None else None,
+        "approved_at": iso_or_none(view.approved_at),
+        "paid_at": iso_or_none(view.paid_at),
         "payment_method": view.payment_method,
         "proof_blob_hash": view.proof_blob_hash,
         "proof_of_payment_file_ids": list(view.proof_of_payment_file_ids),
-        "disputed_at": (
-            view.disputed_at.isoformat() if view.disputed_at is not None else None
-        ),
+        "disputed_at": iso_or_none(view.disputed_at),
         "notes_md": view.notes_md,
     }

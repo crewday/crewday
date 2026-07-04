@@ -98,6 +98,7 @@ from app.audit import write_audit
 from app.domain.places.unit_service import create_default_unit_for_property
 from app.tenancy import WorkspaceContext
 from app.util.clock import Clock, SystemClock
+from app.util.isoformat import iso_or_none
 from app.util.ulid import new_ulid
 
 __all__ = [
@@ -530,12 +531,8 @@ def _view_to_diff_dict(view: PropertyView) -> dict[str, Any]:
         "settings_override_json": dict(view.settings_override_json),
         "property_notes_md": view.property_notes_md,
         "created_at": view.created_at.isoformat(),
-        "updated_at": (
-            view.updated_at.isoformat() if view.updated_at is not None else None
-        ),
-        "deleted_at": (
-            view.deleted_at.isoformat() if view.deleted_at is not None else None
-        ),
+        "updated_at": iso_or_none(view.updated_at),
+        "deleted_at": iso_or_none(view.deleted_at),
     }
 
 

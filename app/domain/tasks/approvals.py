@@ -37,6 +37,7 @@ from app.events.types import (
 )
 from app.tenancy import WorkspaceContext
 from app.util.clock import Clock, SystemClock
+from app.util.isoformat import iso_or_none
 from app.util.ulid import new_ulid
 
 __all__ = [
@@ -455,7 +456,7 @@ def _approval_diff(row: TaskApproval) -> dict[str, str | None]:
         "approval_id": row.id,
         "task_id": row.task_id,
         "state": row.state,
-        "decided_at": row.decided_at.isoformat() if row.decided_at else None,
+        "decided_at": iso_or_none(row.decided_at),
         "decided_by_user_id": row.decided_by_user_id,
         "note_md": row.note_md,
     }

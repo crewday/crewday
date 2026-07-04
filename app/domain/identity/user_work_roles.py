@@ -58,6 +58,7 @@ from app.adapters.db.workspace.models import UserWorkRole, UserWorkspace, WorkRo
 from app.audit import write_audit
 from app.tenancy import WorkspaceContext
 from app.util.clock import Clock, SystemClock
+from app.util.isoformat import iso_or_none
 from app.util.ulid import new_ulid
 
 __all__ = [
@@ -348,7 +349,7 @@ def create_user_work_role(
             "user_id": body.user_id,
             "work_role_id": body.work_role_id,
             "started_on": body.started_on.isoformat(),
-            "ended_on": body.ended_on.isoformat() if body.ended_on else None,
+            "ended_on": iso_or_none(body.ended_on),
         },
         clock=resolved_clock,
     )
@@ -389,8 +390,8 @@ def update_user_work_role(
                 "ended_on must be on or after started_on"
             )
         if body.ended_on != row.ended_on:
-            before["ended_on"] = row.ended_on.isoformat() if row.ended_on else None
-            after["ended_on"] = body.ended_on.isoformat() if body.ended_on else None
+            before["ended_on"] = iso_or_none(row.ended_on)
+            after["ended_on"] = iso_or_none(body.ended_on)
             row.ended_on = body.ended_on
 
     if "pay_rule_id" in sent and body.pay_rule_id != row.pay_rule_id:

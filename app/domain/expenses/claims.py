@@ -134,6 +134,7 @@ from app.events import ExpenseCancelled, ExpenseCreated, ExpenseSubmitted, bus
 from app.tenancy import WorkspaceContext
 from app.util.clock import Clock, SystemClock
 from app.util.currency import ISO_4217_ALLOWLIST
+from app.util.isoformat import iso_or_none
 from app.util.ulid import new_ulid
 
 __all__ = [
@@ -699,19 +700,13 @@ def _view_to_diff_dict(view: ExpenseClaimView) -> dict[str, Any]:
         "property_id": view.property_id,
         "note_md": view.note_md,
         "state": view.state,
-        "submitted_at": (
-            view.submitted_at.isoformat() if view.submitted_at is not None else None
-        ),
+        "submitted_at": iso_or_none(view.submitted_at),
         "decided_by": view.decided_by,
-        "decided_at": (
-            view.decided_at.isoformat() if view.decided_at is not None else None
-        ),
+        "decided_at": iso_or_none(view.decided_at),
         "decision_note_md": view.decision_note_md,
         "pay_period_id": view.pay_period_id,
         "created_at": view.created_at.isoformat(),
-        "deleted_at": (
-            view.deleted_at.isoformat() if view.deleted_at is not None else None
-        ),
+        "deleted_at": iso_or_none(view.deleted_at),
         "attachments": [
             {
                 "id": att.id,
