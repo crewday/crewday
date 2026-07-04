@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import fcntl
 import json
+import os
 import time
 import urllib.error
 import urllib.request
@@ -32,15 +33,24 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Final
 
+import pytest
+
 __all__ = [
     "DEFAULT_DEADLINE_S",
     "MailpitMessage",
+    "app_reachable",
+    "app_url",
+    "clean_inbox",
+    "clean_mailpit",
     "fetch_headers",
     "fetch_message_detail",
     "fetch_messages",
     "is_reachable",
     "mailpit_test_lock",
+    "mailpit_url",
     "purge_inbox",
+    "readyz_failures",
+    "stack_endpoints",
     "wait_for_http",
     "wait_for_message",
 ]
@@ -48,6 +58,8 @@ __all__ = [
 
 DEFAULT_DEADLINE_S: Final[float] = 10.0
 _MAILPIT_LOCK_PATH = Path("/tmp/crewday-mailpit-tests.lock")
+_DEFAULT_APP_URL: Final[str] = "http://127.0.0.1:8100"
+_DEFAULT_MAILPIT_URL: Final[str] = "http://127.0.0.1:8026"
 
 
 # Re-exporting Mailpit's ``messages`` array element shape under a name
@@ -261,3 +273,157 @@ def wait_for_http(api_url: str, *, deadline_s: float = 15.0) -> None:
         f"Mailpit HTTP API at {api_url} never came up in {deadline_s}s "
         f"(last error: {last_exc!r})"
     )
+
+
+# ---------------------------------------------------------------------------
+# Dev-stack endpoint discovery + skip gating
+# ---------------------------------------------------------------------------
+#
+# The dev-stack Mailpit round-trip tests (auth recovery / magic-link /
+# billing quote) all share the same reachability + readiness skip guard
+# and inbox-purge seeding. Rather than copy-paste the four-part boilerplate
+# into each module, the fixtures below own the contract; the callers import
+# ``stack_endpoints`` + ``clean_inbox`` (dev-stack HTTP flows) or
+# ``clean_mailpit`` (an in-process client whose SMTP mailer targets Mailpit,
+# e.g. the signup round-trip).
+
+
+def app_url() -> str:
+    """Return the dev-stack app-api base URL (``CREWDAY_TEST_APP_URL``)."""
+    return os.environ.get("CREWDAY_TEST_APP_URL", _DEFAULT_APP_URL)
+
+
+def mailpit_url() -> str:
+    """Return the Mailpit HTTP API base URL (``CREWDAY_TEST_MAILPIT_URL``)."""
+    return os.environ.get("CREWDAY_TEST_MAILPIT_URL", _DEFAULT_MAILPIT_URL)
+
+
+def app_reachable(url: str, *, timeout: float = 2.0) -> bool:
+    """Return ``True`` when ``GET {url}/healthz`` answers 2xx.
+
+    The app-api factory mounts ``/healthz`` unconditionally, so a 2xx
+    there is the cheapest unauthenticated "is the app serving?" probe.
+    """
+    try:
+        with urllib.request.urlopen(f"{url}/healthz", timeout=timeout) as resp:
+            status = int(resp.status)
+            resp.read()
+    except urllib.error.URLError, ConnectionError, OSError:
+        return False
+    return 200 <= status < 300
+
+
+def readyz_failures(url: str, *, timeout: float = 2.0) -> list[str] | None:
+    """Return failing ``/readyz`` check symbols, or ``None`` when ready.
+
+    A long-lived dev-stack container can drift behind the repo's
+    migration head; ``/healthz`` still answers 200 (the ASGI server is
+    up) but writes that touch a missing column fail at commit time,
+    surfacing later as a confusing downstream error. Probing ``/readyz``
+    lets the fixture distinguish "app down" from "app up but migrations
+    behind / worker stalled" and skip with a precise remediation hint.
+
+    Returns ``None`` on 200; on a 503 returns the ``checks[].check``
+    symbols (e.g. ``["migrations"]``); on any network / parse failure
+    returns a one-element fallback so the caller still skips coherently.
+    """
+    try:
+        with urllib.request.urlopen(f"{url}/readyz", timeout=timeout) as resp:
+            status = int(resp.status)
+            payload_bytes = resp.read()
+    except urllib.error.HTTPError as exc:
+        try:
+            status = exc.code
+            payload_bytes = exc.read()
+        finally:
+            exc.close()
+    except urllib.error.URLError, ConnectionError, OSError:
+        return ["unreachable"]
+
+    if 200 <= status < 300:
+        return None
+    try:
+        payload = json.loads(payload_bytes.decode("utf-8")) if payload_bytes else {}
+    except ValueError, UnicodeDecodeError:
+        return [f"http_{status}"]
+    if not isinstance(payload, dict):
+        return [f"http_{status}"]
+    checks = payload.get("checks", [])
+    if not isinstance(checks, list):
+        return [f"http_{status}"]
+    failures = [
+        check.get("check", "unknown")
+        for check in checks
+        if isinstance(check, dict) and check.get("ok") is False
+    ]
+    return failures or [f"http_{status}"]
+
+
+@pytest.fixture(scope="module")
+def stack_endpoints() -> Iterator[tuple[str, str]]:
+    """Yield ``(app_url, mailpit_url)`` after gating on the dev stack.
+
+    Skips the whole module when the app-api is unreachable, not ready
+    (``/readyz`` failing — the migration-drift trap gets a precise
+    hint), or Mailpit is unreachable, so a host without the compose
+    stack up records a clean skip rather than a noisy failure. Module
+    scope: one reachability probe per module; per-test isolation is the
+    function-scoped :func:`clean_inbox` purge.
+    """
+    resolved_app_url = app_url()
+    resolved_mailpit_url = mailpit_url()
+    if not app_reachable(resolved_app_url):
+        pytest.skip(
+            f"app-api not reachable at {resolved_app_url}; start the dev stack "
+            "with `docker compose -f docker-compose.dev.yml up -d`"
+        )
+    failing_checks = readyz_failures(resolved_app_url)
+    if failing_checks is not None:
+        pytest.skip(
+            f"app-api at {resolved_app_url} is not ready (failing: "
+            f"{failing_checks}); if 'migrations' is listed, restart the dev "
+            "stack — `docker compose -f docker-compose.dev.yml restart app-api` "
+            "— to pick up new revisions"
+        )
+    if not is_reachable(resolved_mailpit_url):
+        pytest.skip(
+            f"Mailpit not reachable at {resolved_mailpit_url}; start the dev "
+            "stack with `docker compose -f docker-compose.dev.yml up -d`"
+        )
+    yield resolved_app_url, resolved_mailpit_url
+
+
+@pytest.fixture
+def clean_inbox(stack_endpoints: tuple[str, str]) -> Iterator[tuple[str, str]]:
+    """Purge Mailpit under the cross-worker lock before a dev-stack test.
+
+    The dev-stack Mailpit persists between runs, so an earlier test or
+    another agent's run can leave envelopes behind. Purging at fixture
+    entry gives every test a known-empty inbox without coupling cases.
+    """
+    _, resolved_mailpit_url = stack_endpoints
+    with mailpit_test_lock():
+        purge_inbox(resolved_mailpit_url)
+        yield stack_endpoints
+
+
+@pytest.fixture
+def clean_mailpit() -> Iterator[str]:
+    """Skip when Mailpit is unreachable, purge the inbox, yield its URL.
+
+    Right shape for tests driving an in-process client whose SMTP mailer
+    targets the dev-stack Mailpit sink (the signup round-trip): they need
+    a clean inbox but never touch the dev-stack app-api, so they gate on
+    Mailpit reachability alone. The reachability probe runs inside the
+    cross-worker lock so a concurrent purge cannot race the check.
+    """
+    resolved_mailpit_url = mailpit_url()
+    with mailpit_test_lock():
+        if not is_reachable(resolved_mailpit_url):
+            pytest.skip(
+                f"Mailpit not reachable at {resolved_mailpit_url}; start the "
+                "dev stack with `docker compose -f docker-compose.dev.yml up "
+                "-d --build`"
+            )
+        purge_inbox(resolved_mailpit_url)
+        yield resolved_mailpit_url

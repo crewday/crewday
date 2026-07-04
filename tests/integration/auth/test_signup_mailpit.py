@@ -43,23 +43,20 @@ from app.config import Settings
 from tests.integration.auth._signup_cleanup import delete_signup_rows
 from tests.integration.mail import (
     fetch_message_detail,
-    is_reachable,
-    mailpit_test_lock,
-    purge_inbox,
     wait_for_message,
 )
 
 pytestmark = pytest.mark.integration
+# ``clean_mailpit`` (skip-if-unreachable + inbox purge) lives in the shared
+# ``tests.integration.mail`` plugin. This module drives an in-process client
+# whose SMTP mailer targets the dev-stack Mailpit sink, so it gates on Mailpit
+# reachability alone.
+pytest_plugins = ["tests.integration.mail"]
 
-_DEFAULT_MAILPIT_URL = "http://127.0.0.1:8026"
 _DEFAULT_MAILPIT_SMTP_HOST = "127.0.0.1"
 _DEFAULT_MAILPIT_SMTP_PORT = 1026
 _SIGNUP_SUBJECT = "crew.day — verify your email and finish signing up"
 _SIGNUP_PURPOSE = "signup_verify"
-
-
-def _mailpit_url() -> str:
-    return os.environ.get("CREWDAY_TEST_MAILPIT_URL", _DEFAULT_MAILPIT_URL)
 
 
 def _mailpit_smtp_host() -> str:
@@ -70,19 +67,6 @@ def _mailpit_smtp_port() -> int:
     return int(
         os.environ.get("CREWDAY_TEST_MAILPIT_SMTP_PORT", _DEFAULT_MAILPIT_SMTP_PORT)
     )
-
-
-@pytest.fixture
-def clean_mailpit() -> Iterator[str]:
-    mailpit_url = _mailpit_url()
-    with mailpit_test_lock():
-        if not is_reachable(mailpit_url):
-            pytest.skip(
-                f"Mailpit not reachable at {mailpit_url}; start the dev stack with "
-                "`docker compose -f docker-compose.dev.yml up -d --build`"
-            )
-        purge_inbox(mailpit_url)
-        yield mailpit_url
 
 
 @pytest.fixture

@@ -45,12 +45,10 @@ actually emits"; a 200 + outcome body is what it does.
 from __future__ import annotations
 
 import json
-import os
 import time
 import urllib.error
 import urllib.request
 import uuid
-from collections.abc import Iterator
 from typing import Any
 from urllib.parse import urlparse
 
@@ -58,9 +56,6 @@ import pytest
 
 from tests.integration.mail import (
     fetch_message_detail,
-    is_reachable,
-    mailpit_test_lock,
-    purge_inbox,
     wait_for_message,
 )
 
@@ -79,164 +74,10 @@ pytestmark = [
     pytest.mark.integration,
     pytest.mark.xdist_group("magic_link_mailpit"),
 ]
-
-
-# ---------------------------------------------------------------------------
-# Dev-stack endpoints
-# ---------------------------------------------------------------------------
-
-
-# Mailpit's host port — set to ``8026`` because the dev compose file
-# remaps the container's ``8025`` to host ``8026`` to avoid conflicting
-# with another project's mailpit on the shared dev box (see
-# ``docker-compose.dev.yml`` "127.0.0.1:8026:8025"). Override via
-# ``CREWDAY_TEST_MAILPIT_URL`` when running against a non-dev sink
-# (testcontainers-style throwaway, port-forwarded prod-shadow, …).
-_DEFAULT_MAILPIT_URL = "http://127.0.0.1:8026"
-# App-api is only reachable from the host through the Vite dev proxy
-# at ``127.0.0.1:8100`` — Vite forwards ``/auth/*`` and ``/api/*`` to
-# the in-network ``app-api:8000`` container. Override via
-# ``CREWDAY_TEST_APP_URL`` when the operator has the API published
-# directly (e.g. ``-p 127.0.0.1:8000:8000``).
-_DEFAULT_APP_URL = "http://127.0.0.1:8100"
-
-
-def _mailpit_url() -> str:
-    return os.environ.get("CREWDAY_TEST_MAILPIT_URL", _DEFAULT_MAILPIT_URL)
-
-
-def _app_url() -> str:
-    return os.environ.get("CREWDAY_TEST_APP_URL", _DEFAULT_APP_URL)
-
-
-def _app_reachable(app_url: str, *, timeout: float = 2.0) -> bool:
-    """Return ``True`` when ``GET {app_url}/healthz`` answers 2xx.
-
-    The app-api factory mounts ``/healthz`` unconditionally — see
-    :mod:`app.api.factory`. A 2xx there is the cheapest "is the app
-    actually serving?" probe we have, and it doesn't need auth.
-    """
-    try:
-        with urllib.request.urlopen(f"{app_url}/healthz", timeout=timeout) as resp:
-            status = int(resp.status)
-            resp.read()
-    except urllib.error.URLError, ConnectionError, OSError:
-        return False
-    return 200 <= status < 300
-
-
-def _readyz_failures(app_url: str, *, timeout: float = 2.0) -> list[str] | None:
-    """Return a list of failing ``/readyz`` checks, or ``None`` when ready.
-
-    The dev-stack ``app-api`` container runs ``alembic upgrade head`` in
-    its entrypoint, but a long-lived container can drift behind the
-    repo's migration head whenever a new revision lands and the
-    container hasn't been restarted (``docker compose restart app-api``
-    re-runs the upgrade). When that happens, ``/healthz`` still answers
-    200 (the ASGI server is up) but every write that touches a column
-    added by the missing migration fails at commit time — silently
-    rolling back the magic-link nonce row, so a subsequent ``consume``
-    sees ``rowcount == 0`` and maps onto ``409 already_consumed``.
-
-    That's exactly the failure mode cd-t2jz reproduced before this
-    helper existed: the round-trip looked like the consume side was
-    broken, but the real cause was schema drift on the request side.
-    Probing ``/readyz`` lets the fixture distinguish "app down" from
-    "app up but migrations behind / worker stalled / root key missing"
-    and surface a clear remediation hint, instead of a confusing 409.
-
-    Returns ``None`` when readyz returns 200; on a 503 returns the
-    ``checks[].check`` symbols (e.g. ``["migrations"]``); on any
-    network / parse failure returns a one-element fallback list so the
-    fixture still skips with a coherent reason.
-    """
-    try:
-        with urllib.request.urlopen(f"{app_url}/readyz", timeout=timeout) as resp:
-            status = int(resp.status)
-            payload_bytes = resp.read()
-    except urllib.error.HTTPError as exc:
-        try:
-            status = exc.code
-            payload_bytes = exc.read()
-        finally:
-            exc.close()
-    except urllib.error.URLError, ConnectionError, OSError:
-        return ["unreachable"]
-
-    if 200 <= status < 300:
-        return None
-    try:
-        payload = json.loads(payload_bytes.decode("utf-8")) if payload_bytes else {}
-    except ValueError, UnicodeDecodeError:
-        return [f"http_{status}"]
-    if not isinstance(payload, dict):
-        return [f"http_{status}"]
-    checks = payload.get("checks", [])
-    if not isinstance(checks, list):
-        return [f"http_{status}"]
-    failures = [
-        check.get("check", "unknown")
-        for check in checks
-        if isinstance(check, dict) and check.get("ok") is False
-    ]
-    return failures or [f"http_{status}"]
-
-
-@pytest.fixture(scope="module")
-def stack_endpoints() -> Iterator[tuple[str, str]]:
-    """Yield ``(app_url, mailpit_url)`` after sanity-checking both.
-
-    Skips the whole module when either endpoint is unreachable, so a
-    CI run on a host without the dev compose stack up just records
-    a skip — not a failure. Module-scoped because we only need one
-    reachability probe per test session; the per-test inbox purge
-    (function-scoped fixture below) handles isolation.
-
-    Beyond raw reachability, we also gate on ``/readyz`` so a dev-stack
-    container running stale migrations (the cd-t2jz failure mode —
-    ``audit_log`` missing the ``scope_kind`` column added by a
-    revision newer than the one the running image migrated to) skips
-    with a precise remediation hint instead of failing later with a
-    misleading ``409 already_consumed`` from ``consume``.
-    """
-    app_url = _app_url()
-    mailpit_url = _mailpit_url()
-    if not _app_reachable(app_url):
-        pytest.skip(
-            f"app-api not reachable at {app_url} — start the dev stack via "
-            "`docker compose -f docker-compose.dev.yml up -d`"
-        )
-    failing_checks = _readyz_failures(app_url)
-    if failing_checks is not None:
-        pytest.skip(
-            f"app-api at {app_url} is not ready (failing: {failing_checks}); "
-            "if 'migrations' is listed, restart the dev stack — "
-            "`docker compose -f docker-compose.dev.yml restart app-api` — "
-            "to pick up new revisions"
-        )
-    if not is_reachable(mailpit_url):
-        pytest.skip(
-            f"Mailpit not reachable at {mailpit_url} — start the dev stack via "
-            "`docker compose -f docker-compose.dev.yml up -d`"
-        )
-    yield app_url, mailpit_url
-
-
-@pytest.fixture
-def clean_inbox(stack_endpoints: tuple[str, str]) -> Iterator[tuple[str, str]]:
-    """Purge Mailpit before the test so assertions don't see stale mail.
-
-    The dev-stack Mailpit persists between runs (a named tmpfile inside
-    the container — see ``/api/v1/info`` ``Database`` field), so an
-    earlier test, manual signup attempt, or another agent's Playwright
-    run can leave envelopes in the inbox. Purging at fixture entry
-    gives every test a known-empty starting state without coupling
-    cases to each other.
-    """
-    _, mailpit_url = stack_endpoints
-    with mailpit_test_lock():
-        purge_inbox(mailpit_url)
-        yield stack_endpoints
+# ``stack_endpoints`` + ``clean_inbox`` (dev-stack reachability/readyz skip
+# guard and inbox purge) live in the shared ``tests.integration.mail``
+# plugin.
+pytest_plugins = ["tests.integration.mail"]
 
 
 # ---------------------------------------------------------------------------

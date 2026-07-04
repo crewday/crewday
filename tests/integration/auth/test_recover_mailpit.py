@@ -21,7 +21,6 @@ import urllib.error
 import urllib.parse
 import urllib.request
 import uuid
-from collections.abc import Iterator
 from typing import Any
 
 import pytest
@@ -29,103 +28,17 @@ import pytest
 from tests.integration.mail import (
     fetch_message_detail,
     fetch_messages,
-    is_reachable,
-    mailpit_test_lock,
-    purge_inbox,
     wait_for_message,
 )
 
 pytestmark = pytest.mark.integration
-
-_DEFAULT_APP_URL = "http://127.0.0.1:8100"
-_DEFAULT_MAILPIT_URL = "http://127.0.0.1:8026"
+# ``stack_endpoints`` + ``clean_inbox`` (dev-stack reachability skip guard
+# and inbox purge) live in the shared ``tests.integration.mail`` plugin.
+pytest_plugins = ["tests.integration.mail"]
 
 _RECOVERY_REQUEST_PATH = "/api/v1/recover/passkey/request"
 _RECOVERY_VERIFY_PATH = "/api/v1/recover/passkey/verify"
 _RECOVERY_PASSKEY_START_PATH = "/api/v1/recover/passkey/start"
-
-
-def _app_url() -> str:
-    return os.environ.get("CREWDAY_TEST_APP_URL", _DEFAULT_APP_URL)
-
-
-def _mailpit_url() -> str:
-    return os.environ.get("CREWDAY_TEST_MAILPIT_URL", _DEFAULT_MAILPIT_URL)
-
-
-def _app_reachable(app_url: str, *, timeout: float = 2.0) -> bool:
-    try:
-        with urllib.request.urlopen(f"{app_url}/healthz", timeout=timeout) as resp:
-            status = int(resp.status)
-            resp.read()
-    except urllib.error.URLError, ConnectionError, OSError:
-        return False
-    return 200 <= status < 300
-
-
-def _readyz_failures(app_url: str, *, timeout: float = 2.0) -> list[str] | None:
-    try:
-        with urllib.request.urlopen(f"{app_url}/readyz", timeout=timeout) as resp:
-            status = int(resp.status)
-            payload_bytes = resp.read()
-    except urllib.error.HTTPError as exc:
-        try:
-            status = exc.code
-            payload_bytes = exc.read()
-        finally:
-            exc.close()
-    except urllib.error.URLError, ConnectionError, OSError:
-        return ["unreachable"]
-
-    if 200 <= status < 300:
-        return None
-    try:
-        payload = json.loads(payload_bytes.decode("utf-8")) if payload_bytes else {}
-    except ValueError, UnicodeDecodeError:
-        return [f"http_{status}"]
-    if not isinstance(payload, dict):
-        return [f"http_{status}"]
-    checks = payload.get("checks", [])
-    if not isinstance(checks, list):
-        return [f"http_{status}"]
-    failures = [
-        check.get("check", "unknown")
-        for check in checks
-        if isinstance(check, dict) and check.get("ok") is False
-    ]
-    return failures or [f"http_{status}"]
-
-
-@pytest.fixture(scope="module")
-def stack_endpoints() -> Iterator[tuple[str, str]]:
-    app_url = _app_url()
-    mailpit_url = _mailpit_url()
-    if not _app_reachable(app_url):
-        pytest.skip(
-            f"app-api not reachable at {app_url}; start the dev stack with "
-            "`docker compose -f docker-compose.dev.yml up -d`"
-        )
-    failures = _readyz_failures(app_url)
-    if failures is not None:
-        pytest.skip(
-            f"app-api at {app_url} is not ready (failing: {failures}); "
-            "run `docker compose -f docker-compose.dev.yml exec app-api "
-            "alembic upgrade head` or restart the dev stack"
-        )
-    if not is_reachable(mailpit_url):
-        pytest.skip(
-            f"Mailpit not reachable at {mailpit_url}; start the dev stack with "
-            "`docker compose -f docker-compose.dev.yml up -d`"
-        )
-    yield app_url, mailpit_url
-
-
-@pytest.fixture
-def clean_inbox(stack_endpoints: tuple[str, str]) -> Iterator[tuple[str, str]]:
-    _, mailpit_url = stack_endpoints
-    with mailpit_test_lock():
-        purge_inbox(mailpit_url)
-        yield stack_endpoints
 
 
 def _post_json(

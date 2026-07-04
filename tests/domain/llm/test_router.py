@@ -92,6 +92,34 @@ async def _wait_for(predicate: Callable[[], bool], *, timeout: float = 5.0) -> N
         await asyncio.sleep(0.05)
 
 
+async def _await_bridge_round_trip(
+    source_bus: EventBus,
+    target_bus: EventBus,
+    *,
+    timeout: float = 10.0,
+) -> None:
+    """Block until a NOTIFY published on ``source_bus`` reaches ``target_bus``.
+
+    Postgres ``LISTEN``/``NOTIFY`` only delivers to connections already
+    listening, so the sibling bridge's ``LISTEN`` must be established
+    before the test's meaningful publish — otherwise the invalidation
+    is silently dropped. Rather than sleep a fixed interval and hope the
+    connection is up, republish a throwaway invalidation until the
+    sibling bus actually observes one. This is fast once the bridge is
+    ready and only times out on a genuine wiring failure.
+    """
+    received = asyncio.Event()
+    target_bus.subscribe(LlmAssignmentChanged)(lambda _event: received.set())
+    probe_workspace_id = new_ulid()
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + timeout
+    while not received.is_set():
+        if loop.time() > deadline:
+            raise AssertionError("invalidation bridge never became ready")
+        _publish_assignment_changed(source_bus, probe_workspace_id)
+        await asyncio.sleep(0.05)
+
+
 def _publish_assignment_changed(bus: EventBus, workspace_id: str) -> None:
     """Emit an :class:`LlmAssignmentChanged` event on ``bus``.
 
@@ -1878,7 +1906,7 @@ class TestPostgresInvalidationBridge:
         bridge_b = PostgresLlmAssignmentInvalidationBridge(engine=engine, bus=bus_b)
         await bridge_a.start()
         await bridge_b.start()
-        await asyncio.sleep(0.5)
+        await _await_bridge_round_trip(bus_a, bus_b)
 
         ws = seed_workspace(db_session)
         ctx = build_context(ws.id)

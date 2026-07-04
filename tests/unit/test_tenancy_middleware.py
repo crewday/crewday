@@ -302,6 +302,7 @@ async def test_healthz_stays_responsive_while_scoped_resolution_blocks(
     """Sync DB waits in scoped tenancy resolution must not pin the event loop."""
     app = _build_app()
     resolver_started = threading.Event()
+    release_resolver = threading.Event()
 
     def blocking_resolve(
         self: WorkspaceContextMiddleware,
@@ -310,14 +311,19 @@ async def test_healthz_stays_responsive_while_scoped_resolution_blocks(
         correlation_id: str,
     ) -> tuple[WorkspaceContext, None, str]:
         resolver_started.set()
-        time.sleep(0.5)
+        # A real sync DB wait pins this worker thread; gating on an
+        # Event reproduces that block deterministically. The test
+        # releases it only after proving /healthz stayed responsive,
+        # so there is no fixed sleep to race against.
+        if not release_resolver.wait(5.0):
+            raise AssertionError("resolver was never released by the test")
         return (
             WorkspaceContext(
                 workspace_id="ws-dev",
                 workspace_slug="dev",
                 actor_id="user-dev",
                 actor_kind="user",
-                actor_grant_role="owner",
+                actor_grant_role="manager",
                 actor_was_owner_member=True,
                 audit_correlation_id=correlation_id,
             ),
@@ -346,6 +352,7 @@ async def test_healthz_stays_responsive_while_scoped_resolution_blocks(
         assert health.status_code == 200
         assert health.json() == {"ok": True, "bound": False}
 
+        release_resolver.set()
         scoped_response = await scoped
         assert scoped_response.status_code == 200
         assert scoped_response.json()["bound"] is True
