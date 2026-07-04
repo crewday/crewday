@@ -1,6 +1,10 @@
 /* ══════════════════════════════════════════════════════════════
    MANAGER (desktop) layout
    ══════════════════════════════════════════════════════════════ */
+
+/* Off-scale type: 10px uppercase nav/section labels and logo glyph sizes
+   (22-26px) are intentional off-scale exceptions per DESIGN.md typography
+   (cd-hmzu6), not a sanctioned scale rung. */
 .desk {
   display: grid; grid-template-columns: 232px 1fr 340px;
   height: calc(100dvh - var(--banner-h, 40px)); position: relative; z-index: 1;
@@ -8,12 +12,14 @@
 }
 .desk__nav {
   background: var(--card); border-right: 1px solid var(--line);
-  padding: 20px 12px; display: flex; flex-direction: column; gap: 16px;
+  padding: var(--space-9) var(--space-6); display: flex; flex-direction: column; gap: var(--space-8);
   height: 100%; min-height: 0; overflow-y: auto;
 }
-.desk__brand { display: flex; align-items: center; gap: 8px; padding: 0 8px; }
+.desk__brand { display: flex; align-items: center; gap: var(--space-4); padding: 0 var(--space-4); }
 .desk__logo { color: var(--moss); font-size: 22px; }
 .desk__wordmark {
+  /* 1.25rem Fraunces wordmark: off-scale between display-sm and headline-md
+     (cd-uo8xv between-rung note). */
   font-family: "Fraunces", serif; font-weight: 700;
   font-size: 1.25rem; letter-spacing: -0.03em;
   font-variation-settings: "opsz" 72;
@@ -21,13 +27,13 @@
 /* §02 — workspace switcher chip placed between the brand row and the
    nav groups. Opens for every signed-in user with at least one
    workspace so creation remains discoverable. */
-.ws-switcher { position: relative; padding: 0 4px; }
+.ws-switcher { position: relative; padding: 0 var(--space-2); }
 .ws-switcher__trigger {
-  display: flex; align-items: center; gap: 8px; width: 100%;
+  display: flex; align-items: center; gap: var(--space-4); width: 100%;
   background: var(--paper-2); border: 1px solid var(--line);
-  border-radius: var(--radius-card); padding: 8px 10px; cursor: pointer;
+  border-radius: var(--radius-card); padding: var(--space-4) var(--space-5); cursor: pointer;
   color: var(--ink-1); text-align: left;
-  font: inherit; font-size: 13px; font-weight: 600;
+  font: inherit; font-size: var(--text-body-sm); font-weight: 600;
 }
 .ws-switcher__trigger:hover { background: var(--paper-3, var(--paper-2)); }
 .ws-switcher__name { flex: 1; min-width: 0; }
@@ -39,16 +45,16 @@
 .ws-switcher__chev { color: var(--ink-3); flex-shrink: 0; }
 .ws-switcher__menu {
   position: absolute; top: calc(100% + 4px); left: 4px; right: 4px;
-  list-style: none; margin: 0; padding: 4px;
+  list-style: none; margin: 0; padding: var(--space-2);
   background: var(--card); border: 1px solid var(--line);
   border-radius: var(--radius-card); box-shadow: var(--shadow);
   z-index: 50; max-height: 60vh; overflow-y: auto;
 }
 .ws-switcher__opt {
-  display: flex; align-items: center; gap: 8px; width: 100%;
-  background: transparent; border: 0; padding: 8px 10px; cursor: pointer;
+  display: flex; align-items: center; gap: var(--space-4); width: 100%;
+  background: transparent; border: 0; padding: var(--space-4) var(--space-5); cursor: pointer;
   color: var(--ink-1); text-align: left; border-radius: var(--radius-control);
-  font: inherit; font-size: 13px;
+  font: inherit; font-size: var(--text-body-sm);
 }
 .ws-switcher__opt:hover { background: var(--paper-2); }
 .ws-switcher__opt--active { background: var(--moss-soft); color: var(--moss); font-weight: 600; }
@@ -59,13 +65,13 @@
   color: var(--ink-3); font-weight: 500;
 }
 .ws-switcher__opt-check { flex-shrink: 0; }
-.ws-switcher__separator { height: 1px; background: var(--line); margin: 4px 2px; }
+.ws-switcher__separator { height: 1px; background: var(--line); margin: var(--space-2) var(--space-1); }
 
-.desk__nav-group { display: flex; flex-direction: column; gap: 2px; }
+.desk__nav-group { display: flex; flex-direction: column; gap: var(--space-1); }
 .nav-section {
-  display: flex; align-items: center; gap: 8px;
+  display: flex; align-items: center; gap: var(--space-4);
   font-size: 10px; text-transform: uppercase; letter-spacing: 0.14em;
-  color: var(--ink-3); padding: 12px 12px 4px 12px;
+  color: var(--ink-3); padding: var(--space-6) var(--space-6) var(--space-2) var(--space-6);
 }
 .nav-section__text { flex: 0 0 auto; }
 .nav-section__rule {
@@ -76,9 +82,9 @@
 .nav-link {
   position: relative;
   display: grid; grid-template-columns: 18px 1fr;
-  align-items: center; gap: 10px;
+  align-items: center; gap: var(--space-5);
   padding: 7px 12px; border-radius: var(--radius-card); color: var(--ink-2);
-  font-weight: 500; font-size: 14px;
+  font-weight: 500; font-size: var(--text-label-md);
   transition: background 140ms ease, color 140ms ease;
 }
 .nav-link__icon {
@@ -98,7 +104,7 @@
   transition: height 160ms ease;
 }
 .nav-link__fallback-glyph {
-  font-family: "Fraunces", serif; font-weight: 600; font-size: 13px;
+  font-family: "Fraunces", serif; font-weight: 600; font-size: var(--text-body-sm);
   line-height: 1; color: var(--ink-3);
 }
 .nav-link:hover {
@@ -120,23 +126,23 @@
 }
 
 .desk__nav-action {
-  padding: 8px 4px 0;
+  padding: var(--space-4) var(--space-2) 0;
   display: flex; justify-content: stretch;
 }
 .desk__nav-action > .clock-toggle { width: 100%; }
 .desk__nav-action > .booking-hint { width: 100%; }
 
 .desk__me {
-  display: flex; align-items: center; gap: 10px;
-  padding: 10px; border-top: 1px solid var(--line);
+  display: flex; align-items: center; gap: var(--space-5);
+  padding: var(--space-5); border-top: 1px solid var(--line);
   position: relative;
 }
 .desk__me-meta { min-width: 0; flex: 1 1 auto; }
 .desk__me-name {
-  font-weight: 600; font-size: 13px;
+  font-weight: 600; font-size: var(--text-body-sm);
 }
 .desk__me-role {
-  color: var(--ink-3); font-size: 12px;
+  color: var(--ink-3); font-size: var(--text-label-sm);
 }
 
 /* When present, the me footer is pinned to the bottom. The
@@ -185,11 +191,11 @@
   position: absolute;
   top: 50%; left: calc(100% + 8px);
   transform: translate(-4px, -50%);
-  padding: 6px 12px 6px 10px;
+  padding: var(--space-3) var(--space-6) var(--space-3) var(--space-5);
   background: var(--card-raised);
   color: var(--ink);
   font-family: "Inter Tight", sans-serif; font-weight: 500;
-  font-size: 13px;
+  font-size: var(--text-body-sm);
   white-space: nowrap;
   border-radius: var(--radius-control);
   border-left: 2px solid var(--moss);
@@ -217,8 +223,8 @@
    `pointer-events: none` except on the actual link, so main-column
    interactions are never blocked. */
 .desk__nav--collapsed {
-  padding: 20px 6px;
-  gap: 10px;
+  padding: var(--space-9) var(--space-3);
+  gap: var(--space-5);
   align-items: stretch;
   overflow: visible;
 }
@@ -245,7 +251,7 @@
 .desk__nav--collapsed .desk__brand {
   flex-direction: column;
   justify-content: center; align-items: center;
-  gap: 6px;
+  gap: var(--space-3);
   padding: 0;
 }
 .desk__nav--collapsed .desk__logo {
@@ -272,7 +278,7 @@
 /* Section headers become a thin rule — the text is still in the DOM
    for screen readers but hidden visually so the rail stays calm. */
 .desk__nav--collapsed .nav-section {
-  padding: 8px 10px 2px;
+  padding: var(--space-4) var(--space-5) var(--space-1);
   gap: 0;
 }
 .desk__nav--collapsed .nav-section__text {
@@ -310,7 +316,7 @@
 /* Me footer: avatar only, centered. Hover shows the tooltip stash. */
 .desk__nav--collapsed .desk__me {
   justify-content: center;
-  padding: 10px 4px;
+  padding: var(--space-5) var(--space-2);
   gap: 0;
 }
 .desk__nav--collapsed .desk__me-meta { display: none; }
@@ -327,13 +333,13 @@
    pins to the left edge when no back button or action exists. Phone
    overrides below turn this into a sticky, compact, safe-area bar. */
 .page-topbar {
-  display: flex; align-items: flex-start; gap: 16px;
+  display: flex; align-items: flex-start; gap: var(--space-8);
   margin-bottom: 26px;
-  padding-top: 36px; padding-bottom: 10px;
+  padding-top: 36px; padding-bottom: var(--space-5);
 }
 .page-topbar__leading {
   flex: 0 0 auto;
-  display: flex; align-items: center; gap: 4px;
+  display: flex; align-items: center; gap: var(--space-2);
   min-height: 44px;
 }
 .page-topbar__leading:empty { display: none; }
@@ -342,7 +348,7 @@
 }
 .page-topbar__trailing {
   flex: 0 0 auto;
-  display: flex; align-items: center; gap: 8px;
+  display: flex; align-items: center; gap: var(--space-4);
   min-height: 44px;
   margin-left: auto;
 }
@@ -368,17 +374,19 @@
 }
 .desk__content { display: flex; flex-direction: column; gap: 22px; }
 .page-title {
-  font-size: 2.05rem; margin-bottom: 4px; line-height: 1.1;
+  /* 2.05rem Fraunces page title: intentional large display above display-lg
+     (cd-uo8xv between-rung note). */
+  font-size: 2.05rem; margin-bottom: var(--space-2); line-height: 1.1;
   font-variation-settings: "opsz" 96;
 }
-.page-sub { color: var(--ink-3); font-size: 14px; }
+.page-sub { color: var(--ink-3); font-size: var(--text-label-md); }
 
 /* Overflow menu used by the header trailing slot. Rendered as a native
    <dialog> so Escape + backdrop click + focus trap come for free. */
 .overflow-menu[open] {
   border: 1px solid var(--line);
   border-radius: var(--radius-card);
-  padding: 6px;
+  padding: var(--space-3);
   background: var(--card); color: var(--ink);
   box-shadow: 0 20px 60px rgba(0,0,0,0.25);
   min-width: min(260px, 86vw);
@@ -386,11 +394,11 @@
 .overflow-menu::backdrop { background: rgba(31, 26, 20, 0.35); }
 .overflow-menu__list {
   list-style: none; padding: 0; margin: 0;
-  display: flex; flex-direction: column; gap: 2px;
+  display: flex; flex-direction: column; gap: var(--space-1);
 }
 .overflow-menu__item {
-  display: flex; align-items: center; gap: 10px;
-  width: 100%; padding: 10px 12px;
+  display: flex; align-items: center; gap: var(--space-5);
+  width: 100%; padding: var(--space-5) var(--space-6);
   min-height: 44px;
   background: transparent; border: 0; border-radius: var(--radius-card);
   font: inherit; color: var(--ink);
@@ -419,23 +427,23 @@
   flex: 1;
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: var(--space-1);
 }
 .overflow-menu__reason {
   color: var(--ink-3);
-  font-size: 12px;
+  font-size: var(--text-label-sm);
   line-height: 1.25;
 }
 .page-action-disabled {
   display: inline-flex;
   align-items: center;
-  gap: 8px;
+  gap: var(--space-4);
   min-width: 0;
 }
 .page-action-disabled__reason {
   max-width: 150px;
   color: var(--ink-3);
-  font-size: 12px;
+  font-size: var(--text-label-sm);
   line-height: 1.2;
   overflow-wrap: anywhere;
 }
@@ -448,6 +456,6 @@
 @media (max-width: 719px) {
   .page-topbar__trailing .page-action-disabled__reason {
     max-width: 84px;
-    font-size: 11px;
+    font-size: var(--text-mono-sm);
   }
 }

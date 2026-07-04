@@ -32,27 +32,27 @@
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 12px;
-  padding: 24px 16px;
+  gap: var(--space-6);
+  padding: var(--space-10) var(--space-8);
 }
 .chat-log {
   flex: 1 1 auto; min-height: 0;
-  display: flex; flex-direction: column; gap: 6px;
-  padding: 16px 14px 20px;
+  display: flex; flex-direction: column; gap: var(--space-3);
+  padding: var(--space-8) var(--space-7) var(--space-9);
   overflow-y: auto;
   scroll-behavior: smooth;
   overscroll-behavior: contain;
 }
 .chat-log--inline {
-  padding: 8px 0;
+  padding: var(--space-4) 0;
   flex: initial;
   max-height: 340px;
   overflow-y: auto;
 }
 
 .chat-msg {
-  padding: 8px 12px 6px; border-radius: var(--radius-modal);
-  font-size: 14px; line-height: 1.4; max-width: 78%;
+  padding: var(--space-4) var(--space-6) var(--space-3); border-radius: var(--radius-modal);
+  font-size: var(--text-label-md); line-height: 1.4; max-width: 78%;
   box-shadow: 0 1px 0.5px rgba(31, 26, 20, 0.08);
   position: relative;
   word-wrap: break-word;
@@ -60,7 +60,7 @@
 .chat-msg__body { display: block; }
 .chat-markdown {
   display: grid;
-  gap: 6px;
+  gap: var(--space-3);
 }
 .chat-markdown__paragraph {
   margin: 0;
@@ -94,7 +94,7 @@
   font-size: 0.92em;
   background: color-mix(in srgb, currentColor 8%, transparent);
   border-radius: var(--radius-tag);
-  padding: 0 4px;
+  padding: 0 var(--space-2);
 }
 .chat-markdown__code {
   margin: 0;
@@ -105,7 +105,7 @@
   line-height: 1.45;
   background: color-mix(in srgb, currentColor 7%, transparent);
   border-radius: var(--radius-control);
-  padding: 8px;
+  padding: var(--space-4);
 }
 .chat-markdown__code code {
   background: transparent;
@@ -129,23 +129,24 @@
 .chat-msg--action {
   background: var(--card); border: 1px solid var(--sand);
   align-self: flex-start; max-width: 90%;
-  display: flex; flex-direction: column; gap: 8px;
+  display: flex; flex-direction: column; gap: var(--space-4);
   box-shadow: 0 1px 2px rgba(217, 164, 65, 0.18);
 }
-.chat-msg__ctas { display: flex; gap: 6px; }
+.chat-msg__ctas { display: flex; gap: var(--space-3); }
 .agent-message-links {
   display: flex;
   flex-wrap: wrap;
-  gap: 6px;
-  margin-top: 8px;
+  gap: var(--space-3);
+  margin-top: var(--space-4);
 }
 .agent-message-links__link {
   text-decoration: none;
   width: auto;
 }
 .chat-msg__time {
+  /* 10px timestamp: intentional sub-11px off-scale exception (cd-hmzu6). */
   display: block; font-size: 10px; color: var(--ink-3);
-  margin-top: 2px; text-align: right;
+  margin-top: var(--space-1); text-align: right;
   font-family: "JetBrains Mono", monospace;
 }
 .chat-activity,
@@ -153,7 +154,7 @@
   align-self: flex-start;
   max-width: 78%;
   color: var(--ink-3);
-  font-size: 11px;
+  font-size: var(--text-mono-sm);
   line-height: 1.25;
   font-family: "JetBrains Mono", monospace;
   letter-spacing: 0;
@@ -174,11 +175,11 @@
  * prefers-reduced-motion per §14 "Motion". */
 .chat-msg--typing,
 .agent-msg--typing {
-  padding-top: 10px; padding-bottom: 10px;
+  padding-top: var(--space-5); padding-bottom: var(--space-5);
   min-width: 52px;
 }
 .chat-typing {
-  display: inline-flex; gap: 4px; align-items: center;
+  display: inline-flex; gap: var(--space-2); align-items: center;
   height: 10px;
 }
 .chat-typing__dot {
@@ -210,7 +211,7 @@
   padding: 8px 10px calc(8px + env(safe-area-inset-bottom, 0px));
   background: var(--paper-2);
   border-top: 1px solid var(--line);
-  display: flex; align-items: flex-end; gap: 8px;
+  display: flex; align-items: flex-end; gap: var(--space-4);
   z-index: 15;
 }
 .chat-composer__icon {
@@ -240,8 +241,8 @@
      textarea grows to 140px — pill would turn the tall state into a
      lozenge, so this stays a fixed rounded-rect between card and modal. */
   border-radius: 22px;
-  padding: 2px 6px 2px 14px;
-  display: flex; align-items: center; gap: 4px;
+  padding: var(--space-1) var(--space-3) var(--space-1) var(--space-7);
+  display: flex; align-items: center; gap: var(--space-2);
   transition: border-color 120ms ease;
 }
 .chat-composer__field:focus-within { border-color: var(--moss); }
@@ -250,7 +251,7 @@
   border: 0; background: transparent;
   color: var(--ink);
   font: inherit; font-family: "Inter Tight", sans-serif;
-  font-size: 15px; line-height: 1.4;
+  font-size: var(--text-body-md); line-height: 1.4;
   padding: 9px 2px;
   min-height: 24px;
   max-height: 140px;
@@ -279,7 +280,7 @@
 .chat-composer--inline {
   position: static;
   margin: 0;
-  padding: 8px 0 0;
+  padding: var(--space-4) 0 0;
   border-top: 0;
   background: transparent;
   z-index: auto;

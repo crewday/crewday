@@ -11,20 +11,26 @@
    without colliding.
    ========================================================== */
 
+/* Off-scale type in this file: the dense credential/scope tiles carry
+   sub-11px monospace + micro-labels (9-11.5px) and compact sub-1rem
+   Fraunces titles (14.5-18px). These are intentional off-scale exceptions
+   per DESIGN.md typography (cd-hmzu6) for this information-dense surface,
+   not a sanctioned scale rung. */
+
 /* Header meta strip — sits in .panel__head next to the title.
    Replaces trailing .muted text with a structured rhythm of
    counters + a quiet pointer to the /me surface. */
 .tokens-meta {
-  display: flex; align-items: center; gap: 14px;
-  font-size: 12px; color: var(--ink-3);
+  display: flex; align-items: center; gap: var(--space-7);
+  font-size: var(--text-label-sm); color: var(--ink-3);
   font-variant-numeric: tabular-nums;
 }
 .tokens-meta__stat {
-  display: inline-flex; align-items: baseline; gap: 4px;
+  display: inline-flex; align-items: baseline; gap: var(--space-2);
 }
 .tokens-meta__stat-value {
   font-family: "Fraunces", serif; font-weight: 600;
-  font-size: 15px; color: var(--ink);
+  font-size: var(--text-body-md); color: var(--ink);
   font-variation-settings: "opsz" 16;
 }
 .tokens-meta__stat-label {
@@ -56,7 +62,7 @@
 .tokens-table thead th {
   font-size: 10.5px; font-weight: 600; color: var(--ink-3);
   text-transform: uppercase; letter-spacing: 0.1em;
-  padding: 12px 14px 10px; text-align: left;
+  padding: var(--space-6) var(--space-7) var(--space-5); text-align: left;
   border-bottom: 1px solid var(--line);
 }
 .tokens-table tbody td {
@@ -85,7 +91,7 @@
 }
 .tokens-name__title {
   font-family: "Fraunces", serif; font-weight: 600;
-  font-size: 16px; color: var(--ink); line-height: 1.2;
+  font-size: var(--text-body-lg); color: var(--ink); line-height: 1.2;
   font-variation-settings: "opsz" 24;
 }
 .tokens-name__id {
@@ -94,19 +100,19 @@
   letter-spacing: 0.01em;
 }
 .tokens-name__id::before {
-  content: "◆"; color: var(--moss-2); margin-right: 6px;
+  content: "◆"; color: var(--moss-2); margin-right: var(--space-3);
   font-size: 9px; vertical-align: 1.5px;
 }
 [data-theme="dark"] .tokens-name__id::before { color: var(--moss); }
 .tokens-name__note {
-  font-size: 12.5px; color: var(--ink-3); font-style: italic;
+  font-size: var(--text-label-sm); color: var(--ink-3); font-style: italic;
   max-width: 28ch; line-height: 1.4;
 }
 
 /* Kind badge — slightly more presence than .chip (serif-matched,
    outlined, per-kind tone). */
 .tokens-kind {
-  display: inline-flex; align-items: center; gap: 6px;
+  display: inline-flex; align-items: center; gap: var(--space-3);
   padding: 3px 10px 3px 8px; border-radius: var(--radius-pill);
   font-size: 11.5px; font-weight: 600; letter-spacing: 0.02em;
   border: 1px solid transparent; white-space: nowrap;
@@ -133,11 +139,11 @@
 
 /* Scope list in a table cell — pills aligned tightly, wrapping. */
 .tokens-scopes {
-  display: flex; flex-wrap: wrap; gap: 4px; max-width: 22ch;
+  display: flex; flex-wrap: wrap; gap: var(--space-2); max-width: 22ch;
 }
 .tokens-scopes__pill {
   font-family: "JetBrains Mono", ui-monospace, monospace;
-  font-size: 11px; padding: 2px 8px; border-radius: var(--radius-tag);
+  font-size: var(--text-mono-sm); padding: var(--space-1) var(--space-4); border-radius: var(--radius-tag);
   background: var(--paper-2); color: var(--ink-2);
   border: 1px solid var(--line);
   white-space: nowrap;
@@ -147,14 +153,14 @@
   border-color: transparent;
 }
 .tokens-scopes__inherit {
-  font-size: 12px; color: var(--ink-3); font-style: italic;
+  font-size: var(--text-label-sm); color: var(--ink-3); font-style: italic;
   line-height: 1.35; max-width: 22ch;
 }
 
 /* Stacked time cell — primary timestamp + quieter secondary */
 .tokens-time {
-  display: flex; flex-direction: column; gap: 2px;
-  font-size: 12.5px; color: var(--ink-2);
+  display: flex; flex-direction: column; gap: var(--space-1);
+  font-size: var(--text-label-sm); color: var(--ink-2);
   font-variant-numeric: tabular-nums;
 }
 .tokens-time__sub {
@@ -165,13 +171,13 @@
   font-size: 10.5px; color: var(--ink-3);
   letter-spacing: 0.01em; margin-top: 1px;
 }
-.tokens-time--absent { color: var(--ink-4); font-style: italic; font-size: 12px; }
+.tokens-time--absent { color: var(--ink-4); font-style: italic; font-size: var(--text-label-sm); }
 
 /* Status dot — carries the same tone as the row tick, but as an
    explicit pill so the column header has a target. */
 .tokens-status {
-  display: inline-flex; align-items: center; gap: 6px;
-  font-size: 12px; font-weight: 500;
+  display: inline-flex; align-items: center; gap: var(--space-3);
+  font-size: var(--text-label-sm); font-weight: 500;
 }
 .tokens-status::before {
   content: ""; width: 8px; height: 8px; border-radius: 50%;
@@ -186,46 +192,46 @@
 .tokens-status--revoked::before  { background: var(--ink-4); }
 
 .tokens-row-actions {
-  display: flex; flex-direction: column; gap: 4px;
+  display: flex; flex-direction: column; gap: var(--space-2);
   align-items: flex-end; white-space: nowrap;
 }
-.tokens-row-actions__primary { display: flex; gap: 4px; }
+.tokens-row-actions__primary { display: flex; gap: var(--space-2); }
 
 /* Per-token audit log — distinctly quieter than the main list.
    Inset on the warm paper-2, smaller type, left-gutter timestamp. */
 .tokens-audit {
-  margin-top: 14px; padding: 16px 18px;
+  margin-top: var(--space-7); padding: 16px 18px;
   background: var(--paper-2);
   border: 1px dashed var(--line-strong);
   border-radius: var(--radius-card);
 }
 .tokens-audit__head {
   display: flex; align-items: baseline; justify-content: space-between;
-  margin-bottom: 10px;
+  margin-bottom: var(--space-5);
 }
 .tokens-audit__title {
   font-family: "Fraunces", serif; font-weight: 600;
-  font-size: 14px; color: var(--ink);
+  font-size: var(--text-label-md); color: var(--ink);
   font-variation-settings: "opsz" 14;
 }
 .tokens-audit__title-tag {
   font-family: "JetBrains Mono", ui-monospace, monospace;
-  font-size: 11.5px; color: var(--ink-3); margin-left: 8px;
+  font-size: 11.5px; color: var(--ink-3); margin-left: var(--space-4);
 }
 .tokens-audit__empty {
-  color: var(--ink-3); font-size: 12.5px; font-style: italic;
+  color: var(--ink-3); font-size: var(--text-label-sm); font-style: italic;
 }
 .tokens-audit__table {
-  width: 100%; border-collapse: collapse; font-size: 12.5px;
+  width: 100%; border-collapse: collapse; font-size: var(--text-label-sm);
 }
 .tokens-audit__table th {
-  text-align: left; padding: 6px 8px;
+  text-align: left; padding: var(--space-3) var(--space-4);
   font-size: 10px; font-weight: 600; color: var(--ink-3);
   text-transform: uppercase; letter-spacing: 0.08em;
   border-bottom: 1px solid var(--line);
 }
 .tokens-audit__table td {
-  padding: 8px; border-bottom: 1px solid var(--line);
+  padding: var(--space-4); border-bottom: 1px solid var(--line);
   color: var(--ink-2); vertical-align: top;
 }
 .tokens-audit__table tr:last-child td { border-bottom: 0; }
@@ -236,16 +242,16 @@
 .tokens-audit__method {
   display: inline-block; min-width: 44px; text-align: center;
   font-family: "JetBrains Mono", ui-monospace, monospace;
-  font-size: 11px; font-weight: 700; letter-spacing: 0.03em;
-  padding: 2px 6px; border-radius: var(--radius-tag);
+  font-size: var(--text-mono-sm); font-weight: 700; letter-spacing: 0.03em;
+  padding: var(--space-1) var(--space-3); border-radius: var(--radius-tag);
   background: var(--paper-3); color: var(--ink-2);
 }
 .tokens-audit__request {
-  display: flex; flex-direction: column; gap: 4px;
+  display: flex; flex-direction: column; gap: var(--space-2);
   min-width: 0;
 }
 .tokens-audit__request-main {
-  display: flex; align-items: flex-start; gap: 6px;
+  display: flex; align-items: flex-start; gap: var(--space-3);
   min-width: 0;
 }
 .tokens-audit__request-path {
@@ -253,7 +259,7 @@
   font-size: 11.5px; overflow-wrap: anywhere;
 }
 .tokens-audit__request-meta {
-  display: flex; flex-wrap: wrap; gap: 6px;
+  display: flex; flex-wrap: wrap; gap: var(--space-3);
   align-items: center; min-width: 0;
 }
 .tokens-audit__status {
@@ -272,7 +278,7 @@
 .tokens-audit__actor,
 .tokens-audit__cid {
   font-family: "JetBrains Mono", ui-monospace, monospace;
-  font-size: 11px; color: var(--ink-3);
+  font-size: var(--text-mono-sm); color: var(--ink-3);
   overflow-wrap: anywhere;
 }
 
@@ -281,19 +287,19 @@
   display: flex; flex-direction: column; gap: 18px;
 }
 .tokens-form__section {
-  display: flex; flex-direction: column; gap: 8px;
+  display: flex; flex-direction: column; gap: var(--space-4);
 }
 .tokens-form__legend {
-  font-size: 11px; font-weight: 600; letter-spacing: 0.08em;
+  font-size: var(--text-mono-sm); font-weight: 600; letter-spacing: 0.08em;
   text-transform: uppercase; color: var(--ink-3);
 }
 .tokens-form__legend--with-action {
   display: flex; align-items: center; justify-content: space-between;
-  gap: 12px;
+  gap: var(--space-6);
 }
 .tokens-form__legend-hint {
-  font-size: 12px; color: var(--ink-3); font-weight: 400;
-  text-transform: none; letter-spacing: 0; margin-left: 8px;
+  font-size: var(--text-label-sm); color: var(--ink-3); font-weight: 400;
+  text-transform: none; letter-spacing: 0; margin-left: var(--space-4);
 }
 .tokens-form__legend-action {
   flex-shrink: 0;
@@ -301,19 +307,19 @@
   text-transform: none;
 }
 .tokens-form__row {
-  display: grid; grid-template-columns: 1fr 1fr; gap: 14px;
+  display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-7);
 }
 @media (max-width: 640px) { .tokens-form__row { grid-template-columns: 1fr; } }
 
 /* Kind selector — two cards, same idiom as /me Appearance. */
 .tokens-kind-picker {
-  display: grid; grid-template-columns: 1fr 1fr; gap: 10px;
+  display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-5);
 }
 @media (max-width: 640px) { .tokens-kind-picker { grid-template-columns: 1fr; } }
 .tokens-kind-picker__opt {
   position: relative; cursor: pointer;
-  display: flex; flex-direction: column; gap: 4px;
-  padding: 14px 16px;
+  display: flex; flex-direction: column; gap: var(--space-2);
+  padding: var(--space-7) var(--space-8);
   background: var(--card); border: 1px solid var(--line);
   border-radius: var(--radius-card);
   transition: border-color 140ms ease, background 140ms ease, box-shadow 140ms ease;
@@ -328,7 +334,7 @@
   box-shadow: 0 0 0 1px var(--moss);
 }
 .tokens-kind-picker__title {
-  display: flex; align-items: center; gap: 8px;
+  display: flex; align-items: center; gap: var(--space-4);
   font-family: "Fraunces", serif; font-weight: 600;
   font-size: 14.5px; color: var(--ink);
 }
@@ -343,22 +349,22 @@
   box-shadow: inset 0 0 0 3px var(--card);
 }
 .tokens-kind-picker__sub {
-  font-size: 12.5px; color: var(--ink-3); line-height: 1.45;
+  font-size: var(--text-label-sm); color: var(--ink-3); line-height: 1.45;
   padding-left: 22px;
 }
 
 /* Scope picker — pill toggles. Monospace scope keys on a sand-
    tinted background when selected; ghost-neutral when not. */
 .tokens-scope-picker {
-  display: flex; flex-wrap: wrap; gap: 6px;
+  display: flex; flex-wrap: wrap; gap: var(--space-3);
 }
 .tokens-scope-picker__pill {
   cursor: pointer; user-select: none;
-  display: inline-flex; align-items: center; gap: 6px;
-  padding: 6px 12px; border-radius: var(--radius-pill);
+  display: inline-flex; align-items: center; gap: var(--space-3);
+  padding: var(--space-3) var(--space-6); border-radius: var(--radius-pill);
   background: var(--card); border: 1px solid var(--line-strong);
   font-family: "JetBrains Mono", ui-monospace, monospace;
-  font-size: 12px; color: var(--ink-2);
+  font-size: var(--text-label-sm); color: var(--ink-2);
   transition: background 120ms ease, color 120ms ease,
               border-color 120ms ease, transform 120ms ease;
 }
@@ -387,12 +393,12 @@
    plain-language description; clicking anywhere on the row toggles. */
 .tokens-scope-list {
   list-style: none; margin: 0; padding: 0;
-  display: flex; flex-direction: column; gap: 2px;
+  display: flex; flex-direction: column; gap: var(--space-1);
 }
 .tokens-scope-list__item {
   cursor: pointer; user-select: none;
-  display: grid; grid-template-columns: auto 1fr auto; gap: 12px;
-  align-items: center; padding: 10px 12px;
+  display: grid; grid-template-columns: auto 1fr auto; gap: var(--space-6);
+  align-items: center; padding: var(--space-5) var(--space-6);
   border: 1px solid var(--line); border-radius: var(--radius-card);
   background: var(--card);
   transition: background 120ms ease, border-color 120ms ease;
@@ -406,7 +412,7 @@
   width: 18px; height: 18px; border-radius: var(--radius-control);
   border: 1.5px solid var(--line-strong); background: var(--card);
   display: inline-flex; align-items: center; justify-content: center;
-  font-size: 11px; color: transparent;
+  font-size: var(--text-mono-sm); color: transparent;
   transition: background 120ms ease, border-color 120ms ease,
               color 120ms ease, transform 220ms cubic-bezier(0.34, 1.56, 0.64, 1);
   flex-shrink: 0;
@@ -420,11 +426,11 @@
 }
 .tokens-scope-list__key {
   font-family: "JetBrains Mono", ui-monospace, monospace;
-  font-size: 12.5px; color: var(--ink);
+  font-size: var(--text-label-sm); color: var(--ink);
 }
 .tokens-scope-list__hint {
-  font-size: 12px; color: var(--ink-3); line-height: 1.4;
-  grid-column: 2; padding-top: 2px;
+  font-size: var(--text-label-sm); color: var(--ink-3); line-height: 1.4;
+  grid-column: 2; padding-top: var(--space-1);
 }
 .tokens-scope-list__badge {
   font-size: 10.5px; color: var(--ink-3);
@@ -434,22 +440,22 @@
 
 /* Submit bar — split pattern: hint on the left, actions on right */
 .tokens-form__actions {
-  display: flex; align-items: center; gap: 12px;
+  display: flex; align-items: center; gap: var(--space-6);
   justify-content: space-between;
-  padding-top: 12px; margin-top: 4px;
+  padding-top: var(--space-6); margin-top: var(--space-2);
   border-top: 1px solid var(--line);
 }
 .tokens-form__actions-hint {
-  font-size: 12px; color: var(--ink-3);
+  font-size: var(--text-label-sm); color: var(--ink-3);
   line-height: 1.45; max-width: 54ch;
 }
-.tokens-form__actions-buttons { display: flex; gap: 8px; }
+.tokens-form__actions-buttons { display: flex; gap: var(--space-4); }
 
 .tokens-form__error {
-  margin: 0; padding: 10px 14px;
+  margin: 0; padding: var(--space-5) var(--space-7);
   background: var(--rust-soft); color: var(--rust);
   border-left: 3px solid var(--rust); border-radius: var(--radius-control);
-  font-size: 13px;
+  font-size: var(--text-body-sm);
 }
 
 /* ---- Reveal-once panel. The ceremony state.
@@ -464,11 +470,11 @@
   box-shadow: var(--shadow-raised);
 }
 .tokens-reveal__ribbon {
-  display: flex; align-items: center; gap: 12px;
+  display: flex; align-items: center; gap: var(--space-6);
   padding: 14px 22px;
   background: var(--card);
   border-bottom: 1px dashed var(--sand);
-  font-size: 12px; color: var(--ink-2);
+  font-size: var(--text-label-sm); color: var(--ink-2);
 }
 .tokens-reveal__ribbon-mark {
   display: inline-flex; align-items: center; justify-content: center;
@@ -478,12 +484,12 @@
 }
 .tokens-reveal__ribbon-title {
   font-family: "Fraunces", serif; font-weight: 600;
-  font-size: 15px; color: var(--ink);
+  font-size: var(--text-body-md); color: var(--ink);
   font-variation-settings: "opsz" 18;
   letter-spacing: -0.01em;
 }
 .tokens-reveal__ribbon-sub {
-  color: var(--ink-3); font-size: 12px; margin-top: 1px;
+  color: var(--ink-3); font-size: var(--text-label-sm); margin-top: 1px;
 }
 .tokens-reveal__dismiss {
   margin-left: auto;
@@ -492,30 +498,30 @@
 .tokens-reveal__label {
   font-size: 10px; font-weight: 700; letter-spacing: 0.14em;
   text-transform: uppercase; color: var(--ink-3);
-  margin: 0 0 8px;
+  margin: 0 0 var(--space-4);
 }
 .tokens-reveal__secret-row {
-  display: flex; align-items: stretch; gap: 10px;
+  display: flex; align-items: stretch; gap: var(--space-5);
 }
 .tokens-reveal__secret {
   flex: 1; min-width: 0;
-  padding: 14px 16px;
+  padding: var(--space-7) var(--space-8);
   background: var(--paper);
   border: 1px solid var(--line-strong);
   border-radius: var(--radius-card);
   font-family: "JetBrains Mono", ui-monospace, monospace;
-  font-size: 13px; line-height: 1.5; color: var(--ink);
+  font-size: var(--text-body-sm); line-height: 1.5; color: var(--ink);
   letter-spacing: 0.02em;
   word-break: break-all;
   overflow-x: auto;
 }
 .tokens-reveal__copy {
   flex-shrink: 0;
-  display: inline-flex; align-items: center; gap: 6px;
-  padding: 10px 14px;
+  display: inline-flex; align-items: center; gap: var(--space-3);
+  padding: var(--space-5) var(--space-7);
   background: var(--moss); color: var(--card);
   border: 1px solid var(--moss); border-radius: var(--radius-card);
-  font-weight: 600; font-size: 13px; cursor: pointer;
+  font-weight: 600; font-size: var(--text-body-sm); cursor: pointer;
   font-family: inherit;
   transition: background 120ms ease, transform 120ms ease;
 }
@@ -524,8 +530,8 @@
 .tokens-reveal__copy--done { background: var(--moss-3); }
 
 .tokens-reveal__divider {
-  display: flex; align-items: center; gap: 10px;
-  margin: 20px 0 8px;
+  display: flex; align-items: center; gap: var(--space-5);
+  margin: var(--space-9) 0 var(--space-4);
   font-size: 10.5px; font-weight: 700; letter-spacing: 0.14em;
   text-transform: uppercase; color: var(--ink-3);
 }
@@ -534,11 +540,11 @@
   content: ""; flex: 1; height: 1px; background: var(--line);
 }
 .tokens-reveal__code {
-  margin: 0; padding: 14px 16px;
+  margin: 0; padding: var(--space-7) var(--space-8);
   background: var(--ink); color: var(--paper);
   border-radius: var(--radius-card);
   font-family: "JetBrains Mono", ui-monospace, monospace;
-  font-size: 12.5px; line-height: 1.55; letter-spacing: 0.01em;
+  font-size: var(--text-label-sm); line-height: 1.55; letter-spacing: 0.01em;
   overflow-x: hidden; white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
@@ -551,8 +557,8 @@
    informational and destructive variants for future use. Use as
    an inline hint card (not a blocking dialog). ---- */
 .callout {
-  display: flex; align-items: flex-start; gap: 14px;
-  padding: 14px 16px;
+  display: flex; align-items: flex-start; gap: var(--space-7);
+  padding: var(--space-7) var(--space-8);
   /* 12px snapped to card (10px) per DESIGN.md — the default radius between levels. */
   border-radius: var(--radius-card);
   background: var(--moss-softer);
@@ -581,21 +587,21 @@
   font-variation-settings: "opsz" 16;
 }
 .callout__copy {
-  font-size: 12.5px; color: var(--ink-2); line-height: 1.5; margin: 0;
+  font-size: var(--text-label-sm); color: var(--ink-2); line-height: 1.5; margin: 0;
 }
 
 /* Inline counter (e.g. "2/5 active") pinned in .panel__head next
    to a primary action button. Moss numeral reads as an attention-
    light status indicator without needing a chip. */
 .tokens-meter {
-  display: inline-flex; align-items: baseline; gap: 6px;
-  margin-right: 12px;
+  display: inline-flex; align-items: baseline; gap: var(--space-3);
+  margin-right: var(--space-6);
   font-variant-numeric: tabular-nums;
   color: var(--ink-3);
 }
 .tokens-meter__value {
   font-family: "Fraunces", serif; font-weight: 600;
-  font-size: 15px; color: var(--moss);
+  font-size: var(--text-body-md); color: var(--moss);
   font-variation-settings: "opsz" 16;
 }
 .tokens-meter__label {
@@ -609,7 +615,7 @@
    On its own panel, siblings get their spacing from .desk__content. */
 .panel-stack {
   display: flex; flex-direction: column;
-  gap: 14px; margin-top: 14px;
+  gap: var(--space-7); margin-top: var(--space-7);
 }
 
 /* ---- Generalised "entry card": a tile-within-a-panel for any
@@ -620,11 +626,11 @@
    ---- */
 .entry-cards {
   list-style: none; margin: 0; padding: 0;
-  display: grid; gap: 10px;
+  display: grid; gap: var(--space-5);
 }
 .entry-card {
   position: relative;
-  display: flex; flex-direction: column; gap: 6px;
+  display: flex; flex-direction: column; gap: var(--space-3);
   padding: 14px 18px 14px 22px;
   background: var(--card);
   border: 1px solid var(--line);
@@ -647,8 +653,8 @@
 .entry-card--sky::before { background: var(--sky); }
 
 .entry-card__head {
-  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
-  row-gap: 6px;
+  display: flex; align-items: center; gap: var(--space-5); flex-wrap: wrap;
+  row-gap: var(--space-3);
 }
 .entry-card__name {
   font-family: "Fraunces", serif; font-weight: 600;
@@ -659,13 +665,13 @@
 }
 .entry-card__action {
   margin-left: auto; flex-shrink: 0;
-  display: inline-flex; align-items: center; gap: 6px;
+  display: inline-flex; align-items: center; gap: var(--space-3);
 }
 
 .entry-card__prefix {
-  display: flex; align-items: baseline; gap: 8px;
+  display: flex; align-items: baseline; gap: var(--space-4);
   font-family: "JetBrains Mono", ui-monospace, monospace;
-  font-size: 12.5px; color: var(--ink-3);
+  font-size: var(--text-label-sm); color: var(--ink-3);
   letter-spacing: 0.02em;
 }
 .entry-card__prefix-label {
@@ -675,20 +681,20 @@
   color: var(--ink-4);
 }
 .entry-card__meta {
-  display: flex; flex-wrap: wrap; gap: 14px;
+  display: flex; flex-wrap: wrap; gap: var(--space-7);
   font-size: 11.5px; color: var(--ink-3);
-  padding-top: 8px; margin-top: 2px;
+  padding-top: var(--space-4); margin-top: var(--space-1);
   border-top: 1px dashed var(--line);
   font-variant-numeric: tabular-nums;
 }
 .entry-card__meta-label {
   font-size: 10px; font-weight: 600;
   text-transform: uppercase; letter-spacing: 0.08em;
-  color: var(--ink-4); margin-right: 4px;
+  color: var(--ink-4); margin-right: var(--space-2);
 }
 
 .tokens-empty {
-  padding: 32px 20px; text-align: center;
+  padding: var(--space-11) var(--space-9); text-align: center;
   border: 1px dashed var(--line-strong); border-radius: var(--radius-card);
   background: var(--paper);
 }
@@ -696,16 +702,16 @@
   display: inline-flex; align-items: center; justify-content: center;
   width: 44px; height: 44px; border-radius: 50%;
   background: var(--moss-softer); color: var(--moss);
-  margin-bottom: 10px;
+  margin-bottom: var(--space-5);
 }
 .tokens-empty__title {
   font-family: "Fraunces", serif; font-weight: 600;
-  font-size: 15px; color: var(--ink);
+  font-size: var(--text-body-md); color: var(--ink);
   font-variation-settings: "opsz" 18;
-  margin: 0 0 4px;
+  margin: 0 0 var(--space-2);
 }
 .tokens-empty__sub {
-  font-size: 12.5px; color: var(--ink-3); margin: 0;
+  font-size: var(--text-label-sm); color: var(--ink-3); margin: 0;
 }
 
 /* Inline name field — visibly editable, with enough typographic
@@ -733,11 +739,11 @@
 .tokens-name-input::placeholder { color: var(--ink-4); font-style: italic; }
 
 .tokens-note-input {
-  padding: 10px 12px;
+  padding: var(--space-5) var(--space-6);
   background: var(--card);
   border: 1px solid var(--line-strong);
   border-radius: var(--radius-card);
-  font: inherit; font-size: 13px; color: var(--ink);
+  font: inherit; font-size: var(--text-body-sm); color: var(--ink);
   transition: border-color 140ms ease;
   width: 100%;
 }
@@ -746,11 +752,11 @@
 }
 
 .tokens-select {
-  padding: 8px 12px; padding-right: 28px;
+  padding: var(--space-4) var(--space-6); padding-right: 28px;
   background: var(--card);
   border: 1px solid var(--line-strong);
   border-radius: var(--radius-card);
-  font: inherit; font-size: 13px; color: var(--ink);
+  font: inherit; font-size: var(--text-body-sm); color: var(--ink);
   appearance: none;
   background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6' fill='none'><path d='M1 1l4 4 4-4' stroke='%238C8274' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/></svg>");
   background-repeat: no-repeat;
@@ -761,13 +767,13 @@
 
 /* Expiry preset row — small chip buttons */
 .tokens-expiry {
-  display: flex; gap: 6px; flex-wrap: wrap;
+  display: flex; gap: var(--space-3); flex-wrap: wrap;
 }
 .tokens-expiry__preset {
   cursor: pointer;
-  padding: 6px 12px; border-radius: var(--radius-pill);
+  padding: var(--space-3) var(--space-6); border-radius: var(--radius-pill);
   background: var(--card); border: 1px solid var(--line-strong);
-  color: var(--ink-2); font-size: 12.5px;
+  color: var(--ink-2); font-size: var(--text-label-sm);
   font-family: inherit;
   transition: background 120ms ease, color 120ms ease, border-color 120ms ease;
 }

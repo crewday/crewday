@@ -15,10 +15,10 @@
 .demo-banner {
   position: relative; z-index: 55;
   display: flex; align-items: center; justify-content: center;
-  min-height: 32px; padding: 6px 16px;
+  min-height: 32px; padding: var(--space-3) var(--space-8);
   background: var(--rust-soft); color: var(--ink);
   border-bottom: 1px solid rgba(122, 62, 37, 0.24);
-  font-size: 13px; font-weight: 700;
+  font-size: var(--text-body-sm); font-weight: 700;
   text-align: center;
 }
 [data-theme="dark"] .demo-banner {
@@ -41,7 +41,7 @@
 }
 .phone__body { display: contents; }
 
-.phone__section { padding: 16px 20px; }
+.phone__section { padding: var(--space-8) var(--space-9); }
 .phone__section--hero { padding-top: 18px; }
 .phone__section--detail { padding-bottom: 160px; }
 .issue-new__chat-link {
@@ -55,12 +55,15 @@
 
 /* "Hi, <first name>" + date. Only rendered on the Me page; everything
    else skips the greeting because it was noise on functional views. */
-.me-greet { display: flex; flex-direction: column; gap: 2px; }
+.me-greet { display: flex; flex-direction: column; gap: var(--space-1); }
 .me-greet__hello {
+  /* 1.55rem Fraunces greeting: intentional off-scale, sits between
+     display-sm (1.22rem) and display-md (1.65rem) with no clean rung
+     (cd-uo8xv between-rung note; no token minted per cd-hmzu6). */
   font-family: "Fraunces", ui-serif, serif; font-weight: 600;
   font-size: 1.55rem; line-height: 1.1; letter-spacing: -0.02em;
 }
-.me-greet__date { color: var(--ink-3); font-size: 13px; }
+.me-greet__date { color: var(--ink-3); font-size: var(--text-body-sm); }
 
 /* Booking hint pill. Replaces the v0 clock-in toggle: under §09's
    booking model the booking IS the time record (no clock-in / clock-out
@@ -70,9 +73,9 @@
    tab bar (phone). */
 .booking-hint {
   display: inline-flex; align-items: center; justify-content: center;
-  gap: 6px; padding: 10px 16px; border-radius: var(--radius-pill);
+  gap: var(--space-3); padding: var(--space-5) var(--space-8); border-radius: var(--radius-pill);
   border: 1px solid var(--moss-soft); background: var(--moss-soft);
-  font-family: inherit; font-size: 14px; font-weight: 600;
+  font-family: inherit; font-size: var(--text-label-md); font-weight: 600;
   color: var(--moss); cursor: pointer; white-space: nowrap;
   text-decoration: none;
   transition: background 120ms ease, color 120ms ease,
@@ -98,7 +101,7 @@
   border-radius: 0;
   border: none;
   background: transparent;
-  font-size: 12px;
+  font-size: var(--text-label-sm);
   letter-spacing: 0.01em;
 }
 .phone__dock > .booking-hint:hover {
@@ -109,7 +112,7 @@
 .employee-shell-status {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: var(--space-4);
   width: 100%;
 }
 .employee-shell-status > .booking-hint { width: 100%; }
@@ -120,7 +123,7 @@
   background: var(--paper-2);
   color: var(--ink-2);
   border-radius: var(--radius-card);
-  font-size: 12px; font-weight: 700;
+  font-size: var(--text-label-sm); font-weight: 700;
   text-align: center;
 }
 .offline-queue-badge--phone {
@@ -130,22 +133,22 @@
 }
 
 .section-title {
-  font-family: "Fraunces", ui-serif, serif; font-size: 14px; font-weight: 600;
-  margin-bottom: 10px; color: var(--ink-2);
+  font-family: "Fraunces", ui-serif, serif; font-size: var(--text-section-title); font-weight: 600;
+  margin-bottom: var(--space-5); color: var(--ink-2);
   text-transform: uppercase; letter-spacing: 0.09em;
 }
-.section-title--sm { font-size: 12px; margin-top: 22px; margin-bottom: 8px; }
+.section-title--sm { font-size: var(--text-label-sm); margin-top: 22px; margin-bottom: var(--space-4); }
 
 .section-title-row {
   display: flex; align-items: center; justify-content: space-between;
-  gap: 10px; margin-bottom: 10px;
+  gap: var(--space-5); margin-bottom: var(--space-5);
 }
 .section-title-row .section-title { margin-bottom: 0; }
 
 .field--inline {
-  display: flex; flex-direction: row; align-items: center; gap: 8px;
+  display: flex; flex-direction: row; align-items: center; gap: var(--space-4);
 }
-.field--inline > span { font-size: 13px; color: var(--ink-2); }
+.field--inline > span { font-size: var(--text-body-sm); color: var(--ink-2); }
 
 .task-card--personal { border-left: 3px solid var(--sky, #9bb8d9); }
 
@@ -154,11 +157,11 @@
    aesthetic as `/settings`. */
 .me-page {
   display: flex; flex-direction: column; gap: 22px;
-  padding: 16px 20px;
+  padding: var(--space-8) var(--space-9);
 }
 .me-workspace-switch { display: block; }
 @media (min-width: 720px) {
-  .me-page { padding: 24px 0; }
+  .me-page { padding: var(--space-10) 0; }
   .me-workspace-switch { display: none; }
 }
 
@@ -172,7 +175,7 @@
   background: transparent; border: 0; border-radius: 0;
   padding: 0; margin-bottom: 0;
 }
-.panel > ul > li.stack-row + li.stack-row { margin-top: 10px; }
+.panel > ul > li.stack-row + li.stack-row { margin-top: var(--space-5); }
 .panel > .profile-card {
   background: transparent; border: 0; border-radius: 0;
   padding: 0; box-shadow: none;
@@ -187,7 +190,7 @@
 }
 .tab {
   display: inline-flex; flex-direction: column; align-items: center; justify-content: center;
-  gap: 3px; padding: 6px 4px; min-height: 48px; font-size: 11px; color: var(--ink-3);
+  gap: 3px; padding: var(--space-3) var(--space-2); min-height: 48px; font-size: var(--text-mono-sm); color: var(--ink-3);
 }
 .tab__glyph { font-size: 18px; line-height: 1; }
 .tab--active { color: var(--moss); font-weight: 600; }
@@ -267,11 +270,11 @@
     overflow-y: auto;
     /* Top padding is 0 on purpose: `.page-topbar` supplies its own
        36px top breathing room, matching the ≥1080px rule below. */
-    padding: 0 40px 40px;
+    padding: 0 var(--space-12) var(--space-12);
     align-items: stretch;
   }
-  .phone__section { padding: 16px 0; width: 100%; max-width: 880px; margin: 0 auto; }
-  .phone__section--detail { padding-bottom: 32px; max-width: 880px; margin: 0 auto; }
+  .phone__section { padding: var(--space-8) 0; width: 100%; max-width: 880px; margin: 0 auto; }
+  .phone__section--detail { padding-bottom: var(--space-11); max-width: 880px; margin: 0 auto; }
   /* Shared workspace-relative routes (today, week, my/expenses,
      schedule, history, issues/new, task/:tid) also mount inside
      .desk__main when a manager views them. Drop the 880px cap there
@@ -282,8 +285,8 @@
   .desk__main .phone__section--hero {
     max-width: none;
   }
-  .task-list { gap: 10px; }
-  .task-card--now { padding: 20px; }
+  .task-list { gap: var(--space-5); }
+  .task-card--now { padding: var(--space-9); }
 
   /* Chat: the composer sticks to the bottom of the main column
      instead of the viewport. */
@@ -296,7 +299,7 @@
     overflow: hidden;
   }
   .phone--chat .chat-screen { padding: 0 0 0; }
-  .phone--chat .chat-log { padding: 20px 40px; }
+  .phone--chat .chat-log { padding: var(--space-9) var(--space-12); }
   .phone--chat .chat-msg { max-width: min(560px, 70%); }
   .chat-composer {
     position: sticky;
@@ -313,11 +316,11 @@
 }
 
 @media (min-width: 1080px) {
-  .phone__body { padding: 0 56px 48px; }
-  .phone--chat .chat-log { padding: 24px 56px; }
+  .phone__body { padding: 0 var(--space-14) var(--space-13); }
+  .phone--chat .chat-log { padding: var(--space-10) var(--space-14); }
   .chat-composer { padding: 12px 56px calc(12px + env(safe-area-inset-bottom, 0px)); }
 }
 
 @media (max-width: 360px) {
-  .phone__section { padding: 14px; }
+  .phone__section { padding: var(--space-7); }
 }

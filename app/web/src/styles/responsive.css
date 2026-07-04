@@ -101,10 +101,10 @@
   .page-topbar {
     position: sticky; top: 0; z-index: 35;
     display: flex; align-items: center;
-    flex-wrap: nowrap; gap: 4px;
+    flex-wrap: nowrap; gap: var(--space-2);
     padding: env(safe-area-inset-top, 0px) 10px 0;
     min-height: calc(52px + env(safe-area-inset-top, 0px));
-    margin-bottom: 12px;
+    margin-bottom: var(--space-6);
     background: var(--card);
     border-bottom: 1px solid var(--line);
   }
@@ -128,11 +128,13 @@
     min-height: 44px;
   }
   .page-topbar__heading {
-    padding: 6px 4px;
+    padding: var(--space-3) var(--space-2);
   }
   .page-title {
     font-family: "Inter Tight", ui-sans-serif, system-ui, sans-serif;
     font-weight: 600;
+    /* Mobile page-title override: off-scale between body-lg and display-sm
+       (cd-uo8xv between-rung note). */
     font-size: 1.05rem;
     line-height: 1.2;
     letter-spacing: -0.01em;
@@ -141,7 +143,7 @@
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   }
   .page-sub {
-    font-size: 12px; line-height: 1.2;
+    font-size: var(--text-label-sm); line-height: 1.2;
     margin: 0;
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   }
@@ -163,7 +165,7 @@
      comfortably, and the row gap loosens by 2 px so the bigger rows
      don't feel claustrophobic. */
   .desk__nav .nav-link { min-height: 44px; padding: 11px 14px; }
-  .desk__nav .desk__nav-group { gap: 4px; }
+  .desk__nav .desk__nav-group { gap: var(--space-2); }
 
   /* The workspace switcher chip is part of the same drawer surface
      and shares the floor — its trigger (and any open-menu options)
@@ -175,13 +177,13 @@
      drawer still needs full width/content. Force it open visually. */
   .desk__nav--collapsed {
     width: min(280px, 82vw);
-    padding: 20px 12px;
+    padding: var(--space-9) var(--space-6);
   }
   .desk__nav--collapsed .desk__wordmark { display: block; }
   .desk__nav--collapsed .desk__brand {
     flex-direction: row; justify-content: flex-start;
-    align-items: center; gap: 8px;
-    padding: 0 8px;
+    align-items: center; gap: var(--space-4);
+    padding: 0 var(--space-4);
   }
   .desk__nav--collapsed .ws-switcher,
   .desk__nav--collapsed .desk__nav-action { display: flex; }
@@ -193,7 +195,7 @@
     /* Match the un-collapsed drawer floor (≥ 44 px tap target). */
     padding: 11px 14px;
     margin: 0;
-    gap: 10px;
+    gap: var(--space-5);
   }
   .desk__nav--collapsed .nav-link__label { display: block; }
   .desk__nav--collapsed .nav-section__text {
@@ -202,7 +204,7 @@
   }
   .desk__nav--collapsed .nav-section__rule { display: none; }
   .desk__nav--collapsed .desk__me {
-    justify-content: flex-start; padding: 10px; gap: 10px;
+    justify-content: flex-start; padding: var(--space-5); gap: var(--space-5);
   }
   .desk__nav--collapsed .desk__me-meta { display: block; }
   .desk__nav--collapsed [data-tip]::after { display: none; }
@@ -210,9 +212,9 @@
   /* Condense table rows. */
   .task-row {
     grid-template-columns: 1fr auto;
-    gap: 6px 10px;
+    gap: var(--space-3) var(--space-5);
   }
-  .task-row__time { grid-column: 1 / -1; font-size: 11px; }
+  .task-row__time { grid-column: 1 / -1; font-size: var(--text-mono-sm); }
   .task-row__area { display: none; }
   .page-topbar__trailing .btn {
     padding-inline: 14px;
@@ -221,8 +223,8 @@
 
   /* Let wide tables scroll horizontally inside panels instead of
      forcing the whole page to scroll. */
-  .panel { padding: 16px; overflow-x: auto; }
-  .panel--article { padding: 20px; }
+  .panel { padding: var(--space-8); overflow-x: auto; }
+  .panel--article { padding: var(--space-9); }
   .table { min-width: 520px; }
   .admin-audit-table {
     min-width: 0;
@@ -237,7 +239,7 @@
     display: block;
   }
   .admin-audit-table tr {
-    padding: 12px 0;
+    padding: var(--space-6) 0;
     border-bottom: 1px solid var(--line);
   }
   .admin-audit-table tr:last-child {
@@ -246,14 +248,14 @@
   .admin-audit-table td {
     display: grid;
     grid-template-columns: 74px minmax(0, 1fr);
-    gap: 12px;
-    padding: 6px 0;
+    gap: var(--space-6);
+    padding: var(--space-3) 0;
     border-bottom: 0;
   }
   .admin-audit-table td::before {
     content: attr(data-label);
     color: var(--ink-3);
-    font-size: 11px;
+    font-size: var(--text-mono-sm);
     font-weight: 500;
     letter-spacing: 0.08em;
     text-transform: uppercase;
@@ -262,15 +264,15 @@
   /* Dashboard grids collapse to a single column. */
   .grid--stats,
   .grid--split,
-  .grid--cards { grid-template-columns: 1fr; gap: 14px; }
+  .grid--cards { grid-template-columns: 1fr; gap: var(--space-7); }
   .permissions__split { grid-template-columns: 1fr; }
 
   /* Approvals / expense-approval cards stack. */
-  .expense-approval__grid { grid-template-columns: 1fr; gap: 10px; }
+  .expense-approval__grid { grid-template-columns: 1fr; gap: var(--space-5); }
   .expense-approval__amount,
   .expense-approval__receipt { border: 0; padding: 0; }
-  .issue-row { grid-template-columns: 1fr; gap: 4px; }
-  .doc-row { grid-template-columns: auto 1fr; gap: 8px; }
+  .issue-row { grid-template-columns: 1fr; gap: var(--space-2); }
+  .doc-row { grid-template-columns: auto 1fr; gap: var(--space-4); }
   .doc-row > :nth-child(n+3) { grid-column: 2 / -1; }
 
 }

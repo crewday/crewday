@@ -8,8 +8,8 @@
 
 .form-grid {
   display: grid;
-  gap: 14px 24px;
-  padding: 16px;
+  gap: var(--space-7) var(--space-10);
+  padding: var(--space-8);
 }
 .form-grid--two { grid-template-columns: 1fr 1fr; }
 @media (max-width: 720px) { .form-grid--two { grid-template-columns: 1fr; } }
@@ -32,13 +32,13 @@
 .property-edit-dialog__identity-field { grid-column: 1 / -1; }
 
 .form-row {
-  display: flex; flex-direction: column; gap: 6px;
+  display: flex; flex-direction: column; gap: var(--space-3);
 }
 .form-label {
-  font-size: 12px; font-weight: 600; text-transform: uppercase;
+  font-size: var(--text-label-sm); font-weight: 600; text-transform: uppercase;
   letter-spacing: 0.04em; color: var(--ink-3);
 }
-.toggle { display: flex; align-items: center; gap: 10px; }
+.toggle { display: flex; align-items: center; gap: var(--space-5); }
 
 /* ══════════════════════════════════════════════════════════════
    CHECKBOX — "field-guide tick".
@@ -73,7 +73,7 @@
    when the component needs explicit control (indeterminate).
    ══════════════════════════════════════════════════════════════ */
 .checkbox {
-  display: inline-flex; align-items: flex-start; gap: 10px;
+  display: inline-flex; align-items: flex-start; gap: var(--space-5);
   cursor: pointer; user-select: none;
   font: inherit; color: var(--ink);
   line-height: 1.4;
@@ -81,8 +81,8 @@
 }
 .checkbox--block {
   display: flex; width: 100%;
-  align-items: flex-start; gap: 12px;
-  padding: 10px 12px;
+  align-items: flex-start; gap: var(--space-6);
+  padding: var(--space-5) var(--space-6);
   border: 1px solid var(--line); border-radius: var(--radius-card);
   background: var(--card);
   transition: background 140ms ease, border-color 140ms ease;
@@ -218,23 +218,23 @@
 
 /* ── Label ──────────────────────────────────────────────────── */
 .checkbox__label {
-  font-size: 14px; color: var(--ink);
+  font-size: var(--text-label-md); color: var(--ink);
 }
 .checkbox__label--hint {
   display: block;
-  font-size: 12px; color: var(--ink-3);
-  margin-top: 2px;
+  font-size: var(--text-label-sm); color: var(--ink-3);
+  margin-top: var(--space-1);
   font-weight: 400;
 }
 
 /* ── Size modifiers ─────────────────────────────────────────── */
 .checkbox--sm .checkbox__box { width: 14px; height: 14px; border-radius: var(--radius-tag); }
 .checkbox--sm .checkbox__dash { width: 7px; }
-.checkbox--sm .checkbox__label { font-size: 13px; }
+.checkbox--sm .checkbox__label { font-size: var(--text-body-sm); }
 
 .checkbox--lg .checkbox__box { width: 22px; height: 22px; border-radius: var(--radius-control); }
 .checkbox--lg .checkbox__dash { width: 11px; height: 2.5px; }
-.checkbox--lg .checkbox__label { font-size: 15px; }
+.checkbox--lg .checkbox__label { font-size: var(--text-body-md); }
 
 /* ── Tonal modifiers ────────────────────────────────────────── */
 .checkbox--rust .checkbox__input:checked ~ .checkbox__box,
@@ -266,14 +266,14 @@
 
 .panel__foot {
   display: flex; align-items: center; justify-content: space-between;
-  padding: 12px 16px; border-top: 1px solid var(--line);
-  gap: 12px; flex-wrap: wrap;
+  padding: var(--space-6) var(--space-8); border-top: 1px solid var(--line);
+  gap: var(--space-6); flex-wrap: wrap;
 }
 
-.inline-actions { display: inline-flex; gap: 6px; align-items: center; }
+.inline-actions { display: inline-flex; gap: var(--space-3); align-items: center; }
 
 .input--inline {
-  padding: 6px 10px;
+  padding: var(--space-3) var(--space-5);
   border: 1px solid var(--line);
   border-radius: var(--radius-control);
   background: var(--paper);
