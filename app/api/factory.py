@@ -2230,6 +2230,15 @@ def _build_worker_lifespan(
             if llm_bridge_engine_to_dispose is not None:
                 llm_bridge_engine_to_dispose.dispose()
                 app.state.llm_assignment_invalidation_bridge_engine = None
+            # Close the dev-profile Vite proxy client (cd-ika7). Only
+            # present when ``register_vite_proxy`` ran (dev profile);
+            # ``getattr`` keeps the prod path a no-op. Draining it here
+            # rather than leaving it to process exit releases the
+            # keep-alive pool cleanly on a supervised reload.
+            vite_client_to_close = getattr(app.state, "vite_client", None)
+            if vite_client_to_close is not None:
+                await vite_client_to_close.aclose()
+                app.state.vite_client = None
 
     return _lifespan
 

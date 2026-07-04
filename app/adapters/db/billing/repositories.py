@@ -263,7 +263,16 @@ class SqlAlchemyOrganizationRepository(OrganizationRepository):
         if kind is not None:
             stmt = stmt.where(Organization.kind == kind)
         if search is not None:
-            stmt = stmt.where(Organization.display_name.ilike(f"%{search}%"))
+            # Escape LIKE metacharacters so a ``%`` / ``_`` typed into
+            # the search box matches literally instead of acting as a
+            # wildcard. Backslash is escaped first so it can serve as
+            # the ``escape`` char for the following two replacements.
+            like_term = (
+                search.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+            )
+            stmt = stmt.where(
+                Organization.display_name.ilike(f"%{like_term}%", escape="\\")
+            )
         if not include_archived:
             stmt = stmt.where(Organization.archived_at.is_(None))
         return [_to_row(row) for row in self._session.scalars(stmt).all()]

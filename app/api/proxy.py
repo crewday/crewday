@@ -427,12 +427,11 @@ def register_vite_proxy(app: FastAPI, *, vite_dev_url: str) -> None:
     # :func:`_default_vite_ws_connect`, which proxies
     # :func:`websockets.asyncio.client.connect`.
     app.state.vite_ws_connect = _default_vite_ws_connect
-    # Lifecycle note: neither the :class:`httpx.AsyncClient` nor the
-    # per-upgrade :mod:`websockets` connections are explicitly closed
-    # by a lifespan hook (TODO cd-ika7 ties one in for the authz
-    # cache). The HTTP pool is reclaimed on process exit; each
-    # upstream WS is closed on the way out of its handler via the
-    # ``async with`` context — no dangling tasks.
+    # Lifecycle note: the :class:`httpx.AsyncClient` is closed by the
+    # app lifespan's shutdown ``finally`` block (cd-ika7), which
+    # ``aclose()``s ``app.state.vite_client`` when present. Each
+    # per-upgrade :mod:`websockets` connection is closed on the way out
+    # of its handler via the ``async with`` context — no dangling tasks.
 
     @app.websocket("/{full_path:path}")
     async def vite_ws_proxy(websocket: WebSocket, full_path: str) -> None:

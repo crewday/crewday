@@ -238,6 +238,10 @@ def _validate_platform(platform: str) -> Platform:
             f"platform {platform!r} is not in the v1 whitelist "
             f"({', '.join(get_args(Platform))})"
         )
+    # Unavoidable: mypy does not narrow ``str`` to the ``Platform``
+    # ``Literal`` from a runtime ``in get_args()`` membership test.
+    # The guard above proves the value is a whitelist member, so this
+    # is the typed boundary where the narrowing is asserted by hand.
     return platform  # type: ignore[return-value]
 
 

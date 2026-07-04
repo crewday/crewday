@@ -252,6 +252,33 @@ def test_list_filters_by_kind_search_and_archived_state(
         ]
 
 
+def test_list_search_escapes_like_metacharacters(
+    factory: sessionmaker[Session],
+) -> None:
+    # A ``%`` / ``_`` / ``\`` typed into the search box must match
+    # literally rather than acting as a LIKE wildcard. Without escaping,
+    # ``%`` matches everything and ``_`` matches any single character.
+    with factory() as s:
+        workspace_id = _seed_workspace(s)
+        ctx = _ctx(workspace_id)
+        repo = SqlAlchemyOrganizationRepository(s)
+        service = _service(ctx)
+        service.create(
+            repo, OrganizationCreate(kind="client", display_name="50% Off Deals")
+        )
+        service.create(
+            repo, OrganizationCreate(kind="client", display_name="Fifty Percent")
+        )
+        service.create(repo, OrganizationCreate(kind="client", display_name="A_B Corp"))
+        service.create(repo, OrganizationCreate(kind="client", display_name="AXB Corp"))
+
+        percent_hits = service.list(repo, kind="client", search="%")
+        assert [org.display_name for org in percent_hits] == ["50% Off Deals"]
+
+        underscore_hits = service.list(repo, kind="client", search="_")
+        assert [org.display_name for org in underscore_hits] == ["A_B Corp"]
+
+
 def test_update_validates_kind_transitions_against_artifacts(
     factory: sessionmaker[Session],
 ) -> None:

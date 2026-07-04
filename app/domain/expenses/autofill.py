@@ -101,6 +101,7 @@ from decimal import ROUND_HALF_EVEN, Decimal
 from typing import Any, Final, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
+from sqlalchemy.exc import UnboundExecutionError
 
 from app.adapters.llm.ports import (
     ChatContent,
@@ -888,10 +889,17 @@ def resolve_autofill_model_pick(
     audit writes but cannot execute router queries. Treat that as "no assignment
     visible" so the explicit legacy ``settings.llm_ocr_model`` fallback remains
     available there.
+
+    Both "no bind visible" shapes are caught: a real unbound
+    :class:`~sqlalchemy.orm.Session` raises
+    :class:`~sqlalchemy.exc.UnboundExecutionError`, while the seam-test
+    fake (which overrides ``__init__`` without calling ``super().__init__``)
+    raises :class:`AttributeError` from ``get_bind``. A genuine query
+    failure would raise neither and is left to propagate.
     """
     try:
         repo.session.get_bind()
-    except Exception:
+    except UnboundExecutionError, AttributeError:
         return None
     chain = resolve_model(repo.session, ctx, AUTOFILL_CAPABILITY, clock=clock)
     if not chain:

@@ -336,8 +336,12 @@ def update_work_engagement(
 
     if "engagement_kind" in sent and body.engagement_kind != row.engagement_kind:
         before["engagement_kind"] = row.engagement_kind
-        after["engagement_kind"] = body.engagement_kind
-        row.engagement_kind = body.engagement_kind  # type: ignore[assignment]
+        after["engagement_kind"] = new_kind
+        # ``new_kind`` equals ``body.engagement_kind`` inside this branch
+        # (it was set from it when the field is in ``sent``) and is
+        # already narrowed to ``str`` by the assert above, so assigning
+        # it needs no ``type: ignore``.
+        row.engagement_kind = new_kind
 
     if "supplier_org_id" in sent and body.supplier_org_id != row.supplier_org_id:
         before["supplier_org_id"] = row.supplier_org_id
