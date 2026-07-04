@@ -2,7 +2,7 @@ import { type FormEvent } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { fetchJson } from "@/lib/api";
 import { qk } from "@/lib/queryKeys";
-import { useCloseOnEscape } from "@/lib/useCloseOnEscape";
+import { useModalDialog } from "@/lib/modalDialog";
 import AutoGrowTextarea from "@/components/AutoGrowTextarea";
 import DeskPage from "@/components/DeskPage";
 import DateTime from "@/components/DateTime";
@@ -393,54 +393,56 @@ function DeliveryLogDrawer({
   error: string | null;
   onClose: () => void;
 }) {
-  useCloseOnEscape(onClose);
+  const dialog = useModalDialog(onClose);
 
   return (
-    <>
-      <button type="button" className="day-drawer__scrim" aria-label="Close delivery log" onClick={onClose} />
-      <aside className="day-drawer" role="dialog" aria-label={`Delivery log for ${webhook.url}`}>
-        <header className="day-drawer__head">
-          <div>
-            <div className="day-drawer__eyebrow">Delivery log</div>
-            <div className="day-drawer__title">{webhook.name || webhook.url}</div>
-          </div>
-          <button type="button" className="day-drawer__close" onClick={onClose} aria-label="Close delivery log">
-            ×
-          </button>
-        </header>
-        <div className="day-drawer__body">
-          {loading ? (
-            <Loading />
-          ) : error ? (
-            <p className="day-drawer__muted">{error}</p>
-          ) : !deliveries || deliveries.length === 0 ? (
-            <p className="day-drawer__muted">No deliveries yet.</p>
-          ) : (
-            <table className="table table--roomy">
-              <thead>
-                <tr>
-                  <th>Event</th><th>Status</th><th>Attempt</th><th>Response</th><th>Created</th>
-                </tr>
-              </thead>
-              <tbody>
-                {deliveries.map((delivery) => (
-                  <tr key={delivery.id}>
-                    <td>{delivery.event}</td>
-                    <td>
-                      <Chip tone={delivery.status === "succeeded" ? "moss" : "ghost"} size="sm">
-                        {delivery.status}
-                      </Chip>
-                    </td>
-                    <td className="mono">{delivery.attempt}</td>
-                    <td className="mono">{deliveryResponseText(delivery)}</td>
-                    <td><DateTime value={delivery.created_at} showTime className="mono" /></td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          )}
+    <dialog
+      ref={dialog.ref}
+      className="day-drawer"
+      aria-label={`Delivery log for ${webhook.url}`}
+      onCancel={dialog.onCancel}
+    >
+      <header className="day-drawer__head">
+        <div>
+          <div className="day-drawer__eyebrow">Delivery log</div>
+          <div className="day-drawer__title">{webhook.name || webhook.url}</div>
         </div>
-      </aside>
-    </>
+        <button type="button" className="day-drawer__close" onClick={onClose} aria-label="Close delivery log">
+          ×
+        </button>
+      </header>
+      <div className="day-drawer__body">
+        {loading ? (
+          <Loading />
+        ) : error ? (
+          <p className="day-drawer__muted">{error}</p>
+        ) : !deliveries || deliveries.length === 0 ? (
+          <p className="day-drawer__muted">No deliveries yet.</p>
+        ) : (
+          <table className="table table--roomy">
+            <thead>
+              <tr>
+                <th>Event</th><th>Status</th><th>Attempt</th><th>Response</th><th>Created</th>
+              </tr>
+            </thead>
+            <tbody>
+              {deliveries.map((delivery) => (
+                <tr key={delivery.id}>
+                  <td>{delivery.event}</td>
+                  <td>
+                    <Chip tone={delivery.status === "succeeded" ? "moss" : "ghost"} size="sm">
+                      {delivery.status}
+                    </Chip>
+                  </td>
+                  <td className="mono">{delivery.attempt}</td>
+                  <td className="mono">{deliveryResponseText(delivery)}</td>
+                  <td><DateTime value={delivery.created_at} showTime className="mono" /></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
+    </dialog>
   );
 }

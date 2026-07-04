@@ -5,7 +5,7 @@ import { fetchJson } from "@/lib/api";
 import { type ListEnvelope, unwrapList } from "@/lib/listResponse";
 import { qk } from "@/lib/queryKeys";
 import { workspaceRouteForPathname } from "@/lib/workspaceRoutes";
-import { useCloseOnEscape } from "@/lib/useCloseOnEscape";
+import { useModalDialog } from "@/lib/modalDialog";
 import {
   InlineNoteField,
   InlineSearchableSelectField,
@@ -296,7 +296,7 @@ export default function InstructionDetailPage() {
     },
   });
 
-  useCloseOnEscape(closeVersions, versionsOpen);
+  const versionsDialog = useModalDialog(closeVersions);
 
   if (!iid) return <DeskPage title="Instruction">Missing instruction id.</DeskPage>;
   if (instrQ.isPending || propsQ.isPending) {
@@ -532,50 +532,43 @@ export default function InstructionDetailPage() {
       </section>
 
       {versionsOpen && (
-        <div
-          className="day-drawer__scrim"
-          role="presentation"
-          onClick={(event) => {
-            if (event.target === event.currentTarget) closeVersions();
-          }}
+        <dialog
+          ref={versionsDialog.ref}
+          className="day-drawer"
+          aria-label="Instruction history"
+          onCancel={versionsDialog.onCancel}
         >
-          <aside
-            className="day-drawer"
-            role="dialog"
-            aria-label="Instruction history"
-          >
-            <header className="day-drawer__head">
-              <div>
-                <div className="day-drawer__eyebrow">Instruction history</div>
-                <h2 className="day-drawer__title">{i.title}</h2>
-              </div>
-              <button
-                type="button"
-                className="day-drawer__close"
-                onClick={closeVersions}
-                aria-label="Close instruction history"
-              >
-                ×
-              </button>
-            </header>
-            <div className="day-drawer__body">
-              {versionsQ.isPending ? <Loading /> : null}
-              {versionsQ.isError ? <p>Failed to load.</p> : null}
-              {versionsQ.data?.map((version) => (
-                <section key={version.id} className="day-drawer__section">
-                  <h3 className="day-drawer__section-title">
-                    Revision {version.version} · <DateTime value={version.created_at} showTime />
-                  </h3>
-                  {version.change_note && <p className="day-drawer__muted">{version.change_note}</p>}
-                  <div className="kb-body">
-                    {/* react-doctor-disable-next-line react-doctor/no-render-in-render -- Markdown body rendering is a pure parser formatter shared by the article and history drawer. */}
-                    {renderBody(version.body_md)}
-                  </div>
-                </section>
-              ))}
+          <header className="day-drawer__head">
+            <div>
+              <div className="day-drawer__eyebrow">Instruction history</div>
+              <h2 className="day-drawer__title">{i.title}</h2>
             </div>
-          </aside>
-        </div>
+            <button
+              type="button"
+              className="day-drawer__close"
+              onClick={closeVersions}
+              aria-label="Close instruction history"
+            >
+              ×
+            </button>
+          </header>
+          <div className="day-drawer__body">
+            {versionsQ.isPending ? <Loading /> : null}
+            {versionsQ.isError ? <p>Failed to load.</p> : null}
+            {versionsQ.data?.map((version) => (
+              <section key={version.id} className="day-drawer__section">
+                <h3 className="day-drawer__section-title">
+                  Revision {version.version} · <DateTime value={version.created_at} showTime />
+                </h3>
+                {version.change_note && <p className="day-drawer__muted">{version.change_note}</p>}
+                <div className="kb-body">
+                  {/* react-doctor-disable-next-line react-doctor/no-render-in-render -- Markdown body rendering is a pure parser formatter shared by the article and history drawer. */}
+                  {renderBody(version.body_md)}
+                </div>
+              </section>
+            ))}
+          </div>
+        </dialog>
       )}
     </DeskPage>
   );

@@ -367,10 +367,10 @@ describe("<InventoryPage>", () => {
       render(<Harness />);
       fireEvent.click(await screen.findByText("Paper towels"));
 
-      expect(
-        await screen.findByRole("dialog", { name: /Inventory ledger/ }),
-      ).toBeInTheDocument();
-      fireEvent.keyDown(window, { key: "Escape" });
+      const drawer = await screen.findByRole("dialog", { name: /Inventory ledger/ });
+      expect(drawer).toBeInTheDocument();
+      // Native <dialog> Escape fires a `cancel` event on the dialog.
+      fireEvent(drawer, new Event("cancel", { bubbles: false, cancelable: true }));
 
       await waitFor(() => {
         expect(

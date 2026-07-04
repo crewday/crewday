@@ -8,6 +8,7 @@ import {
   type ReactNode,
 } from "react";
 import FormField, { type FieldRequirement } from "@/components/FormField";
+import { closeModalDialog, openModalDialog } from "@/lib/modalDialog";
 
 type FormModalWidth = "default" | "narrow" | "wide";
 type FormModalRole = "dialog" | "alertdialog";
@@ -79,28 +80,9 @@ export default function FormModal(props: FormModalProps) {
 
   useLayoutEffect(() => {
     const dialog = dialogRef.current;
-    if (open && dialog && !dialog.open) {
-      if (typeof dialog.showModal === "function") {
-        try {
-          dialog.showModal();
-        } catch {
-          dialog.setAttribute("open", "");
-        }
-      } else {
-        dialog.setAttribute("open", "");
-      }
-    }
-    if (!open && dialog?.open) {
-      if (typeof dialog.close === "function") {
-        try {
-          dialog.close();
-        } catch {
-          dialog.removeAttribute("open");
-        }
-      } else {
-        dialog.removeAttribute("open");
-      }
-    }
+    if (!dialog) return;
+    if (open) openModalDialog(dialog);
+    else closeModalDialog(dialog);
   }, [open]);
 
   return (

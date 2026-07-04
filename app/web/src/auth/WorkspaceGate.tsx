@@ -1,5 +1,6 @@
 import { Link, Navigate, Outlet, useLocation } from "react-router-dom";
 import { useCallback, useEffect, useMemo, useRef } from "react";
+import { useModalDialog } from "@/lib/modalDialog";
 import { useAuth } from "./useAuth";
 import { landingForWorkspace, workspaceSlug } from "./roleLanding";
 import { useWorkspace } from "@/context/WorkspaceContext";
@@ -57,6 +58,12 @@ export function WorkspaceGate({
   const setFirstAction = useCallback((node: HTMLElement | null): void => {
     firstActionRef.current = node;
   }, []);
+  // showModal() turns the gate into a real modal (focus trap) instead of
+  // `<dialog open>`, which announces `aria-modal` without trapping. The
+  // gate is mandatory, so Esc must not dismiss it — with no dismiss
+  // handler, `gateDialog.onCancel` just blocks the native close; the
+  // explicit focus effect below keeps initial focus on the first pick.
+  const gateDialog = useModalDialog();
 
   const available = useMemo(
     () => user?.available_workspaces ?? [],
@@ -154,7 +161,12 @@ export function WorkspaceGate({
     // pure UX polish, not a new permission edge.
     const isAdmin = user?.is_deployment_admin === true;
     return (
-      <dialog open className="auth-gate" aria-modal="true" aria-labelledby="auth-gate-title">
+      <dialog
+        ref={gateDialog.ref}
+        className="auth-gate"
+        aria-labelledby="auth-gate-title"
+        onCancel={gateDialog.onCancel}
+      >
         <div className="auth-gate__panel">
           <h1 id="auth-gate-title" className="auth-gate__title">No workspaces yet</h1>
           <p className="auth-gate__sub">
@@ -189,7 +201,12 @@ export function WorkspaceGate({
   // 2+ workspaces: pick one. Hold-pattern style matches `<RequireAuth>`'s
   // loading state so the transition between the two doesn't flash.
   return (
-    <dialog open className="auth-gate" aria-modal="true" aria-labelledby="auth-gate-title">
+    <dialog
+      ref={gateDialog.ref}
+      className="auth-gate"
+      aria-labelledby="auth-gate-title"
+      onCancel={gateDialog.onCancel}
+    >
       <div className="auth-gate__panel">
         <h1 id="auth-gate-title" className="auth-gate__title">Pick a workspace</h1>
         <p className="auth-gate__sub">

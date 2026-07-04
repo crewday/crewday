@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useReducer, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
 import type { ChangeEvent, Dispatch } from "react";
 import { useLocation, useParams } from "react-router-dom";
 import {
@@ -10,7 +10,7 @@ import {
 import { ApiError, fetchJson } from "@/lib/api";
 import { formatDecimal } from "@/lib/numberFormat";
 import { qk } from "@/lib/queryKeys";
-import { useCloseOnEscape } from "@/lib/useCloseOnEscape";
+import { useModalDialog } from "@/lib/modalDialog";
 import DeskPage from "@/components/DeskPage";
 import AutoGrowTextarea from "@/components/AutoGrowTextarea";
 import DateTime from "@/components/DateTime";
@@ -912,7 +912,6 @@ function newInventoryItemColumns(
 // react-doctor-disable-next-line react-doctor/no-giant-component -- Existing promoted surface is intentionally deferred until a focused component split preserves behavior.
 function InventoryDrawer({ item, onClose }: { item: InventoryItem; onClose: () => void }) {
   const qc = useQueryClient();
-  useCloseOnEscape(onClose);
 
   // Infinite-scrolling ledger. 8 per page keeps the first screen
   // tight on laptops; IntersectionObserver fetches more when the
@@ -942,8 +941,20 @@ function InventoryDrawer({ item, onClose }: { item: InventoryItem; onClose: () =
   // observe the sentinel relative to the aside's own scroll viewport
   // so the trigger fires even when the drawer's inner overflow (not
   // the window) is what's scrolling.
-  const drawerRef = useRef<HTMLElement | null>(null);
+  const drawerRef = useRef<HTMLDialogElement | null>(null);
   const sentinelRef = useRef<HTMLDivElement | null>(null);
+  // The dialog is both the modal surface (focus trap + ::backdrop via
+  // showModal()) and the scroll root the ledger's IntersectionObserver
+  // watches, so the two refs share one node.
+  const dialog = useModalDialog(onClose);
+  const dialogRefCallback = dialog.ref;
+  const setDrawerNode = useCallback(
+    (node: HTMLDialogElement | null) => {
+      drawerRef.current = node;
+      dialogRefCallback(node);
+    },
+    [dialogRefCallback],
+  );
 
   useEffect(() => {
     const sentinel = sentinelRef.current;
@@ -1033,324 +1044,317 @@ function InventoryDrawer({ item, onClose }: { item: InventoryItem; onClose: () =
       Math.abs(reorderTargetNum - (item.reorder_target ?? item.par)) > 1e-9);
 
   return (
-    <>
-      <div
-        className="inv-drawer__scrim"
-        onClick={onClose}
-        aria-hidden="true"
-      />
-      <aside
-        ref={drawerRef}
-        className="inv-drawer"
-        role="dialog"
-        aria-label={`Inventory ledger, ${item.name}`}
-      >
-        <div className="inv-drawer__ribbon" aria-hidden="true" />
-        <header className="inv-drawer__head">
-          <div className="inv-drawer__head-top">
-            <span className="inv-drawer__eyebrow">{item.sku}</span>
+    <dialog
+      ref={setDrawerNode}
+      className="inv-drawer"
+      aria-label={`Inventory ledger, ${item.name}`}
+      onCancel={dialog.onCancel}
+    >
+      <div className="inv-drawer__ribbon" aria-hidden="true" />
+      <header className="inv-drawer__head">
+        <div className="inv-drawer__head-top">
+          <span className="inv-drawer__eyebrow">{item.sku}</span>
+          <button
+            type="button"
+            className="inv-drawer__close"
+            onClick={onClose}
+            aria-label="Close (Esc)"
+          >
+            ×
+          </button>
+        </div>
+        <h3 className="inv-drawer__title">{item.name}</h3>
+        <div className="inv-drawer__meta">
+          <span>{item.area}</span>
+          <span className="inv-drawer__meta-sep" aria-hidden="true">·</span>
+          <Chip tone={statusTone} size="sm">{statusLabel}</Chip>
+        </div>
+      </header>
+
+      <section className="inv-hero">
+        <div className="inv-hero__stat">
+          <span className="inv-hero__label">On hand</span>
+          <span className="inv-hero__num">{fmtQty(item.on_hand)}</span>
+          <span className="inv-hero__unit">{item.unit}</span>
+        </div>
+        <div className="inv-hero__divider" aria-hidden="true" />
+        <div className="inv-hero__stat inv-hero__stat--muted">
+          <span className="inv-hero__label">Par</span>
+          <span className="inv-hero__num">{fmtQty(item.par)}</span>
+          <span className="inv-hero__unit">{item.unit}</span>
+        </div>
+        <div
+          className="inv-hero__gauge"
+          aria-hidden="true"
+        >
+          <div
+            className={`inv-hero__gauge-fill inv-hero__gauge-fill--${statusTone}`}
+            style={{ width: `${coverage * 100}%` }}
+          />
+        </div>
+      </section>
+
+      <section className="inv-drawer__adjust">
+        <h4 className="inv-drawer__sect">Reorder rule</h4>
+        <form
+          className="inv-adjust"
+          onSubmit={(e) => {
+            e.preventDefault();
+            if (
+              !Number.isFinite(reorderPointNum) ||
+              !Number.isFinite(reorderTargetNum)
+            ) {
+              dispatchDrawer({ type: "reorderError", error: "Par and target must be numbers." });
+              return;
+            }
+            if (reorderPointNum < 0 || reorderTargetNum < 0) {
+              dispatchDrawer({ type: "reorderError", error: "Par and target cannot be negative." });
+              return;
+            }
+            if (reorderTargetNum < reorderPointNum) {
+              dispatchDrawer({ type: "reorderError", error: "Target must be at least par." });
+              return;
+            }
+            if (
+              reorderPointNum < item.on_hand &&
+              reorderPointNum < item.par &&
+              !window.confirm(
+                "Lowering par below current stock can pause automatic restock tasks. Save anyway?",
+              )
+            ) {
+              return;
+            }
+            reorder.mutate({
+              reorder_point: reorderPointNum,
+              reorder_target: reorderTargetNum,
+            });
+          }}
+        >
+          <div className="inv-adjust__grid">
+            <label className="field inv-adjust__field">
+              <span>Par</span>
+              <div className="inv-adjust__input-row">
+                <input
+                  className="inv-adjust__input mono"
+                  type="number"
+                  step="0.01"
+                  min="0"
+                  value={reorderPoint}
+                  onChange={(e) => dispatchDrawer({ type: "patch", patch: { reorderPoint: e.target.value } })}
+                  required
+                 aria-label="field inv-adjust__field Par inv-adjust__input-row inv-adjust__input mono number 0.01 0 inv-adjust__unit"/>
+                <span className="inv-adjust__unit">{item.unit}</span>
+              </div>
+            </label>
+            <label className="field inv-adjust__field">
+              <span>Target</span>
+              <div className="inv-adjust__input-row">
+                <input
+                  className="inv-adjust__input mono"
+                  type="number"
+                  step="0.01"
+                  min="0"
+                  value={reorderTarget}
+                  onChange={(e) => dispatchDrawer({ type: "patch", patch: { reorderTarget: e.target.value } })}
+                  required
+                 aria-label="field inv-adjust__field Target inv-adjust__input-row inv-adjust__input mono number 0.01 0 inv-adjust__unit"/>
+                <span className="inv-adjust__unit">{item.unit}</span>
+              </div>
+            </label>
+          </div>
+          <div className="inv-adjust__footer">
+            <span className="muted">
+              Restock tasks trigger when on-hand reaches par.
+            </span>
             <button
-              type="button"
-              className="inv-drawer__close"
-              onClick={onClose}
-              aria-label="Close (Esc)"
+              className="btn btn--moss"
+              type="submit"
+              disabled={reorder.isPending || !reorderChanged}
             >
-              ×
+              Save reorder rule
             </button>
           </div>
-          <h3 className="inv-drawer__title">{item.name}</h3>
-          <div className="inv-drawer__meta">
-            <span>{item.area}</span>
-            <span className="inv-drawer__meta-sep" aria-hidden="true">·</span>
-            <Chip tone={statusTone} size="sm">{statusLabel}</Chip>
-          </div>
-        </header>
+          {reorderErr && <p className="form-error">{reorderErr}</p>}
+        </form>
+      </section>
 
-        <section className="inv-hero">
-          <div className="inv-hero__stat">
-            <span className="inv-hero__label">On hand</span>
-            <span className="inv-hero__num">{fmtQty(item.on_hand)}</span>
-            <span className="inv-hero__unit">{item.unit}</span>
+      <section className="inv-drawer__adjust">
+        <h4 className="inv-drawer__sect">Record an event</h4>
+        <form
+          className="inv-adjust"
+          onSubmit={(e) => {
+            e.preventDefault();
+            if (delta === null || delta === 0) {
+              dispatchDrawer({ type: "adjustError", error: "Observed must differ from current on-hand." });
+              return;
+            }
+            adjust.mutate({
+              observed_on_hand: observedNum,
+              reason,
+              note,
+            });
+          }}
+        >
+          <div className="inv-adjust__grid">
+            <label className="field inv-adjust__field">
+              <span>Observed count</span>
+              <div className="inv-adjust__input-row">
+                <input
+                  className="inv-adjust__input mono"
+                  type="number"
+                  step="0.01"
+                  min="0"
+                  value={observed}
+                  onChange={(e) => dispatchDrawer({ type: "patch", patch: { observed: e.target.value } })}
+                  required
+                 aria-label="field inv-adjust__field Observed count inv-adjust__input-row inv-adjust__input mono number 0.01 0 inv-adjust__unit"/>
+                <span className="inv-adjust__unit">{item.unit}</span>
+              </div>
+            </label>
+            <label className="field inv-adjust__field">
+              <span>Reason</span>
+              <select
+                className="inv-adjust__select"
+                value={reason}
+                onChange={(e) =>
+                  dispatchDrawer({ type: "patch", patch: { reason: e.target.value as InventoryMovementReason } })
+                }
+              >
+                {ADJUST_REASONS.map((r) => (
+                  <option key={r.value} value={r.value}>
+                    {r.label}
+                  </option>
+                ))}
+              </select>
+            </label>
           </div>
-          <div className="inv-hero__divider" aria-hidden="true" />
-          <div className="inv-hero__stat inv-hero__stat--muted">
-            <span className="inv-hero__label">Par</span>
-            <span className="inv-hero__num">{fmtQty(item.par)}</span>
-            <span className="inv-hero__unit">{item.unit}</span>
-          </div>
-          <div
-            className="inv-hero__gauge"
-            aria-hidden="true"
-          >
-            <div
-              className={`inv-hero__gauge-fill inv-hero__gauge-fill--${statusTone}`}
-              style={{ width: `${coverage * 100}%` }}
+          <div className="field">
+            <span>Note (optional)</span>
+            <AutoGrowTextarea
+              className="inv-adjust__note"
+              aria-label="Note (optional)"
+              placeholder="e.g. Found in garage, soaked in rain."
+              value={note}
+              onChange={(e) => dispatchDrawer({ type: "patch", patch: { note: e.target.value } })}
             />
           </div>
-        </section>
-
-        <section className="inv-drawer__adjust">
-          <h4 className="inv-drawer__sect">Reorder rule</h4>
-          <form
-            className="inv-adjust"
-            onSubmit={(e) => {
-              e.preventDefault();
-              if (
-                !Number.isFinite(reorderPointNum) ||
-                !Number.isFinite(reorderTargetNum)
-              ) {
-                dispatchDrawer({ type: "reorderError", error: "Par and target must be numbers." });
-                return;
-              }
-              if (reorderPointNum < 0 || reorderTargetNum < 0) {
-                dispatchDrawer({ type: "reorderError", error: "Par and target cannot be negative." });
-                return;
-              }
-              if (reorderTargetNum < reorderPointNum) {
-                dispatchDrawer({ type: "reorderError", error: "Target must be at least par." });
-                return;
-              }
-              if (
-                reorderPointNum < item.on_hand &&
-                reorderPointNum < item.par &&
-                !window.confirm(
-                  "Lowering par below current stock can pause automatic restock tasks. Save anyway?",
-                )
-              ) {
-                return;
-              }
-              reorder.mutate({
-                reorder_point: reorderPointNum,
-                reorder_target: reorderTargetNum,
-              });
-            }}
-          >
-            <div className="inv-adjust__grid">
-              <label className="field inv-adjust__field">
-                <span>Par</span>
-                <div className="inv-adjust__input-row">
-                  <input
-                    className="inv-adjust__input mono"
-                    type="number"
-                    step="0.01"
-                    min="0"
-                    value={reorderPoint}
-                    onChange={(e) => dispatchDrawer({ type: "patch", patch: { reorderPoint: e.target.value } })}
-                    required
-                   aria-label="field inv-adjust__field Par inv-adjust__input-row inv-adjust__input mono number 0.01 0 inv-adjust__unit"/>
-                  <span className="inv-adjust__unit">{item.unit}</span>
-                </div>
-              </label>
-              <label className="field inv-adjust__field">
-                <span>Target</span>
-                <div className="inv-adjust__input-row">
-                  <input
-                    className="inv-adjust__input mono"
-                    type="number"
-                    step="0.01"
-                    min="0"
-                    value={reorderTarget}
-                    onChange={(e) => dispatchDrawer({ type: "patch", patch: { reorderTarget: e.target.value } })}
-                    required
-                   aria-label="field inv-adjust__field Target inv-adjust__input-row inv-adjust__input mono number 0.01 0 inv-adjust__unit"/>
-                  <span className="inv-adjust__unit">{item.unit}</span>
-                </div>
-              </label>
+          <div className="inv-adjust__footer">
+            <div
+              className={`inv-delta inv-delta--${
+                delta === null || delta === 0
+                  ? "neutral"
+                  : delta > 0
+                    ? "gain"
+                    : "loss"
+              }`}
+              aria-live="polite"
+            >
+              {delta === null || delta === 0 ? (
+                <>
+                  <span className="inv-delta__sign">,</span>
+                  <span className="inv-delta__body">no change yet</span>
+                </>
+              ) : (
+                <>
+                  <span className="inv-delta__sign">
+                    {delta > 0 ? "+" : "−"}
+                  </span>
+                  <span className="inv-delta__num mono">
+                    {fmtQty(Math.abs(delta))}
+                  </span>
+                  <span className="inv-delta__unit">{item.unit}</span>
+                </>
+              )}
             </div>
-            <div className="inv-adjust__footer">
-              <span className="muted">
-                Restock tasks trigger when on-hand reaches par.
-              </span>
-              <button
-                className="btn btn--moss"
-                type="submit"
-                disabled={reorder.isPending || !reorderChanged}
-              >
-                Save reorder rule
-              </button>
-            </div>
-            {reorderErr && <p className="form-error">{reorderErr}</p>}
-          </form>
-        </section>
+            <button
+              className="btn btn--moss"
+              type="submit"
+              disabled={adjust.isPending || delta === null || delta === 0}
+            >
+              Record adjustment
+            </button>
+          </div>
+          {err && <p className="form-error">{err}</p>}
+        </form>
+      </section>
 
-        <section className="inv-drawer__adjust">
-          <h4 className="inv-drawer__sect">Record an event</h4>
-          <form
-            className="inv-adjust"
-            onSubmit={(e) => {
-              e.preventDefault();
-              if (delta === null || delta === 0) {
-                dispatchDrawer({ type: "adjustError", error: "Observed must differ from current on-hand." });
-                return;
-              }
-              adjust.mutate({
-                observed_on_hand: observedNum,
-                reason,
-                note,
-              });
-            }}
-          >
-            <div className="inv-adjust__grid">
-              <label className="field inv-adjust__field">
-                <span>Observed count</span>
-                <div className="inv-adjust__input-row">
-                  <input
-                    className="inv-adjust__input mono"
-                    type="number"
-                    step="0.01"
-                    min="0"
-                    value={observed}
-                    onChange={(e) => dispatchDrawer({ type: "patch", patch: { observed: e.target.value } })}
-                    required
-                   aria-label="field inv-adjust__field Observed count inv-adjust__input-row inv-adjust__input mono number 0.01 0 inv-adjust__unit"/>
-                  <span className="inv-adjust__unit">{item.unit}</span>
-                </div>
-              </label>
-              <label className="field inv-adjust__field">
-                <span>Reason</span>
-                <select
-                  className="inv-adjust__select"
-                  value={reason}
-                  onChange={(e) =>
-                    dispatchDrawer({ type: "patch", patch: { reason: e.target.value as InventoryMovementReason } })
-                  }
+      <section className="inv-drawer__history">
+        <header className="inv-drawer__history-head">
+          <h4 className="inv-drawer__sect">Ledger</h4>
+          {!movementsQ.isPending && (
+            <span className="inv-drawer__history-count muted mono">
+              {allMovements.length} entries
+            </span>
+          )}
+        </header>
+        {movementsQ.isPending ? (
+          <Loading />
+        ) : movementsQ.isError ? (
+          <p className="form-error">Failed to load history.</p>
+        ) : allMovements.length === 0 ? (
+          <p className="muted inv-history__empty">
+            No movements yet. The first restock or task completion shows up here.
+          </p>
+        ) : (
+          <ol className="inv-history">
+            {allMovements.map((m, idx) => {
+              const tone = REASON_TONE[m.reason];
+              return (
+                <li
+                  key={m.id}
+                  className={`inv-history__row inv-history__row--${tone}`}
+                  style={{ animationDelay: `${Math.min(idx * 28, 320)}ms` }}
                 >
-                  {ADJUST_REASONS.map((r) => (
-                    <option key={r.value} value={r.value}>
-                      {r.label}
-                    </option>
-                  ))}
-                </select>
-              </label>
-            </div>
-            <div className="field">
-              <span>Note (optional)</span>
-              <AutoGrowTextarea
-                className="inv-adjust__note"
-                aria-label="Note (optional)"
-                placeholder="e.g. Found in garage, soaked in rain."
-                value={note}
-                onChange={(e) => dispatchDrawer({ type: "patch", patch: { note: e.target.value } })}
-              />
-            </div>
-            <div className="inv-adjust__footer">
-              <div
-                className={`inv-delta inv-delta--${
-                  delta === null || delta === 0
-                    ? "neutral"
-                    : delta > 0
-                      ? "gain"
-                      : "loss"
-                }`}
-                aria-live="polite"
-              >
-                {delta === null || delta === 0 ? (
-                  <>
-                    <span className="inv-delta__sign">,</span>
-                    <span className="inv-delta__body">no change yet</span>
-                  </>
-                ) : (
-                  <>
-                    <span className="inv-delta__sign">
-                      {delta > 0 ? "+" : "−"}
-                    </span>
-                    <span className="inv-delta__num mono">
-                      {fmtQty(Math.abs(delta))}
-                    </span>
-                    <span className="inv-delta__unit">{item.unit}</span>
-                  </>
-                )}
-              </div>
-              <button
-                className="btn btn--moss"
-                type="submit"
-                disabled={adjust.isPending || delta === null || delta === 0}
-              >
-                Record adjustment
-              </button>
-            </div>
-            {err && <p className="form-error">{err}</p>}
-          </form>
-        </section>
-
-        <section className="inv-drawer__history">
-          <header className="inv-drawer__history-head">
-            <h4 className="inv-drawer__sect">Ledger</h4>
-            {!movementsQ.isPending && (
-              <span className="inv-drawer__history-count muted mono">
-                {allMovements.length} entries
-              </span>
-            )}
-          </header>
-          {movementsQ.isPending ? (
-            <Loading />
-          ) : movementsQ.isError ? (
-            <p className="form-error">Failed to load history.</p>
-          ) : allMovements.length === 0 ? (
-            <p className="muted inv-history__empty">
-              No movements yet. The first restock or task completion shows up here.
-            </p>
-          ) : (
-            <ol className="inv-history">
-              {allMovements.map((m, idx) => {
-                const tone = REASON_TONE[m.reason];
-                return (
-                  <li
-                    key={m.id}
-                    className={`inv-history__row inv-history__row--${tone}`}
-                    style={{ animationDelay: `${Math.min(idx * 28, 320)}ms` }}
-                  >
-                    <div className="inv-history__dot" aria-hidden="true" />
-                    <div className="inv-history__body">
-                      <div className="inv-history__top">
-                        <span className="inv-history__reason">
-                          {REASON_LABEL[m.reason]}
-                        </span>
-                        <DateTime value={m.occurred_at} className="inv-history__when mono" />
-                      </div>
-                      <div
-                        className={`inv-history__delta mono inv-history__delta--${tone}`}
-                      >
-                        {m.delta > 0 ? "+" : "−"}
-                        {fmtQty(Math.abs(m.delta))} {item.unit}
-                      </div>
-                      <div className="inv-history__foot">
-                        <span className="muted">{m.actor_id}</span>
-                        {m.source_task_id && (
-                          <span className="inv-history__src">
-                            ↳ task {m.source_task_id}
-                          </span>
-                        )}
-                        {m.source_stocktake_id && (
-                          <span className="inv-history__src">
-                            ↳ stocktake
-                          </span>
-                        )}
-                        {m.note && (
-                          <span className="inv-history__note">{m.note}</span>
-                        )}
-                      </div>
+                  <div className="inv-history__dot" aria-hidden="true" />
+                  <div className="inv-history__body">
+                    <div className="inv-history__top">
+                      <span className="inv-history__reason">
+                        {REASON_LABEL[m.reason]}
+                      </span>
+                      <DateTime value={m.occurred_at} className="inv-history__when mono" />
                     </div>
-                  </li>
-                );
-              })}
-            </ol>
-          )}
-          <div ref={sentinelRef} className="inv-history__sentinel" aria-hidden="true" />
-          {movementsQ.isFetchingNextPage && (
-            <p className="inv-history__loading muted">
-              <span className="inv-history__loading-dots" aria-hidden="true">
-                <i /><i /><i />
-              </span>
-              loading older entries
-            </p>
-          )}
-          {!movementsQ.hasNextPage && allMovements.length > 0 && !movementsQ.isFetchingNextPage && (
-            <p className="inv-history__end muted">· end of ledger ·</p>
-          )}
-        </section>
-      </aside>
-    </>
+                    <div
+                      className={`inv-history__delta mono inv-history__delta--${tone}`}
+                    >
+                      {m.delta > 0 ? "+" : "−"}
+                      {fmtQty(Math.abs(m.delta))} {item.unit}
+                    </div>
+                    <div className="inv-history__foot">
+                      <span className="muted">{m.actor_id}</span>
+                      {m.source_task_id && (
+                        <span className="inv-history__src">
+                          ↳ task {m.source_task_id}
+                        </span>
+                      )}
+                      {m.source_stocktake_id && (
+                        <span className="inv-history__src">
+                          ↳ stocktake
+                        </span>
+                      )}
+                      {m.note && (
+                        <span className="inv-history__note">{m.note}</span>
+                      )}
+                    </div>
+                  </div>
+                </li>
+              );
+            })}
+          </ol>
+        )}
+        <div ref={sentinelRef} className="inv-history__sentinel" aria-hidden="true" />
+        {movementsQ.isFetchingNextPage && (
+          <p className="inv-history__loading muted">
+            <span className="inv-history__loading-dots" aria-hidden="true">
+              <i /><i /><i />
+            </span>
+            loading older entries
+          </p>
+        )}
+        {!movementsQ.hasNextPage && allMovements.length > 0 && !movementsQ.isFetchingNextPage && (
+          <p className="inv-history__end muted">· end of ledger ·</p>
+        )}
+      </section>
+    </dialog>
   );
 }
 

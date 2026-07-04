@@ -6,7 +6,7 @@
 
 import { Link, useLocation } from "react-router-dom";
 import { useMemo, useState } from "react";
-import { useCloseOnEscape } from "@/lib/useCloseOnEscape";
+import { useModalDialog } from "@/lib/modalDialog";
 import { workspaceRouteForPathname } from "@/lib/workspaceRoutes";
 import type { Booking, MySchedulePayload } from "@/types/api";
 import { BookingAmendDialog } from "./BookingAmendDialog";
@@ -54,9 +54,9 @@ export function DayDrawer(props: DayDrawerProps) {
   // worker opened a rest day (the hero would otherwise look broken).
   const drawerWindow = useMemo(() => (cell ? computeWindow([cell]) : null), [cell]);
 
-  // Universal Esc-to-close, matches the inventory drawer, prompt
-  // drawer, and everything else scrim-backed across the app.
-  useCloseOnEscape(onClose, cell !== null && drawerWindow !== null);
+  // Native <dialog> + showModal() gives the focus trap, Esc-to-close,
+  // ::backdrop scrim, focus-restore-on-close, and backdrop click-to-close.
+  const dialog = useModalDialog(onClose);
 
   if (!cell || !drawerWindow) return null;
   const heading = cell.date.toLocaleDateString("en-GB", {
@@ -68,8 +68,12 @@ export function DayDrawer(props: DayDrawerProps) {
     cell.rota.length > 0 || cell.bookings.length > 0 || cell.tasks.length > 0;
   return (
     <>
-      <div className="day-drawer__scrim" onClick={onClose} aria-hidden />
-      <aside className="day-drawer" role="dialog" aria-label={"Schedule for " + heading}>
+      <dialog
+        ref={dialog.ref}
+        className="day-drawer"
+        aria-label={"Schedule for " + heading}
+        onCancel={dialog.onCancel}
+      >
         <header className="day-drawer__head">
           <div>
             <div className="day-drawer__eyebrow">Schedule</div>
@@ -295,7 +299,7 @@ export function DayDrawer(props: DayDrawerProps) {
             )}
           </section>
         </div>
-      </aside>
+      </dialog>
       <BookingAmendDialog
         booking={amendTarget}
         propertyLabel={amendTarget ? propertyName(amendTarget.property_id, data) : ""}

@@ -27,13 +27,23 @@
   animation: auth-hold-spin 700ms linear infinite;
 }
 
+/* Opened with showModal() so it truly traps focus. The dialog itself is
+   the full-viewport scrim + centering surface, so reset the native
+   `:modal` UA box (max-width / max-height / border / margin) that would
+   otherwise shrink it and leave uncovered edges. */
 .auth-gate {
   position: fixed; inset: 0; z-index: 60;
+  margin: 0; border: none; padding: 24px;
+  max-width: none; max-height: none;
+  color: var(--ink);
   display: flex; align-items: center; justify-content: center;
-  padding: 24px;
   background: rgba(31, 26, 20, 0.55);
   backdrop-filter: blur(4px);
   animation: auth-fade-in 220ms ease-out both;
+}
+.auth-gate::backdrop {
+  background: rgba(31, 26, 20, 0.55);
+  backdrop-filter: blur(4px);
 }
 .auth-gate__panel {
   width: min(440px, 96vw);

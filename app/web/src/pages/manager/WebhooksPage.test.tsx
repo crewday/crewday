@@ -260,7 +260,11 @@ describe("<WebhooksPage>", () => {
       });
       expect(fake.calls).toContain("/w/acme/api/v1/webhooks/wh_1/deliveries");
 
-      fireEvent.keyDown(window, { key: "Escape" });
+      // Native <dialog> Escape fires a `cancel` event on the dialog.
+      fireEvent(
+        screen.getByRole("dialog", { name: /Delivery log/ }),
+        new Event("cancel", { bubbles: false, cancelable: true }),
+      );
       await waitFor(() => {
         expect(screen.queryByRole("dialog", { name: /Delivery log/ })).not.toBeInTheDocument();
       });

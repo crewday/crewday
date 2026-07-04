@@ -420,7 +420,11 @@ describe("<InstructionDetailPage>", () => {
       expect(screen.getByText("updated key material")).toBeInTheDocument();
       expect(screen.getByRole("button", { name: "Close instruction history" })).toBeInTheDocument();
 
-      fireEvent.keyDown(window, { key: "Escape" });
+      // Native <dialog> Escape fires a `cancel` event on the dialog.
+      fireEvent(
+        screen.getByRole("dialog", { name: "Instruction history" }),
+        new Event("cancel", { bubbles: false, cancelable: true }),
+      );
       await waitFor(() => {
         expect(screen.queryByRole("dialog", { name: "Instruction history" })).not.toBeInTheDocument();
       });
