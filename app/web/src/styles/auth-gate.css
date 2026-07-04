@@ -10,9 +10,9 @@
    the protected tree commits. */
 .auth-hold {
   display: flex; align-items: center; justify-content: center;
-  min-height: 100vh; padding: 32px;
+  min-height: 100vh; padding: var(--space-11);
   background: var(--paper); color: var(--ink-3);
-  font-family: "Inter Tight", sans-serif; font-size: 13px;
+  font-family: "Inter Tight", sans-serif; font-size: var(--text-body-sm);
   letter-spacing: 0.04em;
   animation: auth-fade-in 240ms ease-out both;
 }
@@ -33,7 +33,7 @@
    otherwise shrink it and leave uncovered edges. */
 .auth-gate {
   position: fixed; inset: 0; z-index: 60;
-  margin: 0; border: none; padding: 24px;
+  margin: 0; border: none; padding: var(--space-10);
   max-width: none; max-height: none;
   color: var(--ink);
   display: flex; align-items: center; justify-content: center;
@@ -51,33 +51,36 @@
   border: 1px solid var(--line); border-radius: 14px;
   box-shadow: 0 24px 60px rgba(0, 0, 0, 0.28);
   padding: 28px 26px 22px;
-  display: flex; flex-direction: column; gap: 14px;
+  display: flex; flex-direction: column; gap: var(--space-7);
 }
 .auth-gate__title {
   font-family: "Fraunces", serif; font-weight: 600;
+  /* Off-scale Fraunces gate title (between display-sm 1.22rem and
+     display-md 1.65rem); left literal pending a DESIGN.md scale decision. */
   font-size: 1.5rem; letter-spacing: -0.01em;
   font-variation-settings: "opsz" 36;
   margin: 0;
 }
 .auth-gate__sub {
-  margin: 0; color: var(--ink-3); font-size: 13.5px; line-height: 1.45;
+  /* Snapped 13.5px to body-sm (13px, -0.5px); DESIGN.md type-scale normalization. */
+  margin: 0; color: var(--ink-3); font-size: var(--text-body-sm); line-height: 1.45;
 }
 .auth-gate__list {
-  list-style: none; margin: 6px 0 0; padding: 0;
-  display: flex; flex-direction: column; gap: 6px;
+  list-style: none; margin: var(--space-3) 0 0; padding: 0;
+  display: flex; flex-direction: column; gap: var(--space-3);
 }
 .workspace-pick-list {
   list-style: none; margin: 0; padding: 0;
-  display: flex; flex-direction: column; gap: 8px;
+  display: flex; flex-direction: column; gap: var(--space-4);
 }
 .workspace-pick-list__item { margin: 0; }
 .workspace-pick-list__row {
-  display: flex; align-items: center; gap: 12px; width: 100%;
+  display: flex; align-items: center; gap: var(--space-6); width: 100%;
   min-height: 56px;
   background: var(--paper-2); border: 1px solid var(--line);
   border-radius: 10px; padding: 11px 13px; cursor: pointer;
   color: var(--ink); text-align: left; text-decoration: none;
-  font: inherit; font-size: 14px;
+  font: inherit; font-size: var(--text-label-md);
   transition: background 120ms ease, border-color 120ms ease, transform 120ms ease;
 }
 .workspace-pick-list__row:hover,
@@ -104,13 +107,15 @@
   flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px;
 }
 .workspace-pick-list__name {
-  font-weight: 650; font-size: 14.5px;
+  /* Snapped 14.5px to label-md (14px, -0.5px); DESIGN.md type-scale normalization. */
+  font-weight: 650; font-size: var(--text-label-md);
 }
 .workspace-pick-list__meta {
   display: flex; align-items: center; flex-wrap: wrap;
   gap: 5px 8px;
   color: var(--ink-3);
-  font-size: 11.5px;
+  /* Snapped 11.5px to label-sm (12px, +0.5px); DESIGN.md type-scale normalization. */
+  font-size: var(--text-label-sm);
   line-height: 1.25;
 }
 .workspace-pick-list__slug {
@@ -127,7 +132,7 @@
   color: var(--ink-3); flex-shrink: 0;
 }
 .auth-gate__actions {
-  display: flex; justify-content: flex-end; gap: 8px; margin-top: 8px;
+  display: flex; justify-content: flex-end; gap: var(--space-4); margin-top: var(--space-4);
 }
 
 @keyframes auth-fade-in {

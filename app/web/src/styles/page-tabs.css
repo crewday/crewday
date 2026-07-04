@@ -1,7 +1,7 @@
 .page-tabs {
   display: flex;
-  gap: 4px;
-  margin-bottom: 16px;
+  gap: var(--space-2);
+  margin-bottom: var(--space-8);
   max-width: 100%;
   overflow-x: auto;
   overflow-y: hidden;
@@ -16,13 +16,13 @@
   flex: 0 0 auto;
   min-height: 44px;
   max-width: min(18rem, 72vw);
-  padding: 10px 14px;
+  padding: var(--space-5) var(--space-7);
   border: 0;
   border-bottom: 2px solid transparent;
   color: var(--ink-3);
   background: transparent;
   font: inherit;
-  font-size: 14px;
+  font-size: var(--text-label-md);
   font-weight: 500;
   line-height: 1.3;
   text-decoration: none;
@@ -58,8 +58,8 @@
 .property-tabs {
   display: flex;
   flex-wrap: wrap;
-  gap: 4px;
-  margin-bottom: 16px;
+  gap: var(--space-2);
+  margin-bottom: var(--space-8);
   max-width: 100%;
   overflow-x: auto;
   overflow-y: hidden;
@@ -71,7 +71,7 @@
 .property-tabs__links {
   display: flex;
   flex: 0 0 auto;
-  gap: 4px;
+  gap: var(--space-2);
   margin-bottom: 0;
   overflow: visible;
   border-bottom: 0;

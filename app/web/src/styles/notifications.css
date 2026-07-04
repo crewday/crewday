@@ -1,14 +1,14 @@
 .notifications-page {
   display: flex;
   flex-direction: column;
-  gap: 12px;
-  padding: 16px 20px;
+  gap: var(--space-6);
+  padding: var(--space-8) var(--space-9);
 }
 
 .notification-list {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: var(--space-5);
   list-style: none;
   margin: 0;
   padding: 0;
@@ -17,8 +17,8 @@
 .notification-card {
   display: grid;
   grid-template-columns: 34px minmax(0, 1fr);
-  gap: 12px;
-  padding: 14px;
+  gap: var(--space-6);
+  padding: var(--space-7);
   border: 1px solid var(--line);
   border-left-width: 3px;
   border-left-color: transparent;
@@ -59,16 +59,16 @@
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
-  gap: 10px;
+  gap: var(--space-5);
 }
 
 .notification-card__meta {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 6px;
+  gap: var(--space-3);
   color: var(--ink-3);
-  font-size: 12px;
+  font-size: var(--text-label-sm);
   text-transform: capitalize;
 }
 
@@ -77,17 +77,19 @@
 }
 
 .notification-card__title {
-  margin: 8px 0 0;
+  margin: var(--space-4) 0 0;
   color: var(--ink);
   font-family: "Fraunces", ui-serif, serif;
-  font-size: 1.18rem;
+  /* Snapped from 1.18rem to the nearest serif rung (display-sm 1.22rem,
+     ~+0.6px); DESIGN.md type-scale normalization. */
+  font-size: var(--text-display-sm);
   font-weight: 600;
   line-height: 1.22;
   overflow-wrap: anywhere;
 }
 
 .notification-card__message {
-  margin-top: 10px;
+  margin-top: var(--space-5);
   color: var(--ink-2);
 }
 
@@ -98,14 +100,14 @@
 .notification-card__message .chat-markdown__paragraph + .chat-markdown__paragraph,
 .notification-card__message .chat-markdown__list,
 .notification-card__message .chat-markdown__code {
-  margin-top: 8px;
+  margin-top: var(--space-4);
 }
 
 @media (max-width: 520px) {
   .notification-card {
     grid-template-columns: 30px minmax(0, 1fr);
-    gap: 10px;
-    padding: 12px;
+    gap: var(--space-5);
+    padding: var(--space-6);
   }
 
   .notification-card__status {
@@ -125,10 +127,10 @@
 
 @media (min-width: 720px) {
   .notifications-page {
-    padding: 24px 0;
+    padding: var(--space-10) 0;
   }
 
   .notification-card {
-    padding: 16px;
+    padding: var(--space-8);
   }
 }

@@ -4,17 +4,17 @@
 .inv-panel__actions {
   display: inline-flex;
   align-items: center;
-  gap: 12px;
+  gap: var(--space-6);
 }
 
 .inv-table .num-col { text-align: right; }
 .inv-table th.num-col { padding-right: 18px; }
 .inv-table td.num-col { padding-right: 18px; }
 .inv-table .unit {
-  font-size: 11px;
+  font-size: var(--text-mono-sm);
   color: var(--ink-3);
   letter-spacing: 0.04em;
-  margin-left: 2px;
+  margin-left: var(--space-1);
 }
 
 .inv-row { cursor: pointer; transition: background-color 120ms ease; }
@@ -86,7 +86,7 @@
   padding: 22px 24px 16px;
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: var(--space-2);
   position: sticky;
   top: 0;
   z-index: 2;
@@ -97,9 +97,11 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
+  gap: var(--space-6);
 }
 .inv-drawer__eyebrow {
+  /* Sub-11px uppercase micro-eyebrow; intentional off-scale exception per
+     DESIGN.md typography (no sub-11px rung). */
   font-size: 10px;
   letter-spacing: 0.22em;
   text-transform: uppercase;
@@ -108,18 +110,20 @@
 }
 .inv-drawer__title {
   font-family: "Fraunces", ui-serif, serif;
+  /* Off-scale Fraunces drawer title (between display-sm 1.22rem and
+     display-md 1.65rem); left literal pending a DESIGN.md scale decision. */
   font-size: 1.55rem;
   font-weight: 600;
   line-height: 1.1;
   letter-spacing: -0.01em;
   color: var(--ink);
-  margin: 4px 0 6px;
+  margin: var(--space-2) 0 var(--space-3);
 }
 .inv-drawer__meta {
   display: inline-flex;
-  gap: 8px;
+  gap: var(--space-4);
   align-items: center;
-  font-size: 13px;
+  font-size: var(--text-body-sm);
   color: var(--ink-2);
 }
 .inv-drawer__meta-sep { color: var(--ink-4); }
@@ -129,6 +133,7 @@
   border-radius: 999px;
   width: 34px;
   height: 34px;
+  /* Decorative close-button glyph sizing, not a type-scale rung; left literal. */
   font-size: 22px;
   line-height: 1;
   color: var(--ink-2);
@@ -146,8 +151,8 @@
   display: grid;
   grid-template-columns: 1fr auto 1fr;
   align-items: end;
-  gap: 16px;
-  padding: 6px 24px 24px;
+  gap: var(--space-8);
+  padding: var(--space-3) var(--space-10) var(--space-10);
   border-bottom: 1px solid var(--line);
   position: relative;
 }
@@ -155,9 +160,11 @@
   display: flex;
   flex-direction: column;
   align-items: flex-start;
-  gap: 2px;
+  gap: var(--space-1);
 }
 .inv-hero__label {
+  /* Sub-11px uppercase micro-label; intentional off-scale exception per
+     DESIGN.md typography (no sub-11px rung). */
   font-size: 10px;
   letter-spacing: 0.22em;
   text-transform: uppercase;
@@ -165,6 +172,8 @@
 }
 .inv-hero__num {
   font-family: "Fraunces", ui-serif, serif;
+  /* Decorative oversized hero stat numeral, above display-lg (1.85rem);
+     intentional off-scale display figure, not a type-scale rung. */
   font-size: 2.4rem;
   font-weight: 500;
   line-height: 1;
@@ -175,10 +184,10 @@
 .inv-hero__stat--muted .inv-hero__num { color: var(--ink-3); font-weight: 400; }
 .inv-hero__unit {
   font-family: "JetBrains Mono", ui-monospace, monospace;
-  font-size: 11px;
+  font-size: var(--text-mono-sm);
   color: var(--ink-3);
   letter-spacing: 0.06em;
-  margin-top: 4px;
+  margin-top: var(--space-2);
 }
 .inv-hero__divider {
   width: 1px;
@@ -203,34 +212,36 @@
 .inv-hero__gauge-fill--rust { background: var(--rust); }
 
 .inv-drawer__adjust {
-  padding: 20px 24px;
+  padding: var(--space-9) var(--space-10);
   border-bottom: 1px solid var(--line);
   background: var(--paper-2);
 }
 .inv-drawer__sect {
   font-family: "Fraunces", ui-serif, serif;
+  /* Compact sub-1rem Fraunces section title; intentional off-scale exception
+     per DESIGN.md typography (small-serif, below display-sm). */
   font-size: 0.82rem;
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.22em;
   color: var(--ink-3);
-  margin: 0 0 14px;
+  margin: 0 0 var(--space-7);
 }
 .inv-adjust {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: var(--space-6);
 }
 .inv-adjust__grid {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-  gap: 10px;
+  gap: var(--space-5);
 }
 @media (max-width: 520px) {
   .inv-adjust__grid { grid-template-columns: 1fr; }
 }
 .inv-adjust__field > span {
-  font-size: 11px;
+  font-size: var(--text-mono-sm);
   letter-spacing: 0.18em;
   text-transform: uppercase;
   color: var(--ink-3);
@@ -252,8 +263,8 @@
   flex: 1;
   border: none;
   background: transparent;
-  padding: 10px 12px;
-  font-size: 15px;
+  padding: var(--space-5) var(--space-6);
+  font-size: var(--text-body-md);
   font-family: "JetBrains Mono", ui-monospace, monospace;
   font-variant-numeric: tabular-nums;
   color: var(--ink);
@@ -262,11 +273,11 @@
   width: 100%;
 }
 .inv-adjust__unit {
-  padding: 10px 14px;
+  padding: var(--space-5) var(--space-7);
   background: var(--paper-3);
   border-left: 1px solid var(--line);
   color: var(--ink-3);
-  font-size: 12px;
+  font-size: var(--text-label-sm);
   letter-spacing: 0.08em;
   font-family: "JetBrains Mono", ui-monospace, monospace;
   align-self: stretch;
@@ -277,10 +288,10 @@
   border: 1px solid var(--line);
   background: var(--card);
   border-radius: 10px;
-  padding: 10px 12px;
+  padding: var(--space-5) var(--space-6);
   font: inherit;
   color: var(--ink);
-  font-size: 14px;
+  font-size: var(--text-label-md);
   transition: border-color 140ms ease, box-shadow 140ms ease;
 }
 .inv-adjust__select:focus {
@@ -292,8 +303,8 @@
   border: 1px solid var(--line);
   border-radius: 10px;
   background: var(--card);
-  padding: 10px 12px;
-  font-size: 14px;
+  padding: var(--space-5) var(--space-6);
+  font-size: var(--text-label-md);
   min-height: 64px;
   transition: border-color 140ms ease, box-shadow 140ms ease;
 }
@@ -306,17 +317,17 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 14px;
-  margin-top: 4px;
+  gap: var(--space-7);
+  margin-top: var(--space-2);
 }
 
 .inv-delta {
   display: inline-flex;
   align-items: baseline;
-  gap: 4px;
-  padding: 6px 12px 6px 10px;
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-6) var(--space-3) var(--space-5);
   border-radius: 999px;
-  font-size: 13px;
+  font-size: var(--text-body-sm);
   line-height: 1;
   background: var(--paper-3);
   color: var(--ink-2);
@@ -325,23 +336,24 @@
 }
 .inv-delta__sign {
   font-family: "Fraunces", ui-serif, serif;
+  /* Decorative delta-sign glyph, between rungs; left literal. */
   font-size: 18px;
   line-height: 1;
   font-weight: 500;
 }
 .inv-delta__num {
-  font-size: 15px;
+  font-size: var(--text-body-md);
   font-variant-numeric: tabular-nums;
   font-weight: 600;
 }
 .inv-delta__unit {
   font-family: "JetBrains Mono", ui-monospace, monospace;
-  font-size: 11px;
+  font-size: var(--text-mono-sm);
   color: var(--ink-3);
   letter-spacing: 0.08em;
 }
 .inv-delta__body {
-  font-size: 12px;
+  font-size: var(--text-label-sm);
   color: var(--ink-3);
   letter-spacing: 0.02em;
 }
@@ -365,17 +377,17 @@
   display: flex;
   align-items: baseline;
   justify-content: space-between;
-  gap: 10px;
-  margin-bottom: 8px;
+  gap: var(--space-5);
+  margin-bottom: var(--space-4);
 }
 .inv-drawer__history-count {
-  font-size: 11px;
+  font-size: var(--text-mono-sm);
   letter-spacing: 0.08em;
 }
 .inv-history__empty {
-  font-size: 13px;
+  font-size: var(--text-body-sm);
   font-style: italic;
-  padding: 16px 0;
+  padding: var(--space-8) 0;
 }
 .inv-history {
   list-style: none;
@@ -383,7 +395,7 @@
   margin: 0;
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: var(--space-7);
   position: relative;
 }
 .inv-history::before {
@@ -405,8 +417,8 @@
   position: relative;
   display: grid;
   grid-template-columns: 16px minmax(0, 1fr);
-  gap: 12px;
-  padding: 4px 0;
+  gap: var(--space-6);
+  padding: var(--space-2) 0;
   opacity: 0;
   transform: translateY(4px);
   animation: inv-history-reveal 360ms ease-out forwards;
@@ -420,7 +432,7 @@
   border-radius: 999px;
   background: var(--card);
   border: 2px solid var(--ink-4);
-  margin-top: 4px;
+  margin-top: var(--space-2);
   position: relative;
   z-index: 1;
   box-shadow: 0 0 0 4px var(--card);
@@ -447,23 +459,25 @@
   display: flex;
   align-items: baseline;
   justify-content: space-between;
-  gap: 8px;
+  gap: var(--space-4);
 }
 .inv-history__reason {
   font-family: "Fraunces", ui-serif, serif;
+  /* Compact sub-1rem Fraunces title; intentional off-scale exception per
+     DESIGN.md typography (small-serif, below display-sm). */
   font-size: 0.95rem;
   font-weight: 600;
   letter-spacing: -0.005em;
   color: var(--ink);
 }
 .inv-history__when {
-  font-size: 11px;
+  font-size: var(--text-mono-sm);
   color: var(--ink-3);
   letter-spacing: 0.06em;
   flex-shrink: 0;
 }
 .inv-history__delta {
-  font-size: 15px;
+  font-size: var(--text-body-md);
   font-variant-numeric: tabular-nums;
   font-weight: 600;
 }
@@ -472,35 +486,35 @@
 .inv-history__delta--neutral { color: var(--ink-2); }
 .inv-history__foot {
   display: inline-flex;
-  gap: 10px;
+  gap: var(--space-5);
   align-items: baseline;
-  font-size: 12px;
+  font-size: var(--text-label-sm);
   color: var(--ink-3);
   flex-wrap: wrap;
 }
 .inv-history__src {
   color: var(--ink-2);
-  font-size: 11px;
+  font-size: var(--text-mono-sm);
   font-family: "JetBrains Mono", ui-monospace, monospace;
   letter-spacing: 0.04em;
 }
 .inv-history__note {
   font-style: italic;
   color: var(--ink-2);
-  font-size: 12px;
+  font-size: var(--text-label-sm);
 }
 .inv-history__sentinel {
   height: 1px;
-  margin-top: 14px;
+  margin-top: var(--space-7);
 }
 .inv-history__loading {
   display: inline-flex;
   align-items: center;
-  gap: 10px;
-  font-size: 12px;
+  gap: var(--space-5);
+  font-size: var(--text-label-sm);
   font-style: italic;
   letter-spacing: 0.04em;
-  padding: 8px 0 0 24px;
+  padding: var(--space-4) 0 0 var(--space-10);
 }
 .inv-history__loading-dots {
   display: inline-flex;
@@ -521,7 +535,7 @@
   40% { opacity: 1; transform: scale(1); }
 }
 .inv-history__end {
-  font-size: 11px;
+  font-size: var(--text-mono-sm);
   text-align: center;
   letter-spacing: 0.22em;
   text-transform: uppercase;
@@ -534,7 +548,7 @@
   overflow-y: auto;
 }
 .stocktake__table {
-  margin: 12px 0 0;
+  margin: var(--space-6) 0 0;
 }
 .stocktake__item-cell,
 .stocktake__row-meta {
@@ -552,13 +566,13 @@
 .stocktake__delta {
   display: block;
   text-align: right;
-  font-size: 14px;
+  font-size: var(--text-label-md);
 }
 .stocktake__batch {
   width: 100%;
 }
 .stocktake__batch .form-error {
-  margin: 0 0 10px;
+  margin: 0 0 var(--space-5);
 }
 .stocktake__batch .modal__actions {
   margin-top: 0;

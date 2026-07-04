@@ -19,9 +19,9 @@
 .inline-error-alert__message {
   align-self: center;
   margin: 0;
-  padding: 10px 8px 10px 12px;
+  padding: var(--space-5) var(--space-4) var(--space-5) var(--space-6);
   color: var(--ink);
-  font-size: 13px;
+  font-size: var(--text-body-sm);
   font-weight: 600;
   line-height: 1.4;
 }
@@ -51,10 +51,10 @@
 
 .inline-error-alert__details {
   display: grid;
-  gap: 12px;
+  gap: var(--space-6);
   max-height: min(58vh, 520px);
   overflow: auto;
-  padding: 0 12px 12px;
+  padding: 0 var(--space-6) var(--space-6);
 }
 
 .inline-error-alert__properties {
@@ -70,8 +70,8 @@
 .inline-error-alert__property {
   display: grid;
   grid-template-columns: minmax(92px, 0.38fr) minmax(0, 1fr);
-  gap: 8px;
-  padding: 8px 10px;
+  gap: var(--space-4);
+  padding: var(--space-4) var(--space-5);
   background: var(--card-raised);
 }
 
@@ -79,7 +79,7 @@
 .inline-error-alert__block-title {
   margin: 0;
   color: var(--ink-3);
-  font-size: 12px;
+  font-size: var(--text-label-sm);
   font-weight: 600;
   line-height: 1.35;
   letter-spacing: 0.04em;
@@ -91,10 +91,10 @@
   min-width: 0;
   align-items: center;
   justify-content: space-between;
-  gap: 8px;
+  gap: var(--space-4);
   margin: 0;
   color: var(--ink);
-  font-size: 13px;
+  font-size: var(--text-body-sm);
   line-height: 1.4;
 }
 
@@ -115,7 +115,7 @@
   border: 1px solid var(--line);
   border-radius: 999px;
   cursor: pointer;
-  font-size: 12px;
+  font-size: var(--text-label-sm);
   font-weight: 600;
 }
 
@@ -126,12 +126,12 @@
 
 .inline-error-alert__block {
   display: grid;
-  gap: 6px;
+  gap: var(--space-3);
 }
 
 .inline-error-alert__list {
   display: grid;
-  gap: 6px;
+  gap: var(--space-3);
   margin: 0;
   padding: 0;
   list-style: none;
@@ -139,38 +139,38 @@
 
 .inline-error-alert__list li {
   display: grid;
-  gap: 4px;
-  padding: 8px 10px;
+  gap: var(--space-2);
+  padding: var(--space-4) var(--space-5);
   color: var(--ink-2);
   background: var(--paper-2);
   border: 1px solid var(--line);
   border-radius: 8px;
-  font-size: 13px;
+  font-size: var(--text-body-sm);
   line-height: 1.4;
 }
 
 .inline-error-alert__list code {
   width: fit-content;
   max-width: 100%;
-  padding: 2px 6px;
+  padding: var(--space-1) var(--space-3);
   overflow-wrap: anywhere;
   color: var(--ink-2);
   background: var(--card);
   border: 1px solid var(--line);
   border-radius: 4px;
-  font-size: 11px;
+  font-size: var(--text-mono-sm);
 }
 
 .inline-error-alert__list small,
 .inline-error-alert__empty {
   color: var(--ink-3);
-  font-size: 12px;
+  font-size: var(--text-label-sm);
   line-height: 1.4;
 }
 
 .inline-error-alert__empty {
   margin: 0;
-  padding: 8px 10px;
+  padding: var(--space-4) var(--space-5);
   background: var(--paper-2);
   border: 1px solid var(--line);
   border-radius: 8px;
