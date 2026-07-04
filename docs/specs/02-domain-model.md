@@ -106,7 +106,10 @@ Permissions are split in two, deliberately:
   shell the user sees and which rows RLS (§15) lets them read.
 - **Authority (who may do what).** Membership in
   `permission_group` plus rules on `permission_rule` targeting
-  an `action_key` — a purely reverse, action-first model.
+  an `action_key` — a purely reverse, action-first model. (v1:
+  `permission_rule` is accepted-but-inert — see the status note
+  under "Shared tables → `permission_rule`"; authority is decided
+  by groups, `role_grants`, and catalog `default_allow` today.)
   Governance lives in the `owners` permission group on each
   scope (≥1 member invariant replaces the v0 "exactly one
   `owner` grant" rule). See "Shared tables → `role_grants`",
@@ -848,6 +851,22 @@ allowed or denied action A". Resolution walks from most-
 specific to least-specific scope and falls back to the catalog
 default when no rule matches.
 
+> **v1 status — accepted-but-inert.** The `permission_rule`
+> table does not ship in the v1 schema, and the resolver runs
+> against an empty rule set (`EmptyPermissionRuleRepository`).
+> Custom `allow` / `deny` rules therefore **do not yet take
+> effect**: the write endpoints (`POST` / `DELETE
+> /permission_rules`, §12) return `503`, and the manager
+> Permissions UI shows the rule matrix read-only. The **live**
+> authority inputs in v1 are `default_allow` (the action catalog),
+> `role_grants`, and `permission_group` membership (incl. the
+> `owners` fast-paths). The resolution algorithm below is the
+> intended, correct behaviour and is what enforces once the
+> backing table and write path land — tracked as a follow-up
+> epic (SQL-backed `permission_rule` repository + CRUD). Until
+> then the table columns and PK shape below are the forward
+> contract, not a live schema.
+
 | column          | type      | notes                                                                                               |
 |-----------------|-----------|-----------------------------------------------------------------------------------------------------|
 | id              | ULID PK   |                                                                                                     |
@@ -882,6 +901,18 @@ permission resolver returns `allow | deny | approval_required`
 using this order. `approval_required` is a post-allow outcome —
 the resolver decided `allow` but the action's catalog entry
 flags it for human-in-the-loop review (see step 6).
+
+> **v1 status.** Steps 1-3, 5, and 6 are live. Step 4 (the
+> `permission_rule` scope walk) is **structurally present but
+> reads zero rows in v1** because the `permission_rule` table is
+> deferred (see the note under `permission_rule` above): the
+> walk always finds no matching rule and falls through to the
+> catalog default (step 5). In practice that means v1 authority
+> is decided entirely by root-only status, `owners` membership,
+> `default_allow`, and `role_grants` — custom `allow` / `deny`
+> rules do not yet influence any decision. The algorithm text
+> below is unchanged and correct; only its rule input is empty
+> until the follow-up epic lands.
 
 1. **Action existence.** If `A` is not registered in the
    action catalog (§05), the resolver returns `deny` and logs

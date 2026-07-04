@@ -32,6 +32,11 @@
 .permissions__members { padding: 16px; }
 .panel__footer { padding-top: 12px; border-top: 1px solid var(--line); margin-top: 12px; }
 .permissions__rules td:first-child { max-width: 320px; }
+.permissions__rules-status {
+  margin: 0 16px 12px;
+  border-color: var(--sand);
+  background: var(--sand-soft);
+}
 .permissions__resolver {
   padding: 12px 16px; border-top: 1px solid var(--line); margin-top: 8px;
 }

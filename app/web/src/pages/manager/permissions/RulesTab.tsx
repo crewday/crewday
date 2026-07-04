@@ -1,6 +1,5 @@
 import { useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Plus } from "lucide-react";
 import { fetchJson } from "@/lib/api";
 import { qk } from "@/lib/queryKeys";
 import { Chip, Loading } from "@/components/common";
@@ -66,7 +65,7 @@ export default function RulesTab() {
           <header className="panel__head permissions__section-head">
             <div className="panel__head-stack">
               <h2>Permission resolver</h2>
-              <p className="panel__sub">Preview a user, action, and scope before editing rules.</p>
+              <p className="panel__sub">Preview how a user, action, and scope resolve under today&rsquo;s live authority.</p>
             </div>
           </header>
           <p className="muted permissions__empty">No active workspace selected.</p>
@@ -100,7 +99,7 @@ export default function RulesTab() {
         <header className="panel__head permissions__section-head">
           <div className="panel__head-stack">
             <h2>Permission resolver</h2>
-            <p className="panel__sub">Preview a user, action, and scope before editing rules.</p>
+            <p className="panel__sub">Preview how a user, action, and scope resolve under today&rsquo;s live authority.</p>
           </div>
         </header>
 
@@ -119,6 +118,11 @@ export default function RulesTab() {
             <p className="panel__sub">Defaults, owner protections, and active workspace rules.</p>
           </div>
         </header>
+        <p className="form-notice permissions__rules-status">
+          Custom allow/deny rules are not yet enforced in v1 &mdash; this matrix
+          is read-only. Authority today comes from catalog defaults, role grants,
+          and permission groups.
+        </p>
         {ruleRows.length === 0 ? (
           <p className="muted">
             No rules on this workspace, defaults apply for every action below.
@@ -130,7 +134,6 @@ export default function RulesTab() {
               <th>Action</th>
               <th>Default (if no rule matches)</th>
               <th>Active rules on this workspace</th>
-              <th aria-label="Actions"></th>
             </tr>
           </thead>
           <tbody>
@@ -171,15 +174,6 @@ export default function RulesTab() {
                           userLabel={users.data?.[r.subject_id]?.display_name}
                         />
                       ))
-                    )}
-                  </td>
-                  <td>
-                    {entry.root_only ? (
-                      <span className="muted">,</span>
-                    ) : (
-                      <button type="button" className="btn btn--ghost btn--sm">
-                        <Plus size={13} strokeWidth={2} /> Rule
-                      </button>
                     )}
                   </td>
                 </tr>
