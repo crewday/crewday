@@ -27,4 +27,4 @@ def test_version() -> None:
     response = client.get("/version")
 
     assert response.status_code == 200
-    assert response.json() == {"name": "crewday-site-api", "version": "0.0.1"}
+    assert response.json() == {"site_api": "0.0.1", "site_web": "0.0.1"}

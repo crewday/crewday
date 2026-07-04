@@ -1184,11 +1184,37 @@
   font-size: clamp(32px, 4.2vw, 52px);
 }
 
+.suggest-board__panel {
+  display: grid;
+  gap: 16px;
+}
+
+.suggest-board__notice {
+  margin: 0;
+  border: 1px dashed var(--moss);
+  background: var(--moss-soft);
+  color: var(--moss-2);
+  padding: 14px 16px;
+  font-size: 13.5px;
+  line-height: 1.5;
+}
+
 .suggest-board__list {
   display: grid;
   gap: 0;
   border: 1px solid var(--ink);
   background: var(--card);
+}
+
+.suggest-cluster__flag {
+  display: inline-block;
+  border: 1px solid var(--moss);
+  border-radius: 3px;
+  background: var(--moss-soft);
+  color: var(--moss-2);
+  padding: 1px 6px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
 }
 
 .suggest-cluster {

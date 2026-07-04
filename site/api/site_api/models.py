@@ -10,5 +10,5 @@ class StatusResponse(BaseModel):
 class VersionResponse(BaseModel):
     model_config = ConfigDict(frozen=True)
 
-    name: str
-    version: str
+    site_api: str
+    site_web: str

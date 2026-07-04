@@ -1,7 +1,7 @@
 import { appLinks } from "@/config/appLinks";
 
 export const homeCopy = {
-  title: "crew.day",
+  title: "crew.day — run your houses like a hotel",
   description:
     "crew.day is your home organization operating system, from one house to fifty hotels, with an LLM agent running the day-to-day.",
   masthead: {

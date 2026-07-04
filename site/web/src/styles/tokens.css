@@ -31,6 +31,13 @@
   --shadow:      0 2px 4px rgba(63, 110, 59, 0.06), 0 8px 24px rgba(31, 26, 20, 0.06);
   --shadow-raised: 0 6px 18px rgba(31, 26, 20, 0.10);
 
+  /* Text on a solid primary/destructive fill (button-primary textColor
+     in DESIGN.md frontmatter). Same in both themes. */
+  --on-primary:  #FFFFFF;
+  /* Readable sand text ("pending"/"needs attention") on paper. Dark theme
+     lightens to the dark --sand so it stays legible on dark grounds. */
+  --sand-ink:    #8A6A22;
+
   /* Spacing scale from DESIGN.md frontmatter. */
   --space-0: 0;
   --space-1: 2px;
@@ -47,6 +54,30 @@
   --space-12: 40px;
   --space-13: 48px;
   --space-14: 56px;
+
+  /* Radius scale from DESIGN.md frontmatter (rounded.*). Theme-agnostic:
+     defined on :root so both themes inherit. The radius names the thing —
+     tag < control < card < modal < pill. */
+  --radius-tag:     4px;
+  --radius-control: 6px;
+  --radius-card:    10px;
+  --radius-modal:   14px;
+  --radius-pill:    999px;
+
+  /* Type scale (font-size) from DESIGN.md frontmatter (typography.*).
+     Weights, line-heights, and font families stay per-component; these are
+     the sizes every screen picks from. */
+  --text-display-lg:    1.85rem;
+  --text-display-md:    1.65rem;
+  --text-display-sm:    1.22rem;
+  --text-headline-md:   1.35rem;
+  --text-section-title: 14px;
+  --text-body-lg:       16px;
+  --text-body-md:       15px;
+  --text-body-sm:       13px;
+  --text-label-md:      14px;
+  --text-label-sm:      12px;
+  --text-mono-sm:       11px;
 }
 
 [data-theme="dark"] {
@@ -75,4 +106,6 @@
   --sky-soft:    rgba(138, 178, 214, 0.18);
   --shadow:      0 2px 4px rgba(0, 0, 0, 0.35), 0 8px 24px rgba(0, 0, 0, 0.45);
   --shadow-raised: 0 6px 18px rgba(0, 0, 0, 0.55);
+  /* Warm sand-ink is too dark on dark paper; match the dark --sand instead. */
+  --sand-ink:    #EAB65F;
 }

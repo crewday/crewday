@@ -206,6 +206,8 @@ export const suggestCopy = {
   board: {
     eyebrow: "Public board",
     heading: "Grouped themes, not private submissions.",
+    sampleNotice:
+      "Sample preview — these themes and counts are illustrative placeholders. Live feedback clusters replace them once the suggestion backend ships.",
   },
   sections: [
     {

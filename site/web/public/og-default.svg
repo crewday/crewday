@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630">
+  <rect width="1200" height="630" fill="#FAF7F2"/>
+  <rect x="40" y="40" width="1120" height="550" fill="none" stroke="#1F1B16" stroke-width="2"/>
+  <g transform="translate(96 150)">
+    <rect x="0" y="0" width="64" height="64" rx="14" fill="#3F6E3B"/>
+    <path d="M16 47 32 33l16 14v13a2 2 0 0 1-2 2H18a2 2 0 0 1-2-2z" fill="#FAF7F2"/>
+    <text x="88" y="52" font-family="Georgia, 'Times New Roman', serif" font-size="64" font-weight="600" fill="#1F1B16">crew.day</text>
+  </g>
+  <text x="96" y="330" font-family="Georgia, 'Times New Roman', serif" font-size="72" font-weight="600" fill="#1F1B16">Run your houses like a hotel.</text>
+  <text x="96" y="410" font-family="Georgia, 'Times New Roman', serif" font-size="72" font-weight="600" fill="#3F6E3B">Without the front desk.</text>
+  <text x="96" y="520" font-family="'Courier New', monospace" font-size="26" letter-spacing="2" fill="#5B5347">PROUDLY OPEN SOURCE · SELF HOSTABLE</text>
+</svg>

@@ -1,3 +1,5 @@
+import os
+
 from fastapi import APIRouter
 
 from site_api import __version__
@@ -18,4 +20,7 @@ def readyz() -> StatusResponse:
 
 @router.get("/version", response_model=VersionResponse)
 def version() -> VersionResponse:
-    return VersionResponse(name="crewday-site-api", version=__version__)
+    return VersionResponse(
+        site_api=os.environ.get("SITE_API_VERSION", __version__),
+        site_web=os.environ.get("SITE_WEB_VERSION", __version__),
+    )

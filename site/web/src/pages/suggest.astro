@@ -42,21 +42,24 @@ import { suggestCopy } from "@/content/en/pages";
       }
     </section>
 
-    <section class="suggest-board" aria-labelledby="suggest-board-title">
+    <section class="suggest-board suggest-board--sample" aria-labelledby="suggest-board-title">
       <div class="suggest-board__heading">
         <p class="landing-kicker">{suggestCopy.board.eyebrow}</p>
         <h2 id="suggest-board-title">{suggestCopy.board.heading}</h2>
       </div>
-      <div class="suggest-board__list">
-        {
-          suggestCopy.clusters.map((cluster) => (
-            <article class="suggest-cluster">
-              <p>{cluster.meta}</p>
-              <h3>{cluster.title}</h3>
-              <span>{cluster.body}</span>
-            </article>
-          ))
-        }
+      <div class="suggest-board__panel">
+        <p class="suggest-board__notice" role="note">{suggestCopy.board.sampleNotice}</p>
+        <div class="suggest-board__list">
+          {
+            suggestCopy.clusters.map((cluster) => (
+              <article class="suggest-cluster">
+                <p><span class="suggest-cluster__flag">Sample</span> {cluster.meta}</p>
+                <h3>{cluster.title}</h3>
+                <span>{cluster.body}</span>
+              </article>
+            ))
+          }
+        </div>
       </div>
     </section>
   </div>
