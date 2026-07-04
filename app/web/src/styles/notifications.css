@@ -22,7 +22,7 @@
   border: 1px solid var(--line);
   border-left-width: 3px;
   border-left-color: transparent;
-  border-radius: 10px;
+  border-radius: var(--radius-card);
   background: var(--card);
 }
 
@@ -41,7 +41,7 @@
   justify-content: center;
   width: 34px;
   height: 34px;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   color: var(--moss);
   background: var(--moss-soft);
 }

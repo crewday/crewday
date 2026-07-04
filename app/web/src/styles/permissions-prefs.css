@@ -68,7 +68,7 @@
   display: flex; gap: 10px; align-items: flex-start;
   padding: 10px 12px;
   border: 1px solid var(--line-strong);
-  border-radius: 10px;
+  border-radius: var(--radius-card);
   background: var(--card);
   cursor: pointer;
   transition: border-color 120ms ease, background 120ms ease;
@@ -100,7 +100,7 @@
   display: flex; gap: 10px; align-items: center;
   padding: 10px 12px;
   border: 1px solid var(--line-strong);
-  border-radius: 10px;
+  border-radius: var(--radius-card);
   background: var(--card);
   cursor: pointer;
   transition: border-color 120ms ease, background 120ms ease;
@@ -154,7 +154,7 @@
 }
 .agent-prefs__readonly-notice {
   margin: 6px 0 10px; padding: 12px 14px;
-  background: var(--paper-2); border-left: 3px solid var(--sky); border-radius: 4px;
+  background: var(--paper-2); border-left: 3px solid var(--sky); border-radius: var(--radius-tag);
 }
 .agent-prefs__readonly-notice p { margin: 0 0 6px; font-size: 13.5px; }
 .agent-prefs__readonly-notice p:last-child { margin-bottom: 0; }
@@ -183,7 +183,7 @@
 }
 .chat-channels-link-form__field input {
   font-size: 14px; padding: 8px 10px;
-  border: 1px solid var(--line); border-radius: 6px;
+  border: 1px solid var(--line); border-radius: var(--radius-control);
   background: var(--paper); color: var(--ink);
 }
 .chat-channels-link-form__field input:focus {
@@ -196,7 +196,7 @@
 .chat-msg__channel {
   display: inline-block; margin-left: 6px;
   font-size: 10px; letter-spacing: 0.05em;
-  padding: 1px 6px; border-radius: 999px;
+  padding: 1px 6px; border-radius: var(--radius-pill);
   vertical-align: middle;
   font-family: "JetBrains Mono", monospace;
 }
@@ -259,7 +259,7 @@
 }
 .me-chat-channels__binding {
   padding: 10px 12px;
-  border: 1px solid var(--line); border-radius: 8px;
+  border: 1px solid var(--line); border-radius: var(--radius-card);
   background: var(--paper-2);
   display: grid; gap: 4px;
 }
@@ -299,7 +299,7 @@
 .me-chat-channels__error {
   margin: 6px 0 0; padding: 6px 10px;
   background: var(--rust-soft); color: var(--rust);
-  border-left: 3px solid var(--rust); border-radius: 4px;
+  border-left: 3px solid var(--rust); border-radius: var(--radius-tag);
   font-size: 13px;
 }
 .me-chat-channels__radio-row {

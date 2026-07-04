@@ -51,7 +51,7 @@
 }
 
 .chat-msg {
-  padding: 8px 12px 6px; border-radius: 14px;
+  padding: 8px 12px 6px; border-radius: var(--radius-modal);
   font-size: 14px; line-height: 1.4; max-width: 78%;
   box-shadow: 0 1px 0.5px rgba(31, 26, 20, 0.08);
   position: relative;
@@ -93,7 +93,7 @@
   font-family: "JetBrains Mono", monospace;
   font-size: 0.92em;
   background: color-mix(in srgb, currentColor 8%, transparent);
-  border-radius: 4px;
+  border-radius: var(--radius-tag);
   padding: 0 4px;
 }
 .chat-markdown__code {
@@ -104,7 +104,7 @@
   font-size: 0.9em;
   line-height: 1.45;
   background: color-mix(in srgb, currentColor 7%, transparent);
-  border-radius: 6px;
+  border-radius: var(--radius-control);
   padding: 8px;
 }
 .chat-markdown__code code {
@@ -182,7 +182,7 @@
   height: 10px;
 }
 .chat-typing__dot {
-  width: 6px; height: 6px; border-radius: 999px;
+  width: 6px; height: 6px; border-radius: var(--radius-pill);
   background: currentColor; opacity: 0.45;
   animation: chat-typing-bounce 1.2s infinite ease-in-out both;
 }
@@ -236,6 +236,9 @@
   flex: 1; min-width: 0;
   background: var(--card);
   border: 1px solid var(--line);
+  /* Off-scale on purpose: capsule ends at the 44px rest height, but the
+     textarea grows to 140px — pill would turn the tall state into a
+     lozenge, so this stays a fixed rounded-rect between card and modal. */
   border-radius: 22px;
   padding: 2px 6px 2px 14px;
   display: flex; align-items: center; gap: 4px;

@@ -70,7 +70,7 @@
    tab bar (phone). */
 .booking-hint {
   display: inline-flex; align-items: center; justify-content: center;
-  gap: 6px; padding: 10px 16px; border-radius: 999px;
+  gap: 6px; padding: 10px 16px; border-radius: var(--radius-pill);
   border: 1px solid var(--moss-soft); background: var(--moss-soft);
   font-family: inherit; font-size: 14px; font-weight: 600;
   color: var(--moss); cursor: pointer; white-space: nowrap;
@@ -119,7 +119,7 @@
   border: 1px solid var(--sand);
   background: var(--paper-2);
   color: var(--ink-2);
-  border-radius: 8px;
+  border-radius: var(--radius-card);
   font-size: 12px; font-weight: 700;
   text-align: center;
 }

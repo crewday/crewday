@@ -2,7 +2,7 @@
 .surface--login { background: linear-gradient(160deg, var(--paper), var(--paper-2)); }
 .login { min-height: calc(100vh - 40px); display: grid; place-items: center; padding: 40px 20px; position: relative; z-index: 1; }
 .login__card {
-  background: var(--card); border: 1px solid var(--line); border-radius: 14px;
+  background: var(--card); border: 1px solid var(--line); border-radius: var(--radius-modal);
   padding: 36px; width: 100%; max-width: 400px; text-align: center;
   box-shadow: 0 20px 60px rgba(31,26,20,0.06);
 }
@@ -33,7 +33,7 @@
    real failure; the default tone stays muted for the benign
    "user closed the prompt" case. */
 .login__notice {
-  margin: 0 0 14px; padding: 10px 12px; border-radius: 10px;
+  margin: 0 0 14px; padding: 10px 12px; border-radius: var(--radius-card);
   background: var(--paper-2); border: 1px solid var(--line);
   color: var(--ink-2); font-size: 13px; text-align: left;
 }
@@ -41,7 +41,7 @@
 .signup-captcha { display: flex; justify-content: center; min-height: 65px; }
 
 .enroll-steps { list-style: none; padding: 0; margin: 24px 0 0; display: flex; flex-direction: column; gap: 14px; }
-.enroll-step { display: flex; gap: 14px; align-items: flex-start; padding: 14px; background: var(--paper-2); border-radius: 10px; opacity: 0.6; }
+.enroll-step { display: flex; gap: 14px; align-items: flex-start; padding: 14px; background: var(--paper-2); border-radius: var(--radius-card); opacity: 0.6; }
 .enroll-step--active { opacity: 1; border: 1px solid var(--moss); }
 .enroll-step--done { opacity: 1; }
 .enroll-step--done .enroll-step__num { background: var(--moss); color: var(--on-primary); }
@@ -72,7 +72,7 @@
 
 .guest__grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 18px; }
 .guest-card {
-  background: var(--card); border: 1px solid var(--line); border-radius: 14px;
+  background: var(--card); border: 1px solid var(--line); border-radius: var(--radius-modal);
   padding: 20px 22px; box-shadow: var(--shadow);
 }
 .guest-card--wide { grid-column: 1 / -1; }
@@ -118,12 +118,12 @@
 }
 .styleguide__note code {
   font-family: "JetBrains Mono", monospace; font-size: 12px;
-  background: var(--paper-2); padding: 1px 6px; border-radius: 4px;
+  background: var(--paper-2); padding: 1px 6px; border-radius: var(--radius-tag);
 }
 .swatch-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 10px; }
 .swatch {
   display: flex; flex-direction: column; justify-content: space-between;
-  height: 110px; padding: 12px; border-radius: 10px;
+  height: 110px; padding: 12px; border-radius: var(--radius-card);
   border: 1px solid var(--line);
 }
 .swatch span { font-family: "Fraunces", serif; font-weight: 600; font-size: 1.05rem; }

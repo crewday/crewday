@@ -36,7 +36,7 @@
 .page-tabs__tab:focus-visible {
   outline: 2px solid var(--moss);
   outline-offset: -2px;
-  border-radius: 6px 6px 0 0;
+  border-radius: var(--radius-control) var(--radius-control) 0 0;
 }
 
 .page-tabs__tab--active {

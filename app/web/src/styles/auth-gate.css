@@ -48,7 +48,7 @@
 .auth-gate__panel {
   width: min(440px, 96vw);
   background: var(--card); color: var(--ink);
-  border: 1px solid var(--line); border-radius: 14px;
+  border: 1px solid var(--line); border-radius: var(--radius-modal);
   box-shadow: 0 24px 60px rgba(0, 0, 0, 0.28);
   padding: 28px 26px 22px;
   display: flex; flex-direction: column; gap: var(--space-7);
@@ -78,7 +78,7 @@
   display: flex; align-items: center; gap: var(--space-6); width: 100%;
   min-height: 56px;
   background: var(--paper-2); border: 1px solid var(--line);
-  border-radius: 10px; padding: 11px 13px; cursor: pointer;
+  border-radius: var(--radius-card); padding: 11px 13px; cursor: pointer;
   color: var(--ink); text-align: left; text-decoration: none;
   font: inherit; font-size: var(--text-label-md);
   transition: background 120ms ease, border-color 120ms ease, transform 120ms ease;
@@ -99,7 +99,7 @@
 }
 .workspace-pick-list__icon {
   display: inline-flex; align-items: center; justify-content: center;
-  width: 34px; height: 34px; border-radius: 8px;
+  width: 34px; height: 34px; border-radius: var(--radius-card);
   background: var(--moss-soft); color: var(--moss);
   flex-shrink: 0;
 }

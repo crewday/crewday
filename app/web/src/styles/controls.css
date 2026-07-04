@@ -83,7 +83,7 @@
   display: flex; width: 100%;
   align-items: flex-start; gap: 12px;
   padding: 10px 12px;
-  border: 1px solid var(--line); border-radius: 8px;
+  border: 1px solid var(--line); border-radius: var(--radius-card);
   background: var(--card);
   transition: background 140ms ease, border-color 140ms ease;
 }
@@ -105,7 +105,7 @@
 .checkbox__box {
   position: relative; flex-shrink: 0;
   width: 18px; height: 18px;
-  border-radius: 5px;
+  border-radius: var(--radius-control);
   border: 1.5px solid var(--line-strong);
   background: var(--card);
   display: inline-flex; align-items: center; justify-content: center;
@@ -138,7 +138,7 @@
 .checkbox__input:focus-visible ~ .checkbox__box {
   outline: 2px solid var(--moss);
   outline-offset: 3px;
-  border-radius: 5px;
+  border-radius: var(--radius-control);
 }
 
 /* ── Tick ───────────────────────────────────────────────────── */
@@ -162,7 +162,7 @@
 .checkbox__dash {
   position: absolute; inset: auto;
   width: 9px; height: 2px;
-  background: var(--card); border-radius: 2px;
+  background: var(--card); border-radius: var(--radius-tag);
   transform: scaleX(0);
   transform-origin: 50% 50%;
   transition: transform 200ms cubic-bezier(0.65, 0, 0.35, 1);
@@ -228,11 +228,11 @@
 }
 
 /* ── Size modifiers ─────────────────────────────────────────── */
-.checkbox--sm .checkbox__box { width: 14px; height: 14px; border-radius: 4px; }
+.checkbox--sm .checkbox__box { width: 14px; height: 14px; border-radius: var(--radius-tag); }
 .checkbox--sm .checkbox__dash { width: 7px; }
 .checkbox--sm .checkbox__label { font-size: 13px; }
 
-.checkbox--lg .checkbox__box { width: 22px; height: 22px; border-radius: 6px; }
+.checkbox--lg .checkbox__box { width: 22px; height: 22px; border-radius: var(--radius-control); }
 .checkbox--lg .checkbox__dash { width: 11px; height: 2.5px; }
 .checkbox--lg .checkbox__label { font-size: 15px; }
 

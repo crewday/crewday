@@ -135,7 +135,7 @@
 .inv-drawer__close {
   background: transparent;
   border: 1px solid var(--line);
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   width: 34px;
   height: 34px;
   /* Decorative close-button glyph sizing, not a type-scale rung; left literal. */
@@ -203,7 +203,7 @@
 .inv-hero__gauge {
   grid-column: 1 / -1;
   height: 4px;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   background: var(--paper-3);
   overflow: hidden;
 }
@@ -256,7 +256,7 @@
   align-items: stretch;
   background: var(--card);
   border: 1px solid var(--line);
-  border-radius: 10px;
+  border-radius: var(--radius-card);
   overflow: hidden;
   transition: border-color 140ms ease, box-shadow 140ms ease;
 }
@@ -292,7 +292,7 @@
 .inv-adjust__select {
   border: 1px solid var(--line);
   background: var(--card);
-  border-radius: 10px;
+  border-radius: var(--radius-card);
   padding: var(--space-5) var(--space-6);
   font: inherit;
   color: var(--ink);
@@ -306,7 +306,7 @@
 }
 .inv-adjust__note {
   border: 1px solid var(--line);
-  border-radius: 10px;
+  border-radius: var(--radius-card);
   background: var(--card);
   padding: var(--space-5) var(--space-6);
   font-size: var(--text-label-md);
@@ -331,7 +331,7 @@
   align-items: baseline;
   gap: var(--space-2);
   padding: var(--space-3) var(--space-6) var(--space-3) var(--space-5);
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   font-size: var(--text-body-sm);
   line-height: 1;
   background: var(--paper-3);
@@ -434,7 +434,7 @@
 .inv-history__dot {
   width: 15px;
   height: 15px;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   background: var(--card);
   border: 2px solid var(--ink-4);
   margin-top: var(--space-2);
@@ -528,7 +528,7 @@
 .inv-history__loading-dots i {
   width: 5px;
   height: 5px;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   background: var(--ink-3);
   animation: inv-history-dots 1s infinite ease-in-out;
   display: inline-block;

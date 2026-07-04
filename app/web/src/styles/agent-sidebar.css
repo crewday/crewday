@@ -99,7 +99,7 @@
   overscroll-behavior: contain;
 }
 .agent-msg {
-  padding: 8px 12px; border-radius: 12px;
+  padding: 8px 12px; border-radius: var(--radius-card);
   font-size: 13px; line-height: 1.45;
   max-width: 86%;
   word-wrap: break-word;
@@ -133,7 +133,7 @@
 }
 .agent-actions__count {
   background: var(--sand-soft); color: var(--ink);
-  padding: 2px 7px; border-radius: 999px;
+  padding: 2px 7px; border-radius: var(--radius-pill);
   font-family: "JetBrains Mono", monospace; font-size: 10px;
   letter-spacing: 0;
 }
@@ -143,7 +143,7 @@
 .agent-action {
   border: 1px solid var(--line-strong);
   background: var(--card);
-  padding: 8px 10px; border-radius: 10px;
+  padding: 8px 10px; border-radius: var(--radius-card);
   font-size: 12px;
   display: grid; gap: 4px;
   border-left: 3px solid var(--line-strong);
@@ -167,7 +167,7 @@
   width: 100%;
   min-height: 30px;
   padding: 6px 10px;
-  border-radius: 7px; border: 1px solid var(--line-strong);
+  border-radius: var(--radius-control); border: 1px solid var(--line-strong);
   font: inherit; font-size: 12px; font-weight: 600;
   cursor: pointer;
   background: var(--paper);
@@ -212,7 +212,7 @@
   background: var(--card);
   color: var(--ink-2);
   width: 40px; height: 40px;
-  border-radius: 10px;
+  border-radius: var(--radius-card);
   display: inline-flex; align-items: center; justify-content: center;
   cursor: pointer;
   transition: background 120ms ease, color 120ms ease, border-color 120ms ease;
