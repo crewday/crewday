@@ -9,8 +9,9 @@
 .login__card--wide { max-width: 560px; text-align: left; }
 .login__brand { display: inline-flex; align-items: center; gap: var(--space-4); margin-bottom: 22px; }
 .login__headline {
-  /* 1.5rem Fraunces headline: off-scale between display-sm and display-md
-     (cd-uo8xv between-rung note). */
+  /* 1.5rem Fraunces headline: off-scale display-tier per DESIGN.md
+     typography exceptions (between display-sm and display-md);
+     sanctioned per cd-ehriy. */
   font-family: "Fraunces", serif; font-size: 1.5rem; margin-bottom: var(--space-3);
   line-height: 1.2; font-variation-settings: "opsz" 48;
 }

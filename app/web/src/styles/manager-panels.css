@@ -49,8 +49,8 @@
   text-transform: uppercase; letter-spacing: 0.08em;
 }
 .stat-card__value {
-  /* Large Fraunces stat display; intentional off-scale, above display-lg
-     (cd-hmzu6 / cd-uo8xv between-rung note). */
+  /* 2.2rem Fraunces stat display: off-scale display-tier per DESIGN.md
+     typography exceptions (above display-lg); sanctioned per cd-ehriy. */
   font-family: "Fraunces", serif; font-size: 2.2rem; font-weight: 700;
   line-height: 1.05; margin: var(--space-3) 0 var(--space-1);
   font-variation-settings: "opsz" 96;
@@ -161,8 +161,9 @@
   padding-right: var(--space-9); border-right: 1px solid var(--line);
 }
 .expense-approval__value {
-  /* Large Fraunces money display; intentional off-scale between display-md
-     and display-lg (cd-uo8xv between-rung note). */
+  /* 1.75rem Fraunces money display: off-scale display-tier per DESIGN.md
+     typography exceptions (between display-md and display-lg);
+     sanctioned per cd-ehriy. */
   font-family: "Fraunces", serif; font-weight: 700;
   font-size: 1.75rem; line-height: 1; letter-spacing: -0.02em;
   font-variation-settings: "opsz" 72;

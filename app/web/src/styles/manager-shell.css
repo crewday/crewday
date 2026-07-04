@@ -18,8 +18,9 @@
 .desk__brand { display: flex; align-items: center; gap: var(--space-4); padding: 0 var(--space-4); }
 .desk__logo { color: var(--moss); font-size: 22px; }
 .desk__wordmark {
-  /* 1.25rem Fraunces wordmark: off-scale between display-sm and headline-md
-     (cd-uo8xv between-rung note). */
+  /* 1.25rem Fraunces wordmark: off-scale display-tier per DESIGN.md
+     typography exceptions (between display-sm and headline-md);
+     sanctioned per cd-ehriy. */
   font-family: "Fraunces", serif; font-weight: 700;
   font-size: 1.25rem; letter-spacing: -0.03em;
   font-variation-settings: "opsz" 72;
@@ -374,8 +375,8 @@
 }
 .desk__content { display: flex; flex-direction: column; gap: 22px; }
 .page-title {
-  /* 2.05rem Fraunces page title: intentional large display above display-lg
-     (cd-uo8xv between-rung note). */
+  /* 2.05rem Fraunces page title: off-scale display-tier per DESIGN.md
+     typography exceptions (above display-lg); sanctioned per cd-ehriy. */
   font-size: 2.05rem; margin-bottom: var(--space-2); line-height: 1.1;
   font-variation-settings: "opsz" 96;
 }

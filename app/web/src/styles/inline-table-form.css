@@ -1209,8 +1209,9 @@
   margin: 0;
   color: var(--ink);
   font-family: "Fraunces", serif;
-  /* Off-scale Fraunces demo title, between display-md and display-lg
-     (cd-uo8xv between-rung note). */
+  /* 1.7rem Fraunces demo title: off-scale display-tier per DESIGN.md
+     typography exceptions (between display-md and display-lg);
+     sanctioned per cd-ehriy. */
   font-size: 1.7rem;
   line-height: 1.15;
 }

@@ -57,9 +57,9 @@
    else skips the greeting because it was noise on functional views. */
 .me-greet { display: flex; flex-direction: column; gap: var(--space-1); }
 .me-greet__hello {
-  /* 1.55rem Fraunces greeting: intentional off-scale, sits between
-     display-sm (1.22rem) and display-md (1.65rem) with no clean rung
-     (cd-uo8xv between-rung note; no token minted per cd-hmzu6). */
+  /* 1.55rem Fraunces greeting: off-scale display-tier per DESIGN.md
+     typography exceptions (between display-sm and display-md);
+     sanctioned per cd-ehriy. */
   font-family: "Fraunces", ui-serif, serif; font-weight: 600;
   font-size: 1.55rem; line-height: 1.1; letter-spacing: -0.02em;
 }

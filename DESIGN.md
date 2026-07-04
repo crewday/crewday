@@ -291,6 +291,25 @@ density is the whole point, and minting a rung for it would invite it
 to spread. CSS carrying these literals points back to this note rather
 than restating the rationale.
 
+**Display tier is deliberately sparse; between/above-rung Fraunces
+titles are sanctioned exceptions.** The display ramp has exactly three
+rungs — `display-sm` (1.22rem), `display-md` (1.65rem), `display-lg`
+(1.85rem) — and that sparseness is intentional. A recurring set of
+Fraunces display titles sits between those rungs or above the top one:
+roughly 1.25rem (desk wordmark), 1.5rem (login headline), 1.55rem
+(me-greet hello), 1.7rem and 1.75rem (demo / money displays), 2.05rem
+(manager page title), and 2.2rem (stat-card value). These are
+intentional off-scale display-tier literals used for specific
+hero / wordmark / headline contexts — **not** sanctioned rungs. Their
+recurrence is the evidence the "file a PR if a missing level keeps
+recurring" rule above points at: `cd-ehriy` weighed that rule and chose
+to document these as sanctioned exceptions rather than mint rungs. A
+future deliberate decision MAY still mint an intermediate display rung
+(~1.5rem) and/or one above 1.85rem if the pattern justifies it — but not
+until a designer sanctions that token. Until then, do not add it — keep
+these as documented exceptions. CSS carrying these literals points back
+to this note rather than restating the rationale.
+
 **Casing.** Sentence case for buttons, labels, titles. Uppercase
 only on `section-title` (with the `0.09em` letterspacing) — the
 small-caps effect that marks list dividers. Never `text-transform:
