@@ -8,6 +8,7 @@ import { RoleProvider } from "@/context/RoleContext";
 import { SseProvider } from "@/context/SseContext";
 import { ThemeProvider } from "@/context/ThemeContext";
 import { WorkspaceProvider } from "@/context/WorkspaceContext";
+import { I18nProvider } from "@/i18n";
 import { __resetApiProvidersForTests } from "@/lib/api";
 import { installFetchRoutes, type FakeResponse } from "@/test/helpers";
 
@@ -26,9 +27,11 @@ function renderAppAt(path: string) {
           <ThemeProvider>
             <RoleProvider>
               <WorkspaceProvider>
-                <SseProvider>
-                  <App />
-                </SseProvider>
+                <I18nProvider>
+                  <SseProvider>
+                    <App />
+                  </SseProvider>
+                </I18nProvider>
               </WorkspaceProvider>
             </RoleProvider>
           </ThemeProvider>
@@ -59,9 +62,11 @@ function renderAppAtWithNavigator(path: string) {
           <ThemeProvider>
             <RoleProvider>
               <WorkspaceProvider>
-                <SseProvider>
-                  <App />
-                </SseProvider>
+                <I18nProvider>
+                  <SseProvider>
+                    <App />
+                  </SseProvider>
+                </I18nProvider>
               </WorkspaceProvider>
             </RoleProvider>
           </ThemeProvider>
