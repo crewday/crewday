@@ -6,6 +6,7 @@ import DateTime from "@/components/DateTime";
 import FormModal, { FormModalField } from "@/components/FormModal";
 import { Chip } from "@/components/common";
 import { ApiError, fetchJson } from "@/lib/api";
+import { useModalDialog } from "@/lib/modalDialog";
 import { qk } from "@/lib/queryKeys";
 import type {
   LlmPromptRevision,
@@ -27,68 +28,68 @@ export default function PromptLibraryDrawer({
     () => prompts.find((prompt) => prompt.id === selectedId) ?? null,
     [prompts, selectedId],
   );
+  // Native <dialog> + showModal() gives the focus trap, Esc-to-close,
+  // ::backdrop scrim, focus-restore-on-close, and backdrop click-to-close.
+  const dialog = useModalDialog(onClose);
 
   return (
-    <div
-      className="llm-prompt-drawer-backdrop"
-      onClick={(event) => {
-        if (event.target === event.currentTarget) onClose();
-      }}
-      role="presentation"
+    <dialog
+      ref={dialog.ref}
+      className="llm-prompt-drawer"
+      aria-label="Prompt library"
+      onCancel={dialog.onCancel}
     >
-      <aside className="llm-prompt-drawer">
-        <header className="llm-prompt-drawer__head">
-          <h2>Prompt library</h2>
-          <button type="button" className="btn btn--ghost" onClick={onClose}>
-            Close
-          </button>
-        </header>
-        <p className="llm-prompt-drawer__hint muted">
-          Hash-self-seeding: code defaults seed the row; unmodified prompts
-          auto-upgrade when code changes; customisations are preserved.
-        </p>
-        <ul className="llm-prompt-list">
-          {prompts.map((p) => (
-            <li key={p.id} className="llm-prompt-list__item">
-              <button
-                type="button"
-                className="llm-prompt-list__button"
-                onClick={() => setSelectedId(p.id)}
-              >
-                <span className="llm-prompt-list__head">
-                  <code className="inline-code">{p.capability}</code>
-                  <span className="llm-prompt-list__name">{p.name}</span>
-                  <span className="llm-prompt-list__ver mono muted">v{p.version}</span>
-                  {p.is_customised ? (
-                    <Chip tone="sand" size="sm">
-                      customised
-                    </Chip>
-                  ) : (
-                    <Chip tone="ghost" size="sm">
-                      default
-                    </Chip>
-                  )}
-                </span>
-                <span className="llm-prompt-list__preview">{p.preview}</span>
-              </button>
-              <footer className="llm-prompt-list__foot muted">
-                <span>
-                  {p.revisions_count} revision
-                  {p.revisions_count === 1 ? "" : "s"}
-                </span>
-                <span>hash {p.default_hash}</span>
-              </footer>
-            </li>
-          ))}
-        </ul>
-        {selectedPrompt ? (
-          <PromptEditorDialog
-            prompt={selectedPrompt}
-            onClose={() => setSelectedId(null)}
-          />
-        ) : null}
-      </aside>
-    </div>
+      <header className="llm-prompt-drawer__head">
+        <h2>Prompt library</h2>
+        <button type="button" className="btn btn--ghost" onClick={onClose}>
+          Close
+        </button>
+      </header>
+      <p className="llm-prompt-drawer__hint muted">
+        Hash-self-seeding: code defaults seed the row; unmodified prompts
+        auto-upgrade when code changes; customisations are preserved.
+      </p>
+      <ul className="llm-prompt-list">
+        {prompts.map((p) => (
+          <li key={p.id} className="llm-prompt-list__item">
+            <button
+              type="button"
+              className="llm-prompt-list__button"
+              onClick={() => setSelectedId(p.id)}
+            >
+              <span className="llm-prompt-list__head">
+                <code className="inline-code">{p.capability}</code>
+                <span className="llm-prompt-list__name">{p.name}</span>
+                <span className="llm-prompt-list__ver mono muted">v{p.version}</span>
+                {p.is_customised ? (
+                  <Chip tone="sand" size="sm">
+                    customised
+                  </Chip>
+                ) : (
+                  <Chip tone="ghost" size="sm">
+                    default
+                  </Chip>
+                )}
+              </span>
+              <span className="llm-prompt-list__preview">{p.preview}</span>
+            </button>
+            <footer className="llm-prompt-list__foot muted">
+              <span>
+                {p.revisions_count} revision
+                {p.revisions_count === 1 ? "" : "s"}
+              </span>
+              <span>hash {p.default_hash}</span>
+            </footer>
+          </li>
+        ))}
+      </ul>
+      {selectedPrompt ? (
+        <PromptEditorDialog
+          prompt={selectedPrompt}
+          onClose={() => setSelectedId(null)}
+        />
+      ) : null}
+    </dialog>
   );
 }
 

@@ -578,14 +578,22 @@
   font-size: 11.5px;
   line-height: 1;
 }
-/* Prompt-library slide-over. */
-.llm-prompt-drawer-backdrop {
-  position: fixed; inset: 0;
+/* Prompt-library slide-over — native <dialog> opened with showModal()
+   (focus trap + Esc + focus restore). The ::backdrop replaces the old
+   scrim div. */
+.llm-prompt-drawer::backdrop {
   background: rgba(24, 28, 32, 0.38);
-  display: flex; justify-content: flex-end;
-  z-index: 60;
 }
 .llm-prompt-drawer {
+  position: fixed;
+  z-index: 60;
+  top: 0; right: 0; bottom: 0; left: auto;
+  margin: 0;
+  padding: 0;
+  border: none;
+  max-width: none;
+  max-height: none;
+  color: var(--ink);
   width: min(560px, 100%);
   height: 100%;
   background: var(--paper);
