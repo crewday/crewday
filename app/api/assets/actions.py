@@ -280,6 +280,8 @@ def _completion_action_spec(
                 )
         raise AssetActionNotFound()
 
+    # justification: asset_action read is bounded by explicit workspace_id ==
+    # ctx.workspace_id (plus asset_id) predicates, not the ambient filter.
     with tenant_agnostic():
         row = session.scalar(
             select(AssetActionRow).where(
@@ -301,6 +303,8 @@ def _stamp_completion_metadata(
 ) -> AssetActionView:
     if spec.tracking_key is None and spec.label is None:
         return view
+    # justification: view.id was just created by record_action(session, ctx) in
+    # this workspace; re-fetched by its own PK to stamp metadata on that row.
     with tenant_agnostic():
         row = session.get(AssetActionRow, view.id)
     if row is None:

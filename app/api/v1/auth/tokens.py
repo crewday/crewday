@@ -342,6 +342,8 @@ def _is_live_workspace_token(
     ctx: WorkspaceContext,
     token_id: str,
 ) -> bool:
+    # justification: api_token is identity-scoped (not tenant-filtered); keyed
+    # by token_id, then row.workspace_id == ctx.workspace_id is re-checked below.
     with tenant_agnostic():
         row = session.get(ApiToken, token_id)
     return (

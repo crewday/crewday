@@ -130,6 +130,8 @@ def asset_type_for(
 def _area_label_for(session: Session, area_id: str | None) -> str | None:
     if area_id is None:
         return None
+    # justification: area_id comes from an asset already authorized in this
+    # workspace; the FK keeps the by-id label read in-workspace.
     with tenant_agnostic():
         row = session.get(Area, area_id)
     return row.label if row is not None else None
@@ -204,6 +206,8 @@ def _property_kind(value: str) -> Literal["str", "vacation", "residence", "mixed
 
 
 def asset_type_categories(session: Session, workspace_id: str) -> dict[str, str]:
+    # justification: asset_type read is bounded by an explicit predicate
+    # (workspace_id == arg OR NULL deployment-global types), not the ambient one.
     with tenant_agnostic():
         rows = session.execute(
             select(AssetTypeRow.id, AssetTypeRow.category).where(

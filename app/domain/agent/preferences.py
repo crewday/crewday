@@ -527,6 +527,8 @@ def _capability_receives_preferences(capability: str) -> bool:
 
 
 def _workspace_heading(session: Session, ctx: WorkspaceContext) -> str:
+    # justification: workspace is deployment-global (no workspace_id column);
+    # fetched by explicit Workspace.id == ctx.workspace_id.
     with tenant_agnostic():
         workspace = session.get(Workspace, ctx.workspace_id)
     name = workspace.name if workspace is not None else ctx.workspace_slug

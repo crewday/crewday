@@ -877,6 +877,8 @@ def _eligible_relay_targets(session: Session, *, ctx: WorkspaceContext) -> list[
         )
         .order_by(User.display_name.asc(), User.id.asc())
     )
+    # justification: user is identity-scoped; work_engagement, role_grant and
+    # user_workspace carry explicit workspace_id == ctx.workspace_id predicates.
     with tenant_agnostic():
         return list(session.scalars(stmt).all())
 

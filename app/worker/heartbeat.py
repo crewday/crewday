@@ -79,8 +79,7 @@ def upsert_heartbeat(
     not be reset by a successful liveness tick.
     """
     # justification: worker_heartbeat is deployment-wide ops plumbing
-    # (not workspace-scoped); scheduler ticks run outside any
-    # WorkspaceContext so the tenancy filter has nothing to inject.
+    # (no workspace_id column); scheduler ticks run outside any ctx.
     with tenant_agnostic():
         values = {
             "id": new_ulid(),

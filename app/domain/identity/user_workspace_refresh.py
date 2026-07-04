@@ -145,6 +145,8 @@ def reconcile_user_workspace(
     are stamped with this value. Existing rows keep their ``added_at``
     even when their source flips.
     """
+    # justification: derive-refresh reconciler rebuilds the user_workspace
+    # junction across every workspace in one deployment-wide pass.
     with tenant_agnostic():
         desired = _collect_desired_pairs(session)
         existing = _load_existing_user_workspace(session)
@@ -242,6 +244,8 @@ def reconcile_user_workspace_for(
     active :class:`WorkspaceContext` (e.g. the bare-host invite-accept
     surface for new users) do not trip the tenant filter.
     """
+    # justification: reconcile narrowed to one cell; every query is keyed by
+    # explicit user_id and workspace_id.
     with tenant_agnostic():
         desired_source = _collect_desired_source_for(
             session, user_id=user_id, workspace_id=workspace_id

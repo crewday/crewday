@@ -139,6 +139,8 @@ def _area_labels_for(
     area_ids = {view.area_id for view in views if view.area_id is not None}
     if not area_ids:
         return {}
+    # justification: area_ids come from asset views already authorized in this
+    # workspace; the FK keeps the by-id label read in-workspace.
     with tenant_agnostic():
         rows = session.execute(
             select(Area.id, Area.label).where(

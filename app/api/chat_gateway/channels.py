@@ -302,6 +302,8 @@ def _require_chat_gateway_read(ctx: WorkspaceContext, session: Session) -> None:
 def _last_webhook_by_provider(
     session: Session, *, workspace_id: str
 ) -> dict[str, datetime]:
+    # justification: chat_gateway_binding read is bounded by an explicit
+    # workspace_id == workspace_id predicate, not the ambient filter.
     with tenant_agnostic():
         rows = session.execute(
             select(

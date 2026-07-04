@@ -209,6 +209,8 @@ def list_documents(
     if category is not None:
         stmt = stmt.where(AssetDocument.kind == _validate_category(category))
     stmt = stmt.order_by(AssetDocument.created_at.desc(), AssetDocument.id.desc())
+    # justification: stmt carries an explicit workspace_id == ctx.workspace_id
+    # predicate; the ambient tenant filter would be redundant, not bypassed.
     with tenant_agnostic():
         rows = session.scalars(stmt).all()
     return [_row_to_view(row) for row in rows]
@@ -232,6 +234,8 @@ def list_property_documents(
     if category is not None:
         stmt = stmt.where(AssetDocument.kind == _validate_category(category))
     stmt = stmt.order_by(AssetDocument.created_at.desc(), AssetDocument.id.desc())
+    # justification: stmt carries an explicit workspace_id == ctx.workspace_id
+    # predicate; the ambient tenant filter would be redundant, not bypassed.
     with tenant_agnostic():
         rows = session.scalars(stmt).all()
     return [_row_to_view(row) for row in rows]
@@ -263,6 +267,8 @@ def list_workspace_documents(
             AssetDocument.expires_on <= expires_before,
         )
     stmt = stmt.order_by(AssetDocument.created_at.desc(), AssetDocument.id.desc())
+    # justification: stmt carries an explicit workspace_id == ctx.workspace_id
+    # predicate; the ambient tenant filter would be redundant, not bypassed.
     with tenant_agnostic():
         rows = session.scalars(stmt).all()
     return [_row_to_view(row) for row in rows]
@@ -318,6 +324,8 @@ def _load_document(
     ctx: WorkspaceContext,
     document_id: str,
 ) -> AssetDocument:
+    # justification: read carries an explicit workspace_id == ctx.workspace_id
+    # predicate; the ambient tenant filter would be redundant, not bypassed.
     with tenant_agnostic():
         row = session.scalars(
             select(AssetDocument).where(

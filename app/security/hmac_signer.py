@@ -110,6 +110,8 @@ def _legacy_purpose() -> str:
 
 
 def _primary_row(session: Session, *, purpose: str) -> SecretEnvelope | None:
+    # justification: secret_envelope is identity/deployment-global (no
+    # workspace_id column); these are deployment-wide HMAC key slots.
     with tenant_agnostic():
         return session.scalars(
             select(SecretEnvelope)
@@ -126,6 +128,8 @@ def _primary_row(session: Session, *, purpose: str) -> SecretEnvelope | None:
 def _legacy_rows(
     session: Session, *, purpose: str, now: datetime
 ) -> Iterator[SecretEnvelope]:
+    # justification: secret_envelope is identity/deployment-global (no
+    # workspace_id column); these are deployment-wide HMAC key slots.
     with tenant_agnostic():
         rows = session.scalars(
             select(SecretEnvelope)
@@ -278,6 +282,8 @@ def rotate_hmac_key(
         owner=EnvelopeOwner(kind=HMAC_KEY_OWNER_KIND, id=logical_purpose),
     )
     legacy_id = legacy_pointer[1:].decode("utf-8")
+    # justification: secret_envelope is identity/deployment-global (no
+    # workspace_id column); these are deployment-wide HMAC key slots.
     with tenant_agnostic():
         legacy_row = session.get(SecretEnvelope, legacy_id)
     if legacy_row is None:  # pragma: no cover - inserted by encrypt above

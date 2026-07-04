@@ -27,18 +27,24 @@ __all__ = [
 def is_deployment_owner(session: Session, *, user_id: str) -> bool:
     """Return ``True`` iff ``user_id`` belongs to ``owners@deployment``."""
     stmt = select(DeploymentOwner.user_id).where(DeploymentOwner.user_id == user_id)
+    # justification: deployment_owner is a deployment-global membership
+    # registry (no workspace_id column); the tenant filter never applies.
     with tenant_agnostic():
         return session.scalars(stmt).first() is not None
 
 
 def deployment_owner_user_ids(session: Session) -> frozenset[str]:
     """Return every active deployment-owner user id."""
+    # justification: deployment_owner is a deployment-global membership
+    # registry (no workspace_id column); the tenant filter never applies.
     with tenant_agnostic():
         return frozenset(session.scalars(select(DeploymentOwner.user_id)).all())
 
 
 def deployment_owner_count(session: Session) -> int:
     """Return the number of deployment-owner rows."""
+    # justification: deployment_owner is a deployment-global membership
+    # registry (no workspace_id column); the tenant filter never applies.
     with tenant_agnostic():
         return int(
             session.scalar(select(func.count()).select_from(DeploymentOwner)) or 0
@@ -57,6 +63,8 @@ def add_deployment_owner(
     Returns ``(row, created)`` so callers can keep idempotent re-adds
     free of duplicate audit rows.
     """
+    # justification: deployment_owner is a deployment-global membership
+    # registry (no workspace_id column); the tenant filter never applies.
     with tenant_agnostic():
         existing = session.get(DeploymentOwner, user_id)
         if existing is not None:
@@ -73,6 +81,8 @@ def add_deployment_owner(
 
 def remove_deployment_owner(session: Session, *, user_id: str) -> bool:
     """Delete a deployment-owner row, returning whether one existed."""
+    # justification: deployment_owner is a deployment-global membership
+    # registry (no workspace_id column); the tenant filter never applies.
     with tenant_agnostic():
         row = session.get(DeploymentOwner, user_id)
         if row is None:

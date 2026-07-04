@@ -297,6 +297,8 @@ def _read_cached(
     without an explicit bypass. The predicate is the ``(token_id,
     key)`` pair — authorisation, not tenancy.
     """
+    # justification: idempotency_key is deployment-wide (no workspace_id
+    # column); keyed by the (token_id, key) pair, not a tenant.
     with tenant_agnostic():
         return db_session.scalars(
             select(IdempotencyKey)
@@ -341,6 +343,8 @@ def _persist_cached(
         headers=headers,
         created_at=created_at,
     )
+    # justification: idempotency_key is deployment-wide (no workspace_id
+    # column); the insert is keyed by (token_id, key), not a tenant.
     with tenant_agnostic():
         db_session.add(row)
         db_session.commit()
@@ -734,6 +738,8 @@ def _delete_expired_idempotency_keys(
     cutoff: datetime,
 ) -> int:
     """Issue the unbounded TTL DELETE used by the historical sweep path."""
+    # justification: idempotency_key is deployment-wide (no workspace_id
+    # column); the TTL sweep deletes by created_at, not by tenant.
     with tenant_agnostic():
         result = db_session.execute(
             delete(IdempotencyKey).where(IdempotencyKey.created_at < cutoff)
@@ -754,6 +760,8 @@ def _delete_expired_idempotency_key_batch(
         .order_by(IdempotencyKey.created_at.asc())
         .limit(batch_size)
     )
+    # justification: idempotency_key is deployment-wide (no workspace_id
+    # column); the batched TTL sweep deletes by created_at, not by tenant.
     with tenant_agnostic():
         result = db_session.execute(
             delete(IdempotencyKey)

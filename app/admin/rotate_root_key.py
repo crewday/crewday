@@ -104,6 +104,8 @@ def start_rotation(
     if old_fp == new_fp:
         raise RootKeyRotationError("new root key matches the active root key")
 
+    # justification: root_key_slot is deployment-global (no workspace_id
+    # column); the ORM tenant filter does not apply.
     with tenant_agnostic():
         for slot in session.scalars(
             select(RootKeySlot).where(RootKeySlot.is_active.is_(True))
@@ -161,6 +163,8 @@ def reencrypt_legacy_rows(
     now = _now(clock)
     count = 0
 
+    # justification: secret_envelope is deployment-global (no workspace_id
+    # column); the ORM tenant filter does not apply.
     with tenant_agnostic():
         rows = list(
             session.scalars(
@@ -208,6 +212,8 @@ def finalize_rotation(
     now = _now(clock)
     purged = 0
 
+    # justification: root_key_slot/secret_envelope are deployment-global
+    # (no workspace_id column); the ORM tenant filter does not apply.
     with tenant_agnostic():
         slots = list(
             session.scalars(select(RootKeySlot).where(RootKeySlot.is_active.is_(False)))
@@ -323,6 +329,8 @@ def _settings_root_key(settings: Settings) -> SecretStr:
 
 
 def _active_root_key(session: Session, *, settings: Settings) -> SecretStr:
+    # justification: root_key_slot is deployment-global (no workspace_id
+    # column); the ORM tenant filter does not apply.
     with tenant_agnostic():
         slot = session.scalars(
             select(RootKeySlot).where(RootKeySlot.is_active.is_(True))

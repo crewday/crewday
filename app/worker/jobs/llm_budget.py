@@ -112,10 +112,8 @@ def _make_llm_budget_refresh_body(clock: Clock) -> Callable[[], None]:
             # SELECT returns every tenant row. Wrap in
             # ``tenant_agnostic()`` as belt-and-braces in case a
             # future migration registers the table.
-            # justification: scheduler fan-out must enumerate every
-            # tenant's workspace row before binding a per-workspace
-            # ctx; the ``workspace`` table is the tenancy anchor and
-            # carries no ``workspace_id`` column of its own.
+            # justification: fan-out enumerates every tenant's workspace
+            # anchor row (no workspace_id) before re-scoping each iteration.
             with tenant_agnostic():
                 rows = list(session.execute(select(Workspace.id, Workspace.slug)).all())
 

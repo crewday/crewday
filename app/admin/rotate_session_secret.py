@@ -32,6 +32,8 @@ SESSION_SIGNING_KEY_BYTES: Final[int] = 32
 
 def clear_all_sessions(session: Session) -> None:
     """Delete every web session row and flush inside the caller's transaction."""
+    # justification: session is identity-scoped (not a tenant boundary); rotating
+    # the signing key must clear every session deployment-wide.
     with tenant_agnostic():
         session.execute(delete(SessionRow))
         session.flush()

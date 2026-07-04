@@ -580,6 +580,8 @@ def _build_context(
     *,
     workspace_id: str,
 ) -> WorkspaceContext | None:
+    # justification: workspace is the tenancy anchor (no workspace_id
+    # column of its own); the lookup is keyed by explicit Workspace.id.
     with tenant_agnostic():
         slug = session.scalar(
             select(Workspace.slug).where(Workspace.id == workspace_id)
@@ -603,6 +605,8 @@ def _load_document(
     ctx: WorkspaceContext,
     document_id: str,
 ) -> AssetDocument | None:
+    # justification: worker load keyed by an explicit
+    # AssetDocument.workspace_id predicate, not the ambient tenant filter.
     with tenant_agnostic():
         return session.scalar(
             select(AssetDocument).where(

@@ -497,6 +497,8 @@ def build_invite_router(
         from app.tenancy import tenant_agnostic
         from app.util.ulid import new_ulid
 
+        # justification: pre-context invite acceptance (no ambient workspace);
+        # keyed by the globally-unique invite_id, whose workspace_id pins ctx.
         with tenant_agnostic():
             invite_row = session.get(Invite, invite_id)
         if invite_row is None:
@@ -520,6 +522,8 @@ def build_invite_router(
 
         from app.adapters.db.workspace.models import Workspace
 
+        # justification: workspace is a deployment-global table; resolved by its
+        # own id (returned from confirm_invite) to build the redirect target.
         with tenant_agnostic():
             ws = session.scalar(select(Workspace).where(Workspace.id == workspace_id))
         redirect = f"/w/{ws.slug}/today" if ws is not None else "/"
@@ -620,6 +624,8 @@ def build_invite_router(
         from app.adapters.db.workspace.models import Workspace
         from app.tenancy import tenant_agnostic
 
+        # justification: workspace is a deployment-global table; resolved by its
+        # own id (from the passkey-finish outcome) to build the redirect target.
         with tenant_agnostic():
             ws = session.scalar(
                 select(Workspace).where(Workspace.id == outcome.workspace_id)

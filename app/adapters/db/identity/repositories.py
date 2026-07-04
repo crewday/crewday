@@ -319,6 +319,8 @@ class SqlAlchemyEmailChangeRepository(EmailChangeRepository):
     # -- User reads / writes --------------------------------------------
 
     def get_user(self, *, user_id: str) -> UserIdentityRow | None:
+        # justification: user is identity-scoped (no workspace_id column);
+        # the ORM tenant filter does not apply.
         with tenant_agnostic():  # code-health: ignore[duplicate] Push-token query.
             user = self._session.get(User, user_id)
         if user is None:
@@ -326,6 +328,8 @@ class SqlAlchemyEmailChangeRepository(EmailChangeRepository):
         return _to_user_identity_row(user)
 
     def update_user_email(self, *, user_id: str, new_email: str) -> UserIdentityRow:
+        # justification: user is identity-scoped (no workspace_id column);
+        # the ORM tenant filter does not apply.
         with tenant_agnostic():
             user = self._session.get(User, user_id)
             if user is None:
@@ -347,6 +351,8 @@ class SqlAlchemyEmailChangeRepository(EmailChangeRepository):
     def email_taken_by_other(
         self, *, new_email_lower: str, current_user_id: str
     ) -> bool:
+        # justification: user is identity-scoped (no workspace_id column);
+        # the ORM tenant filter does not apply.
         with tenant_agnostic():
             existing = self._session.scalars(
                 select(User).where(User.email_lower == new_email_lower)
@@ -356,6 +362,8 @@ class SqlAlchemyEmailChangeRepository(EmailChangeRepository):
         return existing.id != current_user_id
 
     def latest_passkey_created_at(self, *, user_id: str) -> datetime | None:
+        # justification: passkey_credential is identity-scoped (no
+        # workspace_id column); the ORM tenant filter does not apply.
         with tenant_agnostic():
             stmt = (
                 select(PasskeyCredential.created_at)
@@ -404,6 +412,8 @@ class SqlAlchemyEmailChangeRepository(EmailChangeRepository):
             revert_expires_at=None,
             reverted_at=None,
         )
+        # justification: email_change_pending is identity-scoped (no
+        # workspace_id column); the ORM tenant filter does not apply.
         with tenant_agnostic():
             self._session.add(pending)
             self._session.flush()
@@ -412,6 +422,8 @@ class SqlAlchemyEmailChangeRepository(EmailChangeRepository):
     def find_pending_by_request_jti(
         self, *, request_jti: str
     ) -> EmailChangePendingRow | None:
+        # justification: email_change_pending is identity-scoped (no
+        # workspace_id column); the ORM tenant filter does not apply.
         with tenant_agnostic():
             row = self._session.scalars(
                 select(EmailChangePending).where(
@@ -425,6 +437,8 @@ class SqlAlchemyEmailChangeRepository(EmailChangeRepository):
     def find_pending_by_revert_jti(
         self, *, revert_jti: str
     ) -> EmailChangePendingRow | None:
+        # justification: email_change_pending is identity-scoped (no
+        # workspace_id column); the ORM tenant filter does not apply.
         with tenant_agnostic():
             row = self._session.scalars(
                 select(EmailChangePending).where(
@@ -443,6 +457,8 @@ class SqlAlchemyEmailChangeRepository(EmailChangeRepository):
         revert_expires_at: datetime,
         verified_at: datetime,
     ) -> EmailChangePendingRow:
+        # justification: email_change_pending is identity-scoped (no
+        # workspace_id column); the ORM tenant filter does not apply.
         with tenant_agnostic():
             row = self._session.get(EmailChangePending, pending_id)
             if row is None:
@@ -456,6 +472,8 @@ class SqlAlchemyEmailChangeRepository(EmailChangeRepository):
     def mark_reverted(
         self, *, pending_id: str, reverted_at: datetime
     ) -> EmailChangePendingRow:
+        # justification: email_change_pending is identity-scoped (no
+        # workspace_id column); the ORM tenant filter does not apply.
         with tenant_agnostic():
             row = self._session.get(EmailChangePending, pending_id)
             if row is None:
@@ -513,6 +531,8 @@ class SqlAlchemyUserPushTokenRepository(UserPushTokenRepository):
         self, *, user_id: str
     ) -> Sequence[UserPushTokenRow]:
         with (
+            # justification: user_push_token is identity-scoped (no
+            # workspace_id column); the ORM tenant filter does not apply.
             tenant_agnostic()
         ):  # code-health: ignore[duplicate] Push-token query shape.
             rows = self._session.scalars(
@@ -530,6 +550,8 @@ class SqlAlchemyUserPushTokenRepository(UserPushTokenRepository):
     ) -> (
         UserPushTokenRow | None
     ):  # code-health: ignore[duplicate] ORM/wire fields stay explicit for schema drift.  # noqa: E501
+        # justification: user_push_token is identity-scoped (no workspace_id
+        # column); the ORM tenant filter does not apply.
         with tenant_agnostic():  # code-health: ignore[duplicate] Push-token query.
             row = self._session.scalars(
                 select(UserPushToken).where(
@@ -544,6 +566,8 @@ class SqlAlchemyUserPushTokenRepository(UserPushTokenRepository):
     def find_by_user_platform_token(
         self, *, user_id: str, platform: str, token: str
     ) -> UserPushTokenRow | None:
+        # justification: user_push_token is identity-scoped (no workspace_id
+        # column); the ORM tenant filter does not apply.
         with tenant_agnostic():
             row = self._session.scalars(
                 select(UserPushToken).where(
@@ -559,6 +583,8 @@ class SqlAlchemyUserPushTokenRepository(UserPushTokenRepository):
     def find_by_platform_token(
         self, *, platform: str, token: str
     ) -> UserPushTokenRow | None:
+        # justification: user_push_token is identity-scoped (no workspace_id
+        # column); the ORM tenant filter does not apply.
         with tenant_agnostic():
             row = self._session.scalars(
                 select(UserPushToken).where(
@@ -593,6 +619,8 @@ class SqlAlchemyUserPushTokenRepository(UserPushTokenRepository):
             last_seen_at=created_at,
             disabled_at=None,
         )
+        # justification: user_push_token is identity-scoped (no workspace_id
+        # column); the ORM tenant filter does not apply.
         with tenant_agnostic():
             self._session.add(row)
             self._session.flush()
@@ -605,6 +633,8 @@ class SqlAlchemyUserPushTokenRepository(UserPushTokenRepository):
         token_id: str,
         last_seen_at: datetime,
     ) -> UserPushTokenRow:
+        # justification: user_push_token is identity-scoped (no workspace_id
+        # column); the ORM tenant filter does not apply.
         with tenant_agnostic():
             row = self._session.scalars(
                 select(UserPushToken).where(
@@ -629,6 +659,8 @@ class SqlAlchemyUserPushTokenRepository(UserPushTokenRepository):
         token: str,
         last_seen_at: datetime,
     ) -> UserPushTokenRow:
+        # justification: user_push_token is identity-scoped (no workspace_id
+        # column); the ORM tenant filter does not apply.
         with tenant_agnostic():
             row = self._session.scalars(
                 select(UserPushToken).where(
@@ -652,6 +684,8 @@ class SqlAlchemyUserPushTokenRepository(UserPushTokenRepository):
         token_id: str,
         disabled_at: datetime,
     ) -> UserPushTokenRow | None:
+        # justification: user_push_token is identity-scoped (no workspace_id
+        # column); the ORM tenant filter does not apply.
         with tenant_agnostic():
             row = self._session.scalars(
                 update(UserPushToken)
@@ -668,6 +702,8 @@ class SqlAlchemyUserPushTokenRepository(UserPushTokenRepository):
         return _to_user_push_token_row(row)
 
     def delete(self, *, user_id: str, token_id: str) -> bool:
+        # justification: user_push_token is identity-scoped (no workspace_id
+        # column); the ORM tenant filter does not apply.
         with tenant_agnostic():
             row = self._session.scalars(
                 select(UserPushToken).where(

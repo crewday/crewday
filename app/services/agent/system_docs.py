@@ -99,6 +99,8 @@ def seed_agent_docs(
 
     timestamp = now or datetime.now(UTC)
     lock = _SEED_LOCK if root == DEFAULT_AGENT_DOCS_ROOT else nullcontext()
+    # justification: agent_doc is deployment-global (no workspace_id); seed-locked
+    # bootstrap syncing code-shipped defaults.
     with lock, tenant_agnostic():
         existing = {
             row.slug: row

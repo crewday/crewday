@@ -56,6 +56,8 @@ def _stay_upcoming_workspace_rows(
     from app.adapters.db.workspace.models import Workspace
     from app.tenancy import tenant_agnostic
 
+    # justification: fan-out enumerates every tenant's workspace anchor
+    # row (no workspace_id) before the caller re-scopes each iteration.
     with tenant_agnostic():
         rows = list(
             session.execute(select(Workspace.id, Workspace.slug)).tuples().all()
@@ -226,6 +228,8 @@ def _make_poll_ical_fanout_body(clock: Clock) -> Callable[[], None]:
                 clock=clock,
             )
 
+            # justification: fan-out enumerates every tenant's workspace
+            # anchor row (no workspace_id) before re-scoping each iteration.
             with tenant_agnostic():
                 rows = list(session.execute(select(Workspace.id, Workspace.slug)).all())
                 workspace_ids = [row.id for row in rows]

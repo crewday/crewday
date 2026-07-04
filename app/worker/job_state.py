@@ -124,6 +124,8 @@ def _is_dead_in_session(session: Session, *, job_id: str) -> bool:
     keyed on a unique index but a re-open would still cost a
     round-trip per tick).
     """
+    # justification: worker_heartbeat is deployment-wide ops plumbing
+    # (no workspace_id column); the ORM tenant filter never applies.
     with tenant_agnostic():
         stmt = select(WorkerHeartbeat.dead_at).where(
             WorkerHeartbeat.worker_name == job_id
@@ -180,6 +182,8 @@ def _record_success_in_session(
     job_id: str,
     now: datetime,
 ) -> None:
+    # justification: worker_heartbeat is deployment-wide ops plumbing
+    # (no workspace_id column); the ORM tenant filter never applies.
     with tenant_agnostic():
         values = {
             "id": new_ulid(),
@@ -220,6 +224,8 @@ def _record_failure_in_session(
     clock: Clock,
     now: datetime,
 ) -> FailureOutcome:  # code-health: ignore[nloc] Worker failure-state policy flow.
+    # justification: worker_heartbeat is deployment-wide ops plumbing
+    # (no workspace_id column); the ORM tenant filter never applies.
     with tenant_agnostic():
         values = {
             "id": new_ulid(),
@@ -312,6 +318,8 @@ def reset_job(*, job_id: str, clock: Clock) -> bool:
     now = clock.now()
     with make_uow() as session:
         assert isinstance(session, Session)
+        # justification: worker_heartbeat is deployment-wide ops plumbing
+        # (no workspace_id column); the ORM tenant filter never applies.
         with tenant_agnostic():
             stmt = select(WorkerHeartbeat).where(WorkerHeartbeat.worker_name == job_id)
             existing = session.scalars(stmt).one_or_none()

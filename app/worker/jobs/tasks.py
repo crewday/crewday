@@ -115,6 +115,8 @@ def _make_generator_fanout_body(clock: Clock) -> Callable[[], None]:
             # to :func:`generate_task_occurrences`.
             assert isinstance(session, _Session)
 
+            # justification: fan-out enumerates every tenant's workspace
+            # anchor row (no workspace_id) before re-scoping each iteration.
             with tenant_agnostic():
                 # ``workspace`` is NOT in the tenant-filter registry
                 # (it is the tenancy anchor; see
@@ -280,6 +282,8 @@ def _make_overdue_fanout_body(clock: Clock) -> Callable[[], None]:
         with make_uow() as session:
             assert isinstance(session, _Session)
 
+            # justification: fan-out enumerates every tenant's workspace
+            # anchor row (no workspace_id) before re-scoping each iteration.
             with tenant_agnostic():
                 rows = list(session.execute(select(Workspace.id, Workspace.slug)).all())
                 workspace_ids = [row.id for row in rows]

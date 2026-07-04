@@ -22,6 +22,10 @@
 #   * boundaries   — import-linter. Blocking check as of cd-ev0 — a
 #                    red result fails the build. Contracts live in
 #                    pyproject.toml under [tool.importlinter].
+#   * tenant-agnostic — every tenant_agnostic() escape hatch carries a
+#                    `# justification:` comment (cd-6f2na). Blocking
+#                    static AST gate; see docs/specs/01-architecture.md
+#                    §"Tenant filter enforcement".
 #   * unit         — pytest tests/unit tests/api tests/property tests/llm
 #                    on SQLite only (the default).
 #   * integration  — pytest tests/integration on both SQLite (default)
@@ -254,6 +258,20 @@ jobs:
         # import-linter discovers its config from pyproject.toml
         # ([tool.importlinter]).
         run: uv run lint-imports
+
+  tenant-agnostic:
+    # Blocking check (cd-6f2na). Every tenant_agnostic() escape hatch
+    # from the workspace-scope filter MUST carry a `# justification:`
+    # comment; see docs/specs/01-architecture.md §"Tenant filter
+    # enforcement". Pure-stdlib AST gate — no dependency install needed.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+      - name: tenant_agnostic justifications
+        run: python scripts/check_tenant_agnostic.py app/
 
   unit:
     runs-on: ubuntu-latest

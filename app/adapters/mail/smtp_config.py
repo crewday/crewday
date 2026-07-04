@@ -123,6 +123,8 @@ class DeploymentSmtpConfigSource:
         try:
             with self._uow_factory() as raw_session:
                 session = cast(Session, raw_session)
+                # justification: deployment_setting is deployment-global (no
+                # workspace_id column); SMTP config resolves install-wide.
                 with tenant_agnostic():
                     rows = {
                         row.key: row.value

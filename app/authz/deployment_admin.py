@@ -81,5 +81,7 @@ def is_deployment_admin(session: Session, *, user_id: str) -> bool:
         )
         .limit(1)
     )
+    # justification: deployment-admin lookup keyed by explicit
+    # scope_kind='deployment' predicate on role_grant (workspace_id IS NULL).
     with tenant_agnostic():
         return session.scalars(stmt).first() is not None

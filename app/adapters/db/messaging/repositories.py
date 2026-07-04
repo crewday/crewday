@@ -641,9 +641,9 @@ class SqlAlchemyChatGatewayRepository(ChatGatewayRepository):
     def find_binding(
         self, *, provider: str, external_contact: str
     ) -> ChatGatewayBindingRow | None:
+        # justification: provider webhooks are bare-host ingress; the
+        # binding row itself carries the workspace selected by config.
         with tenant_agnostic():
-            # justification: provider webhooks are bare-host ingress; the
-            # binding row itself carries the workspace selected by config.
             row = self._session.scalars(
                 select(ChatGatewayBinding).where(
                     ChatGatewayBinding.provider == provider,
@@ -694,9 +694,9 @@ class SqlAlchemyChatGatewayRepository(ChatGatewayRepository):
     def touch_binding(
         self, *, binding_id: str, last_message_at: datetime
     ) -> ChatGatewayBindingRow:
+        # justification: provider webhooks resolve tenant from the binding,
+        # not an authenticated workspace route.
         with tenant_agnostic():
-            # justification: provider webhooks resolve tenant from the binding,
-            # not an authenticated workspace route.
             row = self._session.get(ChatGatewayBinding, binding_id)
             if row is None:
                 raise LookupError(f"chat_gateway_binding {binding_id!r} not found")
@@ -707,9 +707,9 @@ class SqlAlchemyChatGatewayRepository(ChatGatewayRepository):
     def find_message_by_provider_id(
         self, *, source: str, provider_message_id: str
     ) -> ChatMessageRow | None:
+        # justification: replay defeat must work before a tenant context is
+        # bound; source/provider_message_id is globally unique.
         with tenant_agnostic():
-            # justification: replay defeat must work before a tenant context is
-            # bound; source/provider_message_id is globally unique.
             row = self._session.scalars(
                 select(ChatMessage).where(
                     ChatMessage.source == source,
@@ -986,9 +986,9 @@ class SqlAlchemyPushDeliveryRepository(PushDeliveryRepository):
         return _to_delivery_row(row)
 
     def select_due(self, *, now: datetime, limit: int) -> Sequence[PushDeliveryRow]:
+        # justification: cd-y60x worker is deployment-scope; each
+        # row carries its own ``workspace_id`` for downstream audit.
         with tenant_agnostic():
-            # justification: cd-y60x worker is deployment-scope; each
-            # row carries its own ``workspace_id`` for downstream audit.
             stmt = (
                 select(NotificationPushQueue)
                 .where(NotificationPushQueue.status == "pending")
@@ -1007,6 +1007,8 @@ class SqlAlchemyPushDeliveryRepository(PushDeliveryRepository):
         now: datetime,
         in_flight_until: datetime,
     ) -> bool:
+        # justification: push-delivery worker claims queue rows deployment-
+        # wide by primary key; each row carries its own workspace_id.
         with tenant_agnostic():
             stmt = (
                 update(NotificationPushQueue)
@@ -1096,6 +1098,8 @@ class SqlAlchemyPushDeliveryRepository(PushDeliveryRepository):
         return _to_delivery_row(row)
 
     def get(self, *, delivery_id: str) -> PushDeliveryRow | None:
+        # justification: push-delivery worker loads a queue row by primary
+        # key deployment-wide; the row carries its own workspace_id.
         with tenant_agnostic():
             row = self._session.scalars(
                 select(NotificationPushQueue).where(
@@ -1105,6 +1109,8 @@ class SqlAlchemyPushDeliveryRepository(PushDeliveryRepository):
         return _to_delivery_row(row) if row is not None else None
 
     def get_token(self, *, push_token_id: str) -> PushTokenRow | None:
+        # justification: push-delivery worker resolves the token by primary
+        # key for a queue row already scoped to its workspace.
         with tenant_agnostic():
             row = self._session.scalars(
                 select(PushToken).where(PushToken.id == push_token_id)
@@ -1112,6 +1118,8 @@ class SqlAlchemyPushDeliveryRepository(PushDeliveryRepository):
         return _to_row(row) if row is not None else None
 
     def delete_token(self, *, push_token_id: str) -> str | None:
+        # justification: push-delivery worker prunes an invalid token by
+        # primary key deployment-wide (vendor reported it gone).
         with tenant_agnostic():
             row = self._session.scalars(
                 select(PushToken).where(PushToken.id == push_token_id)
@@ -1126,6 +1134,8 @@ class SqlAlchemyPushDeliveryRepository(PushDeliveryRepository):
     def get_workspace_setting(
         self, *, workspace_id: str, settings_key: str
     ) -> str | None:
+        # justification: workspace is the tenant root (no workspace_id
+        # column); worker reads one workspace's settings by explicit id.
         with tenant_agnostic():
             payload = self._session.scalars(
                 select(Workspace.settings_json).where(Workspace.id == workspace_id)
@@ -1138,6 +1148,8 @@ class SqlAlchemyPushDeliveryRepository(PushDeliveryRepository):
         return value
 
     def touch_token_last_used(self, *, push_token_id: str, now: datetime) -> None:
+        # justification: push-delivery worker bumps last_used on a token by
+        # primary key for a queue row already scoped to its workspace.
         with tenant_agnostic():
             row = self._session.scalars(
                 select(PushToken).where(PushToken.id == push_token_id)
@@ -1148,6 +1160,8 @@ class SqlAlchemyPushDeliveryRepository(PushDeliveryRepository):
             self._session.flush()
 
     def _load(self, delivery_id: str) -> NotificationPushQueue:
+        # justification: push-delivery worker loads a queue row by primary
+        # key deployment-wide; the row carries its own workspace_id.
         with tenant_agnostic():
             return self._session.scalars(
                 select(NotificationPushQueue).where(

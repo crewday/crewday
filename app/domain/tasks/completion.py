@@ -608,6 +608,8 @@ def _default_required_approval(
         if template_required is True:
             return True
 
+    # justification: workspace is deployment-global (no workspace_id column);
+    # fetched by explicit Workspace.id == ctx.workspace_id.
     with tenant_agnostic():
         workspace_settings = session.scalar(
             select(Workspace.settings_json).where(Workspace.id == ctx.workspace_id)
@@ -830,6 +832,8 @@ def _default_asset_action(
         return
     if task.completed_at is None:
         raise ValueError("cannot stamp asset_action before completed_at is set")
+    # justification: update carries explicit AssetAction.workspace_id ==
+    # ctx.workspace_id.
     with tenant_agnostic():
         session.execute(
             update(AssetAction)

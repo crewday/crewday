@@ -191,6 +191,8 @@ def list_actions(
     if until is not None:
         stmt = stmt.where(AssetAction.last_performed_at <= until)
     stmt = stmt.order_by(AssetAction.last_performed_at.desc(), AssetAction.id.desc())
+    # justification: query carries an explicit workspace_id == ctx.workspace_id
+    # predicate; the ambient tenant filter would be redundant, not bypassed.
     with tenant_agnostic():
         rows = session.scalars(stmt).all()
     return [_row_to_view(row) for row in rows]
@@ -309,6 +311,8 @@ def next_due(
 ) -> AssetNextDueView | None:
     """Return the soonest due scheduled action for an asset."""
     asset = _load_asset(session, ctx, asset_id, include_archived=False)
+    # justification: AssetAction read carries an explicit workspace_id predicate;
+    # AssetType is fetched by PK derived from the already workspace-scoped asset.
     with tenant_agnostic():
         actions = list(
             session.scalars(
@@ -430,6 +434,8 @@ def _latest_matching_action(
 def _load_action(
     session: Session, ctx: WorkspaceContext, action_id: str
 ) -> AssetAction:
+    # justification: read carries an explicit workspace_id == ctx.workspace_id
+    # predicate; the ambient tenant filter would be redundant, not bypassed.
     with tenant_agnostic():
         row = session.scalars(
             select(AssetAction).where(
@@ -453,6 +459,8 @@ def _assert_record_access(
         return
     if ctx.actor_grant_role != "worker":
         raise AssetActionAccessDenied(property_id)
+    # justification: grant lookup carries an explicit workspace_id == ctx.workspace_id
+    # predicate; the ambient tenant filter would be redundant, not bypassed.
     with tenant_agnostic():
         grant = session.scalar(
             select(RoleGrant.id)

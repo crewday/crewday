@@ -260,6 +260,8 @@ def is_step_up_user(session: SqlaSession, *, user_id: str) -> bool:
     ``users.archived_at`` is still pending; when it lands the WHERE
     adds the matching pre-gate.
     """
+    # justification: step-up probe reads role_grant / permission_group_member
+    # across every workspace by user_id; recovery runs outside any ctx (spec 03).
     with tenant_agnostic():
         # Manager-grant check — one row anywhere is enough.
         manager_grant = session.scalar(
@@ -341,6 +343,8 @@ def redeem_code(
     caller's audit + rate-limit decisions branch on the
     ``None``-vs-id discriminator.
     """
+    # justification: recovery redemption reads and burns this user's
+    # break_glass_code rows by user_id, outside any WorkspaceContext (spec 03).
     with tenant_agnostic():
         rows = session.scalars(
             select(BreakGlassCode)

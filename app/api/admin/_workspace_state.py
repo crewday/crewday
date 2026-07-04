@@ -155,6 +155,8 @@ def archive_workspace_if_needed(
     if when.tzinfo is None:  # pragma: no cover - defensive
         when = when.replace(tzinfo=UTC)
     archived = when.astimezone(UTC)
+    # justification: workspace archive keyed by explicit workspace id;
+    # the workspace row is the tenant itself, not workspace-scoped.
     with tenant_agnostic():
         result = session.execute(
             update(Workspace)
@@ -200,6 +202,8 @@ def schedule_workspace_deletion_if_needed(
         return existing_requested, existing_purge_after, False
 
     if existing_requested is None and existing_purge_after is None:
+        # justification: workspace deletion scheduling keyed by explicit
+        # workspace id; the workspace row is the tenant itself, not scoped.
         with tenant_agnostic():
             result = session.execute(
                 update(Workspace)
@@ -238,6 +242,8 @@ def schedule_workspace_deletion_if_needed(
         repair_values["delete_requested_at"] = repair_requested
     if existing_purge_after is None:
         repair_values["purge_after"] = repair_purge_after
+    # justification: workspace deletion-schedule repair keyed by explicit
+    # workspace id; the workspace row is the tenant itself, not scoped.
     with tenant_agnostic():
         result = session.execute(
             update(Workspace)
@@ -289,5 +295,7 @@ def load_workspace(session: Session, *, workspace_id: str) -> Workspace | None:
     there is no workspace context to pin) and to insulate against
     a future change that registers ``workspace`` as scoped.
     """
+    # justification: workspace is the tenant row itself (not registered
+    # as workspace-scoped); loaded by explicit primary-key id.
     with tenant_agnostic():
         return session.get(Workspace, workspace_id)

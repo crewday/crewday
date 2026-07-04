@@ -332,6 +332,8 @@ def _eligible_recipients(
 
 
 def _workspace_timezone(session: Session, *, workspace_id: str) -> str:
+    # justification: workspace is the tenancy anchor (no workspace_id
+    # column of its own); the lookup is keyed by explicit Workspace.id.
     with tenant_agnostic():
         timezone = session.scalar(
             select(Workspace.default_timezone).where(Workspace.id == workspace_id)

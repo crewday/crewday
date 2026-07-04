@@ -51,6 +51,8 @@ def request_ownership_verification(
     """Mail a workspace-ownership verification link to the current owner."""
     # code-health: ignore[params] Port params are adapter API contract.
     _require_owner(session, ctx)
+    # justification: user is identity-scoped (no workspace_id column); the ORM
+    # tenant filter does not apply.
     with tenant_agnostic():
         user = session.get(User, ctx.actor_id)
     if user is None:
@@ -117,6 +119,8 @@ def consume_ownership_verification(
         clock=resolved_clock,
     )
 
+    # justification: workspace is the tenant root (keyed by id, no workspace_id
+    # column); the read is supplied via explicit ctx.workspace_id.
     with tenant_agnostic():
         workspace = session.get(Workspace, ctx.workspace_id)
     if workspace is None:

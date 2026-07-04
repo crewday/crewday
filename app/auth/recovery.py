@@ -436,6 +436,8 @@ def is_self_service_recovery_disabled(session: SqlaSession, *, user_id: str) -> 
         .where(RoleGrant.user_id == user_id)
         .where(RoleGrant.revoked_at.is_(None))
     )
+    # justification: recovery runs outside any WorkspaceContext and reads
+    # role_grant across every workspace keyed by RoleGrant.user_id (spec 03).
     with tenant_agnostic():
         payloads = session.scalars(stmt).all()
     for payload in payloads:
@@ -1198,9 +1200,8 @@ def _mint_and_send_recovery_link(
             capture.captured_token, settings=settings
         )
         if jti is not None:
-            # justification: break_glass_code is workspace-scoped but
-            # the recovery flow runs outside any tenant ctx — same
-            # tenant_agnostic posture used by the rest of this module.
+            # justification: break_glass_code stamped by its explicit primary
+            # key in the recovery flow, which runs outside any tenant ctx.
             with tenant_agnostic():
                 burnt_row = session.get(BreakGlassCode, stepup_burnt_code_id)
                 if burnt_row is not None:

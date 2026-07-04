@@ -125,6 +125,8 @@ def dispatch_inbound_message(
     """
     # code-health: ignore[nloc] Policy txn keeps auth, validation, state, and events together.  # noqa: E501
     eff_clock = clock if clock is not None else SystemClock()
+    # justification: dispatch worker claims one chat_message by its explicit
+    # PK (job.message_id) before a WorkspaceContext exists; binding via its FK.
     with tenant_agnostic():
         message = session.scalar(
             select(ChatMessage)

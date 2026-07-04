@@ -724,6 +724,8 @@ def list_pending_extractions(
         .order_by(_FILE_EXTRACTION.c.created_at.asc(), _FILE_EXTRACTION.c.id.asc())
         .limit(limit)
     )
+    # justification: deployment-scope worker tick lists pending rows across all
+    # tenants; each row carries its own workspace_id and is re-scoped before mutation.
     with tenant_agnostic():
         rows = session.execute(stmt).mappings().all()
     return [_record_from_mapping(row) for row in rows]
@@ -739,6 +741,8 @@ def _load_extraction_row(
     ctx: WorkspaceContext,
     document_id: str,
 ) -> FileExtractionRecord:
+    # justification: read carries an explicit workspace_id == ctx.workspace_id
+    # predicate; the ambient tenant filter would be redundant, not bypassed.
     with tenant_agnostic():
         row = (
             session.execute(
@@ -761,6 +765,8 @@ def _update_extraction_row(
     document_id: str,
     values: Mapping[str, object],
 ) -> None:
+    # justification: update carries an explicit workspace_id == ctx.workspace_id
+    # predicate; the ambient tenant filter would be redundant, not bypassed.
     with tenant_agnostic():
         session.execute(
             update(_FILE_EXTRACTION)
@@ -778,6 +784,8 @@ def _document_asset_id(
     ctx: WorkspaceContext,
     document_id: str,
 ) -> str | None:
+    # justification: read carries an explicit workspace_id == ctx.workspace_id
+    # predicate; the ambient tenant filter would be redundant, not bypassed.
     with tenant_agnostic():
         row = (
             session.execute(

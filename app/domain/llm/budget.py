@@ -808,6 +808,8 @@ def lift_tight_llm_budget_cap(
 
     c = clock or SystemClock()
     now = c.now()
+    # justification: keyed by explicit workspace_id arg; workspace is
+    # deployment-global and budget_ledger is loaded by that workspace_id.
     with tenant_agnostic():
         workspace = session.get(Workspace, workspace_id)
         if workspace is None:
@@ -952,6 +954,8 @@ def _check_per_ip_aggregate_cap(
     window_start = now - timedelta(days=WINDOW_DAYS)
     cap_cents = _IP_BUDGET_MULTIPLIER * FREE_TIER_DEFAULTS["llm_budget_cents_30d"]
 
+    # justification: signup-IP budget pool aggregates llm_usage across the
+    # workspaces sharing signup_ip_key, keyed by an explicit workspace_id list.
     with tenant_agnostic():
         workspace = session.get(Workspace, ctx.workspace_id)
         if workspace is None:
@@ -1022,6 +1026,8 @@ def _check_demo_global_daily_cap(
         LlmUsageRow.created_at >= day_start,
         LlmUsageRow.status != "refused",
     )
+    # justification: deployment-wide demo daily cap sums llm_usage across the
+    # whole install by design; no per-workspace predicate is intended.
     with tenant_agnostic():
         spent = int(session.execute(stmt).scalar_one())
     if spent + projected_cost_cents > cap_cents:

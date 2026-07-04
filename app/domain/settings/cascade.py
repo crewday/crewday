@@ -208,6 +208,8 @@ def _value_from_map(settings: Mapping[str, object], key: str) -> object:
 
 
 def _workspace_settings(session: Session, workspace_id: str) -> Mapping[str, object]:
+    # justification: workspace is deployment-global (no workspace_id column);
+    # fetched by explicit Workspace.id == workspace_id.
     with tenant_agnostic():
         row = session.scalar(
             select(Workspace.settings_json).where(Workspace.id == workspace_id)
@@ -220,6 +222,8 @@ def _property_settings(
 ) -> _LayerSettings | None:
     if property_id is None:
         return None
+    # justification: property scopes through property_workspace (no
+    # workspace_id column); fetched by explicit Property.id primary key.
     with tenant_agnostic():
         row = session.scalar(
             select(Property.settings_override_json).where(Property.id == property_id)
@@ -234,6 +238,8 @@ def _unit_settings(session: Session, chain: SettingScopeChain) -> _LayerSettings
     query = select(Unit.settings_override_json).where(Unit.id == chain.unit_id)
     if chain.property_id is not None:
         query = query.where(Unit.property_id == chain.property_id)
+    # justification: unit scopes through property_workspace (no workspace_id
+    # column); fetched by explicit Unit.id (and property_id) predicate.
     with tenant_agnostic():
         row = session.scalar(query)
     if row is None:
@@ -247,6 +253,8 @@ def _work_engagement_settings(
 ) -> _LayerSettings | None:
     if actor_user_id is None:
         return None
+    # justification: work_engagement query carries explicit
+    # WorkEngagement.workspace_id == workspace_id.
     with tenant_agnostic():
         row = session.execute(
             select(WorkEngagement.id, WorkEngagement.settings_override_json)
@@ -267,6 +275,8 @@ def _task_settings(session: Session, chain: SettingScopeChain) -> _LayerSettings
     settings: dict[str, object] = {}
     entity_id = chain.task_id if chain.task_id is not None else chain.template_id
     if chain.template_id is not None:
+        # justification: query carries explicit TaskTemplate.workspace_id ==
+        # chain.workspace_id.
         with tenant_agnostic():
             template_settings = session.scalar(
                 select(TaskTemplate.settings_override_json).where(
@@ -276,6 +286,8 @@ def _task_settings(session: Session, chain: SettingScopeChain) -> _LayerSettings
             )
         if isinstance(template_settings, dict):
             settings.update(template_settings)
+        # justification: query carries explicit TaskTemplate.workspace_id ==
+        # chain.workspace_id.
         with tenant_agnostic():
             template_photo = session.scalar(
                 select(TaskTemplate.photo_evidence).where(
@@ -288,6 +300,8 @@ def _task_settings(session: Session, chain: SettingScopeChain) -> _LayerSettings
             settings["evidence.policy"] = legacy_policy
 
     if chain.task_id is not None:
+        # justification: query carries explicit Occurrence.workspace_id ==
+        # chain.workspace_id.
         with tenant_agnostic():
             task_settings = session.scalar(
                 select(Occurrence.settings_override_json).where(
@@ -297,6 +311,8 @@ def _task_settings(session: Session, chain: SettingScopeChain) -> _LayerSettings
             )
         if isinstance(task_settings, dict):
             settings.update(task_settings)
+        # justification: query carries explicit Occurrence.workspace_id ==
+        # chain.workspace_id.
         with tenant_agnostic():
             task_photo = session.scalar(
                 select(Occurrence.photo_evidence).where(

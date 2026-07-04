@@ -99,6 +99,8 @@ def _make_daily_digest_fanout_body(clock: Clock) -> Callable[[], None]:
         with make_uow() as session:
             assert isinstance(session, _Session)
 
+            # justification: fan-out enumerates every tenant's workspace
+            # anchor row (no workspace_id) before re-scoping each iteration.
             with tenant_agnostic():
                 rows = list(session.execute(select(Workspace.id, Workspace.slug)).all())
                 workspace_ids = [row.id for row in rows]

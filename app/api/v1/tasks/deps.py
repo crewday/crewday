@@ -65,6 +65,8 @@ def _agent_attribution_from_request(
             token_id=None,
             agent_label=None,
         )
+    # justification: api_token is identity-scoped (no workspace_id column);
+    # the token is fetched by its own primary key. Tenant filter never applies.
     with tenant_agnostic():
         row = session.get(ApiToken, actor.token_id)
     if row is None or row.kind != "delegated":

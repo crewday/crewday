@@ -78,6 +78,8 @@ def list_workspace_page(
         return CursorPage(items=(), next_cursor=None, has_more=False)
     stmt = _workspace_search_statement(search)
     if after_id is not None:
+        # justification: workspace is the tenant row itself (no
+        # workspace_id column); cursor anchor fetched by explicit id.
         with tenant_agnostic():
             cursor_workspace = session.get(Workspace, after_id)
         if cursor_workspace is None or not _matches_workspace_search(
@@ -94,6 +96,8 @@ def list_workspace_page(
     stmt = stmt.order_by(Workspace.created_at.asc(), Workspace.id.asc()).limit(
         limit + 1
     )
+    # justification: workspace is the tenant row itself (no workspace_id
+    # column); deployment admin pages through every workspace.
     with tenant_agnostic():
         rows = tuple(session.scalars(stmt).all())
     return paginate(

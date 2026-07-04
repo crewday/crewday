@@ -271,6 +271,8 @@ def list_assets(
     if after_id is not None:
         stmt = stmt.where(Asset.id > after_id)
     stmt = stmt.order_by(Asset.id.asc()).limit(limit)
+    # justification: stmt carries an explicit workspace_id == ctx.workspace_id
+    # predicate; the ambient tenant filter would be redundant, not bypassed.
     with tenant_agnostic():
         rows = session.scalars(stmt).all()
     return [_row_to_view(row) for row in rows]
@@ -294,6 +296,8 @@ def get_asset_by_qr_token(
     qr_token: str,
 ) -> AssetView:
     """Return the active asset addressed by ``qr_token``."""
+    # justification: read carries an explicit workspace_id == ctx.workspace_id
+    # predicate; the ambient tenant filter would be redundant, not bypassed.
     with tenant_agnostic():
         row = session.scalars(
             select(Asset).where(
@@ -745,6 +749,8 @@ def _load_asset(
     )
     if not include_archived:
         stmt = stmt.where(Asset.deleted_at.is_(None))
+    # justification: stmt carries an explicit workspace_id == ctx.workspace_id
+    # predicate; the ambient tenant filter would be redundant, not bypassed.
     with tenant_agnostic():
         row = session.scalars(stmt).one_or_none()
     if row is None:
@@ -759,6 +765,8 @@ def _validate_placement(
     property_id: str,
     area_id: str | None,
 ) -> None:
+    # justification: membership check keyed by explicit PropertyWorkspace.workspace_id
+    # == ctx.workspace_id; the property table itself has no workspace_id column.
     with tenant_agnostic():
         property_exists = session.scalar(
             select(Property.id)
@@ -775,6 +783,8 @@ def _validate_placement(
         raise AssetPlacementInvalid("property is not active in this workspace")
     if area_id is None:
         return
+    # justification: area has no workspace_id column; the read is constrained by
+    # property_id already validated active in ctx.workspace_id above.
     with tenant_agnostic():
         area_exists = session.scalar(
             select(Area.id)
@@ -794,6 +804,8 @@ def _validate_asset_type(
     ctx: WorkspaceContext,
     asset_type_id: str,
 ) -> None:
+    # justification: explicit predicate matches this workspace's asset types OR the
+    # deployment-global (workspace_id NULL) built-ins the ambient filter would hide.
     with tenant_agnostic():
         type_exists = session.scalar(
             select(AssetType.id)
@@ -832,6 +844,8 @@ def _unique_qr_token(
         )
         if exclude_asset_id is not None:
             stmt = stmt.where(Asset.id != exclude_asset_id)
+        # justification: uniqueness probe carries an explicit workspace_id ==
+        # ctx.workspace_id predicate; the ambient filter would be redundant.
         with tenant_agnostic():
             existing = session.scalar(stmt.limit(1))
         if existing is None:

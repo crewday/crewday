@@ -126,5 +126,7 @@ def is_owner_on_any_workspace(session: Session, *, user_id: str) -> bool:
         )
         .limit(1)
     )
+    # justification: runs before any WorkspaceContext exists (login TTL
+    # check); deliberately scans owners@* across every workspace.
     with tenant_agnostic():
         return session.scalars(stmt).first() is not None

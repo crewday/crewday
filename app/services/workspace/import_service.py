@@ -109,6 +109,8 @@ def restore_workspace_export(
     source_workspace_id = source_workspace["id"]
     source_workspace_slug = source_workspace["slug"]
 
+    # justification: workspace import writes/replaces rows keyed to an explicit
+    # target workspace_id; runs before the imported workspace has an ambient context.
     with tenant_agnostic():
         if mode == "replace":
             if target_workspace_id is None:

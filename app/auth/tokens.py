@@ -695,9 +695,8 @@ def _count_active_workspace_for_user(
     would over-restrict a user that happens to hold a workspace
     grant + some PATs.
     """
-    # justification: api_token is identity-scoped; the ORM tenant
-    # filter has no predicate registered for this table and would
-    # otherwise refuse the read under a live WorkspaceContext.
+    # justification: api_token is identity-scoped; the ORM tenant filter
+    # has no predicate for this table and would refuse the read otherwise.
     with tenant_agnostic():
         stmt = (
             select(func.count())
@@ -723,6 +722,8 @@ def _count_active_workspace_total(
     session: Session, *, workspace_id: str, now: datetime
 ) -> int:
     """Return the number of live scoped + delegated tokens in ``workspace_id``."""
+    # justification: api_token is identity-scoped; the count filters by an
+    # explicit workspace_id predicate the ambient filter cannot inject.
     with tenant_agnostic():
         stmt = (
             select(func.count())
@@ -747,6 +748,8 @@ def _count_active_personal(
     follows the same rule as :func:`_count_active_workspace_for_user`
     (``revoked_at IS NULL`` and unexpired).
     """
+    # justification: api_token is identity-scoped; the PAT count
+    # touches no workspace_id column for the ORM tenant filter to apply.
     with tenant_agnostic():
         stmt = (
             select(func.count())
@@ -1082,9 +1085,8 @@ def mint(
         revoked_at=None,
         created_at=resolved_now,
     )
-    # justification: api_token is identity-scoped; writing under a
-    # live WorkspaceContext would otherwise force the ORM filter to
-    # inject a predicate the table doesn't carry.
+    # justification: api_token is identity-scoped; writing under a live
+    # WorkspaceContext would force the ORM filter to inject a missing predicate.
     with tenant_agnostic():
         session.add(row)
         session.flush()
@@ -1229,6 +1231,8 @@ def list_personal_tokens(
     tokens" panel (§14, cd-i1qe-me-panel follow-up) reads through
     this surface.
     """
+    # justification: api_token is identity-scoped; the PAT list read
+    # touches no workspace_id column for the ORM tenant filter to apply.
     with tenant_agnostic():
         stmt = (
             select(ApiToken)
@@ -1256,6 +1260,8 @@ def list_personal_audit(
     read never discloses whether another user's token exists.
     """
     # code-health: ignore[nloc] Policy txn keeps auth, validation, state, and events together.  # noqa: E501
+    # justification: api_token is identity-scoped; the count touches
+    # no workspace_id column for the ORM tenant filter to apply.
     with tenant_agnostic():
         token_exists = session.scalar(
             select(func.count())
@@ -1405,6 +1411,8 @@ def list_audit(
     PAT / unknown id check into a 404 separately so the empty
     list here is unambiguously "no events yet".
     """
+    # justification: audit_log read scoped by an explicit
+    # workspace_id == ctx.workspace_id predicate, not the ambient filter.
     with tenant_agnostic():
         lifecycle_stmt = (
             select(AuditLog)
@@ -1526,6 +1534,8 @@ def revoke(
         )
         return
 
+    # justification: api_token is identity-scoped; the revoke UPDATE
+    # touches no workspace_id column for the tenant filter to apply.
     with tenant_agnostic():
         row.revoked_at = resolved_now
         session.flush()
@@ -1621,6 +1631,8 @@ def rotate(
     except Argon2Error as exc:
         raise TokenMintFailed(f"argon2id hash failed: {exc}") from exc
 
+    # justification: api_token is identity-scoped; the rotate UPDATE
+    # touches no workspace_id column for the tenant filter to apply.
     with tenant_agnostic():
         row.previous_hash = row.hash
         row.previous_hash_expires_at = resolved_now + _ROTATION_OVERLAP
@@ -1685,6 +1697,8 @@ def rotate_personal(
     # code-health: ignore[nloc] Policy txn keeps auth, validation, state, and events together.  # noqa: E501
     resolved_now = now if now is not None else _now(clock)
 
+    # justification: api_token is identity-scoped; the row read touches
+    # no workspace_id column for the ORM tenant filter to apply.
     with tenant_agnostic():
         row = session.get(ApiToken, token_id)
 
@@ -1709,6 +1723,8 @@ def rotate_personal(
     except Argon2Error as exc:
         raise TokenMintFailed(f"argon2id hash failed: {exc}") from exc
 
+    # justification: api_token is identity-scoped; the rotate UPDATE
+    # touches no workspace_id column for the tenant filter to apply.
     with tenant_agnostic():
         row.previous_hash = row.hash
         row.previous_hash_expires_at = resolved_now + _ROTATION_OVERLAP
@@ -1773,6 +1789,8 @@ def revoke_personal(
     """
     resolved_now = now if now is not None else _now(clock)
 
+    # justification: api_token is identity-scoped; the row read touches
+    # no workspace_id column for the ORM tenant filter to apply.
     with tenant_agnostic():
         row = session.get(ApiToken, token_id)
 
@@ -1784,6 +1802,8 @@ def revoke_personal(
         # "one revoke per token lifetime" invariant.
         return
 
+    # justification: api_token is identity-scoped; the revoke UPDATE
+    # touches no workspace_id column for the tenant filter to apply.
     with tenant_agnostic():
         row.revoked_at = resolved_now
         session.flush()
@@ -1943,6 +1963,8 @@ def verify(
                 previous_hash_matches = True
         if not previous_hash_matches:
             if previous_hash_cleared:
+                # justification: api_token is identity-scoped; flushing the
+                # cleared previous-hash touches no workspace_id column.
                 with tenant_agnostic():
                     session.flush()
             # Collapse into the opaque "not a real token" shape so
@@ -2011,6 +2033,8 @@ def verify(
     # and the audit trail already captures the high-value events
     # (mint + revoke).
     if _maybe_bump_last_used(row, now=resolved_now) or previous_hash_cleared:
+        # justification: api_token is identity-scoped; the last-used
+        # flush touches no workspace_id column for the filter to apply.
         with tenant_agnostic():
             session.flush()
 

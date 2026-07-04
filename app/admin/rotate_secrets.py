@@ -200,6 +200,8 @@ def rotate_smtp_credentials(
         values[SMTP_USER_SETTING] = credentials.user
     if credentials.bounce_domain is not None:
         values[SMTP_BOUNCE_DOMAIN_SETTING] = credentials.bounce_domain
+    # justification: deployment admin acts across the whole install by design;
+    # deployment_setting is deployment-global, audit row deployment-scoped.
     with tenant_agnostic():
         for key, value in values.items():
             _upsert_setting(session, key=key, value=value, updated_at=now)
@@ -240,6 +242,8 @@ def rotate_openrouter_key(
         purpose=OPENROUTER_API_KEY_PURPOSE,
         setting_key=OPENROUTER_API_KEY_SETTING,
     )
+    # justification: deployment admin acts across the whole install by design;
+    # deployment_setting is deployment-global, audit row deployment-scoped.
     with tenant_agnostic():
         _upsert_setting(
             session,
@@ -284,6 +288,8 @@ def rotate_hmac_signing_key(
             clock=clock,
         )
         rotated.append(purpose)
+    # justification: writes a deployment-scoped audit row (workspace_id NULL)
+    # for a deployment-wide secret rotation; no tenant to filter by.
     with tenant_agnostic():
         _deployment_audit(
             session,
@@ -310,6 +316,8 @@ def rotate_session_secret(
     """Rotate session signing material and clear all session rows."""
     key = bytes(secret_bytes_from_input(bytes(new_key), exact_len=32))
     rotate_session_signing_key(session, key, settings=settings, clock=clock)
+    # justification: writes a deployment-scoped audit row (workspace_id NULL)
+    # for a deployment-wide secret rotation; no tenant to filter by.
     with tenant_agnostic():
         _deployment_audit(
             session,

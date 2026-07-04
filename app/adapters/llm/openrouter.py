@@ -744,6 +744,8 @@ class DeploymentOpenRouterConfigSource:
 
     def api_key(self) -> SecretStr | None:
         with self._uow_factory() as session:
+            # justification: deployment_setting is deployment-global (no
+            # workspace_id column); the OpenRouter key resolves install-wide.
             with tenant_agnostic():
                 row = session.get(DeploymentSetting, OPENROUTER_API_KEY_SETTING)
             if row is None:

@@ -280,6 +280,8 @@ def _load_users(session: Session, *, user_ids: list[str]) -> dict[str, User]:
     """
     if not user_ids:
         return {}
+    # justification: user is identity-scoped (no workspace_id column); the ORM
+    # tenant filter does not apply. Ids come from a verified membership set.
     with tenant_agnostic():
         stmt = select(User).where(User.id.in_(user_ids))
         rows = session.scalars(stmt).all()
@@ -666,6 +668,8 @@ def build_employees_router() -> APIRouter:
         # filter does not apply to :class:`Workspace`. Use
         # ``tenant_agnostic`` to match the pattern in
         # ``app.api.v1.settings._get_workspace``.
+        # justification: workspace is a deployment-global table (no
+        # workspace_id column of its own); fetched by its own primary key.
         with tenant_agnostic():
             workspace = session.get(Workspace, ctx.workspace_id)
         if workspace is None:

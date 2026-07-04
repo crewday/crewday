@@ -114,6 +114,8 @@ def _select_due(session: Session, *, now: datetime) -> tuple[str, ...]:
     fire first; a fleet returning from a long pause clears the
     backlog in time order.
     """
+    # justification: deployment-scope dispatcher gathers the global
+    # webhook_delivery queue; each row re-scoped per-row in deliver().
     with tenant_agnostic():
         stmt = (
             select(WebhookDelivery.id)
@@ -352,6 +354,8 @@ def _notify_managers_auto_paused(  # code-health: ignore[nloc] Webhook fanout ow
 
 
 def _manager_user_ids(session: Session, *, workspace_id: str) -> tuple[str, ...]:
+    # justification: worker read keyed by an explicit workspace_id
+    # predicate on role_grant / permission_group, not the tenant filter.
     with tenant_agnostic():
         manager_rows = session.scalars(
             select(User.id)
@@ -372,6 +376,8 @@ def _manager_user_ids(session: Session, *, workspace_id: str) -> tuple[str, ...]
 
 
 def _system_ctx(session: Session, *, workspace_id: str) -> WorkspaceContext:
+    # justification: workspace is the tenancy anchor (no workspace_id
+    # column of its own); the lookup is keyed by explicit Workspace.id.
     with tenant_agnostic():
         slug = session.scalar(
             select(Workspace.slug).where(Workspace.id == workspace_id)

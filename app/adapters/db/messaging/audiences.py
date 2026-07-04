@@ -16,6 +16,8 @@ __all__ = ["list_owner_manager_user_ids", "list_owner_user_ids"]
 
 
 def list_owner_user_ids(session: Session, *, workspace_id: str) -> tuple[str, ...]:
+    # justification: permission_group[_member] are workspace-scoped but the
+    # join pins workspace_id explicitly for one workspace's owner audience.
     with tenant_agnostic():
         owner_ids = session.scalars(
             select(PermissionGroupMember.user_id)
@@ -31,6 +33,8 @@ def list_owner_manager_user_ids(
     session: Session, *, workspace_id: str
 ) -> tuple[str, ...]:
     owner_ids = list_owner_user_ids(session, workspace_id=workspace_id)
+    # justification: role_grant is workspace-scoped but the query pins
+    # workspace_id explicitly for one workspace's manager audience.
     with tenant_agnostic():
         manager_ids = session.scalars(
             select(RoleGrant.user_id).where(

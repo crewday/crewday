@@ -158,6 +158,8 @@ def _resolve_user_or_404(session: Session, *, user_id: str) -> User:
     with the rest of the admin surface — never advertising the
     distinction between "no user" and "no admin".
     """
+    # justification: user is identity-scoped (no workspace_id column);
+    # the ORM tenant filter does not apply.
     with tenant_agnostic():
         user = session.get(User, user_id)
     if user is None:
@@ -273,11 +275,12 @@ def build_admin_me_router() -> APIRouter:
         oldest admins surface first — the team page reads the list
         as a chronological roster.
         """
-        # justification: ``role_grant`` is workspace-scoped; this
-        # SELECT targets the deployment partition (``workspace_id IS
-        # NULL``) which the ORM tenant filter would either narrow
-        # away or fail closed on. The opt-out matches the precedent
-        # in :func:`app.authz.deployment_admin.is_deployment_admin`.
+        # ``role_grant`` is workspace-scoped, but this SELECT targets the
+        # deployment partition (``workspace_id IS NULL``) which the ORM
+        # tenant filter would narrow away or fail closed on; matches the
+        # precedent in :func:`app.authz.deployment_admin.is_deployment_admin`.
+        # justification: role_grant deployment partition (scope_kind==
+        # 'deployment', workspace_id NULL); lists install admin grants.
         with tenant_agnostic():
             rows = session.execute(
                 select(RoleGrant, User)

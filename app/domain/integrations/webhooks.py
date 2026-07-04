@@ -1040,6 +1040,8 @@ def _classify_response(
     status_code = response.status_code
     if 200 <= status_code < 300:
         # Success — clear last_error and mark succeeded.
+        # justification: webhook worker stamps one webhook_delivery row by its
+        # explicit PK (delivery.id); the tick has no WorkspaceContext.
         with tenant_agnostic():
             row = repo.update_delivery_attempt(
                 delivery_id=delivery.id,
@@ -1119,6 +1121,8 @@ def _stamp_transient(
 
     delay_s = RETRY_SCHEDULE_SECONDS[attempt]
     next_attempt_at = now + timedelta(seconds=delay_s)
+    # justification: webhook worker stamps one webhook_delivery row by its
+    # explicit PK (delivery.id); the tick has no WorkspaceContext.
     with tenant_agnostic():
         row = repo.update_delivery_attempt(
             delivery_id=delivery.id,
@@ -1158,6 +1162,8 @@ def _terminal_dead_letter(
     that already loaded the subscription avoid a second read.
     """
     # code-health: ignore[params] Port params are adapter API contract.
+    # justification: webhook worker stamps one webhook_delivery row by its
+    # explicit PK (delivery.id); the tick has no WorkspaceContext.
     with tenant_agnostic():
         row = repo.update_delivery_attempt(
             delivery_id=delivery.id,

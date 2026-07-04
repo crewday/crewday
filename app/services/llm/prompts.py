@@ -33,6 +33,8 @@ def get_active_prompt(
     timestamp = _now(clock)
     default_hash = _hash_body(default)
 
+    # justification: llm_prompt_template is deployment-global (no workspace_id);
+    # seed-locked bootstrap of the code-default prompt for a capability.
     with _SEED_LOCK, tenant_agnostic():
         row = session.scalar(
             select(LlmPromptTemplate).where(

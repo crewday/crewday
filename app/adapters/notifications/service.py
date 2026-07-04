@@ -60,6 +60,8 @@ class SqlAlchemyNotificationSink:
         payload_key: str,
         payload_value: object,
     ) -> bool:
+        # justification: notification is workspace-scoped but the query pins
+        # workspace_id to the ambient context explicitly, not via the filter.
         with tenant_agnostic():
             payloads = self._session.scalars(
                 select(Notification.payload_json)

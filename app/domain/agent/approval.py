@@ -824,6 +824,8 @@ def expire_due(
     del clock  # forward-compat parameter, see docstring
     bus = event_bus if event_bus is not None else default_event_bus
 
+    # justification: deployment-wide TTL sweep expires every workspace's due
+    # approval_requests; each row re-scopes its event via row.workspace_id.
     with tenant_agnostic():
         stmt = (
             select(ApprovalRequest)

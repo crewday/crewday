@@ -157,6 +157,8 @@ def _clear_current_session_workspace(
     ) or request.cookies.get("crewday_session")
     if not cookie_value:
         return
+    # justification: session is identity-scoped (its workspace_id is the
+    # selected-workspace pointer, not a tenancy partition); keyed by cookie hash.
     with tenant_agnostic():
         row = session.get(SessionRow, auth_session.hash_cookie_value(cookie_value))
     if row is None:
@@ -194,6 +196,8 @@ def archive_current_workspace(
             detail={"error": "owners_only"},
         )
 
+    # justification: workspace is a deployment-global table fetched by its own
+    # PK; audit rows written inside carry ctx.workspace_id explicitly.
     with tenant_agnostic():
         workspace = session.get(Workspace, ctx.workspace_id)
         if workspace is None:
@@ -255,6 +259,8 @@ def delete_current_workspace(
         )
 
     now = datetime.now(UTC)
+    # justification: workspace is a deployment-global table fetched by its own
+    # PK; audit rows written inside carry ctx.workspace_id explicitly.
     with tenant_agnostic():
         workspace = session.get(Workspace, ctx.workspace_id)
         if workspace is None:
@@ -329,6 +335,8 @@ def _assert_session_principal(ctx: WorkspaceContext) -> None:
 def _assert_actor_owns_all_target_workspaces(
     session: Session, *, ctx: WorkspaceContext, target_user_id: str
 ) -> None:
+    # justification: deliberate cross-workspace enumeration of the target's
+    # user_workspace rows; each is re-scoped via is_owner_member(workspace_id=...).
     with tenant_agnostic():
         target_workspace_ids = list(
             session.scalars(

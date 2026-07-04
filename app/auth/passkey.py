@@ -505,9 +505,8 @@ def _insert_challenge(
         created_at=now,
         expires_at=now + _CHALLENGE_TTL,
     )
-    # justification: webauthn_challenge is identity-scoped, no tenant
-    # predicate applies; the ORM flush below would otherwise trip on
-    # the missing workspace_id column.
+    # justification: webauthn_challenge is identity-scoped; no tenant
+    # predicate applies (the table has no workspace_id column).
     with tenant_agnostic():
         session.add(row)
         session.flush()
@@ -597,9 +596,8 @@ def _insert_passkey_and_audit(
         created_at=now,
         last_used_at=None,
     )
-    # justification: passkey_credential is identity-scoped; writing
-    # under a live WorkspaceContext would otherwise force the ORM
-    # filter to inject a predicate the table doesn't carry.
+    # justification: passkey_credential is identity-scoped; writing under a
+    # live WorkspaceContext would force the ORM filter to inject a missing predicate.
     with tenant_agnostic():
         session.add(credential_row)
         session.flush()

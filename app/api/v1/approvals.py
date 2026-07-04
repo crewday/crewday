@@ -299,6 +299,8 @@ def _resolve_decider_credential(
         return ("session", None)
 
     token_id = actor.token_id
+    # justification: api_token is identity-scoped (no workspace_id column); the
+    # ORM tenant filter does not apply. Keyed by the request's token id.
     with tenant_agnostic():
         row = session.get(ApiToken, token_id)
     if row is None:

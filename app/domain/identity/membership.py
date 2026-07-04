@@ -447,6 +447,8 @@ def list_workspaces_for_user(
     :func:`tenant_agnostic` so the ORM filter doesn't narrow the
     result to the caller's current workspace.
     """
+    # justification: identity-driven aggregation of the user's memberships
+    # across all workspaces, keyed by UserWorkspace.user_id == user_id.
     with tenant_agnostic():
         rows = session.execute(
             select(UserWorkspace, Workspace)
@@ -490,6 +492,8 @@ def switch_session_workspace(
     """
     resolved_now = _now(clock)
     # Verify the user is actually a member of the target workspace.
+    # justification: membership check fetched by explicit composite PK
+    # (user_id, workspace_id).
     with tenant_agnostic():
         member = session.get(UserWorkspace, (user_id, workspace_id))
     if member is None:

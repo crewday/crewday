@@ -761,6 +761,8 @@ def patch_workspace_basics(
 
 
 def _get_workspace(session: Session, ctx: WorkspaceContext) -> Workspace:
+    # justification: workspace is a deployment-global table (no workspace_id
+    # column of its own); fetched by its own primary key (ctx.workspace_id).
     with tenant_agnostic():
         ws = session.get(Workspace, ctx.workspace_id)
     if ws is None:

@@ -301,6 +301,8 @@ def update_basics(
     #    is circular). ``tenant_agnostic`` documents the intent and
     #    keeps the read explicit; the ``ctx.workspace_id`` predicate
     #    is supplied via :meth:`Session.get`.
+    # justification: workspace is the tenant root (no workspace_id); read keyed by
+    # explicit ctx.workspace_id via Session.get.
     with tenant_agnostic():
         ws = session.get(Workspace, ctx.workspace_id)
     if ws is None:

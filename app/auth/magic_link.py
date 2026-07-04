@@ -1304,6 +1304,8 @@ def write_rejected_audit(
         # — a miss leaves ``email_hash`` out of the diff rather than
         # carrying a bogus value. ``tenant_agnostic`` mirrors the
         # service's own lookup pattern.
+        # justification: magic_link_nonce is identity-scoped; no tenant
+        # predicate applies (the table has no workspace_id column).
         with tenant_agnostic():
             row = session.get(MagicLinkNonce, jti)
         if row is not None:

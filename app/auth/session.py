@@ -449,10 +449,8 @@ def issue(
         invalidated_at=None,
         invalidation_cause=None,
     )
-    # justification: ``session`` is user-scoped, not workspace-scoped
-    # (see :mod:`app.adapters.db.identity`). The ORM tenant filter has
-    # nothing to apply here, and login runs before a
-    # :class:`WorkspaceContext` is in scope anyway.
+    # justification: ``session`` is user-scoped, not workspace-scoped; the ORM
+    # tenant filter has nothing to apply and login predates any WorkspaceContext.
     with tenant_agnostic():
         session.add(row)
         session.flush()

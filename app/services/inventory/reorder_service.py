@@ -298,6 +298,8 @@ def _resolve_restock_role_id(
     session: Session, ctx: WorkspaceContext, *, property_id: str | None
 ) -> str | None:
     key = _DEFAULT_RESTOCK_ROLE_KEY
+    # justification: workspace is the tenant root (keyed by id); read keyed by
+    # explicit ctx.workspace_id.
     with tenant_agnostic():
         settings = session.scalar(
             select(Workspace.settings_json).where(Workspace.id == ctx.workspace_id)
@@ -337,6 +339,8 @@ def _resolve_restock_role_id(
 def _local_iso(session: Session, *, property_id: str | None, at: datetime) -> str:
     zone = ZoneInfo("UTC")
     if property_id is not None:
+        # justification: property has no workspace_id column (shared via
+        # property_workspace); tenant filter does not apply. Read by explicit id.
         with tenant_agnostic():
             timezone = session.scalar(
                 select(Property.timezone).where(Property.id == property_id)

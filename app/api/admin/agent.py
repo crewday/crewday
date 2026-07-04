@@ -761,6 +761,8 @@ def _produce_admin_action(
         inline_channel=_ADMIN_INLINE_CHANNEL,
         page_context=page_context,
     )
+    # justification: admin_agent_action is a deployment-scoped admin table
+    # (no workspace_id column); the ORM tenant filter does not apply.
     with tenant_agnostic():
         try:
             with session.begin_nested():
@@ -996,6 +998,8 @@ def _get_action_by_idempotency_key(
     session: Session,
     idempotency_key: str,
 ) -> AdminAgentActionRow | None:
+    # justification: admin_agent_action is a deployment-scoped admin table
+    # (no workspace_id column); the ORM tenant filter does not apply.
     with tenant_agnostic():
         return session.scalar(
             select(AdminAgentActionRow).where(

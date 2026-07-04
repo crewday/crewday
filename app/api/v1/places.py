@@ -662,6 +662,8 @@ def _resolve_workspace_id(
             ValueError("set either workspace_id or workspace_slug, not both")
         )
     if workspace_id is not None:
+        # justification: workspace is a deployment-global table; resolved by its
+        # own primary key across tenants by design.
         with tenant_agnostic():
             resolved = session.scalars(
                 select(Workspace.id).where(Workspace.id == workspace_id)
@@ -673,6 +675,8 @@ def _resolve_workspace_id(
         raise _validation_error(
             ValueError("workspace_id or workspace_slug is required")
         )
+    # justification: workspace is a deployment-global table; resolved by its
+    # own slug across tenants by design.
     with tenant_agnostic():
         resolved = session.scalars(
             select(Workspace.id).where(Workspace.slug == workspace_slug)
@@ -683,6 +687,8 @@ def _resolve_workspace_id(
 
 
 def _resolve_workspace_path_ref(session: Session, workspace_ref: str) -> str:
+    # justification: workspace is a deployment-global table; resolved by its
+    # own slug/id across tenants by design.
     with tenant_agnostic():
         resolved = session.scalars(
             select(Workspace.id).where(Workspace.slug == workspace_ref)
@@ -1165,6 +1171,8 @@ def build_properties_router() -> APIRouter:
         session: _Db,
         view: property_service.PropertyView = property_settings_view_dep,
     ) -> EntitySettingsPayload:
+        # justification: workspace is a deployment-global table; fetched by its
+        # own primary key (ctx.workspace_id) for the settings cascade.
         with tenant_agnostic():
             workspace = session.get(Workspace, ctx.workspace_id)
         if workspace is None:
@@ -1208,6 +1216,8 @@ def build_properties_router() -> APIRouter:
         except property_service.PropertyNotFound as exc:
             raise _property_not_found() from exc
 
+        # justification: workspace is a deployment-global table; fetched by its
+        # own primary key (ctx.workspace_id) for the settings cascade.
         with tenant_agnostic():
             workspace = session.get(Workspace, ctx.workspace_id)
         if workspace is None:

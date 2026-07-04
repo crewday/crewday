@@ -89,6 +89,8 @@ def _list_workspace_aggregates(
     cutoff: datetime,
 ) -> dict[str, tuple[int, int]]:
     """Return ``{workspace_id: (call_count, spend_cents)}`` for the window."""
+    # justification: llm_usage aggregated across the whole install for the
+    # deployment-admin usage table; grouped by workspace_id, op by design.
     with tenant_agnostic():
         rows = session.execute(
             select(

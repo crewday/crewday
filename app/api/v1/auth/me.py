@@ -318,6 +318,8 @@ def _validated_session_user(
     except (auth_session.SessionInvalid, auth_session.SessionExpired) as exc:
         raise auth_unauthorized("session_invalid") from exc
 
+    # justification: bare-host /auth/me runs before a WorkspaceContext exists;
+    # user and session are identity-scoped, keyed by user_id and cookie hash.
     with tenant_agnostic():
         user = session.get(User, user_id)
         session_row = session.get(
@@ -339,10 +341,8 @@ def _load_available_workspaces(
     in an ``owners`` permission group are surfaced as ``manager`` —
     §03 collapses governance onto the manager surface in v1.
     """
-    # justification: ``role_grant`` and ``workspace`` are tenancy
-    # anchors themselves; this lookup runs before a WorkspaceContext
-    # exists (auth/me is bare-host), so the ORM tenant filter has
-    # nothing to apply.
+    # justification: bare-host /auth/me before a WorkspaceContext exists;
+    # enumerates the user's own role_grant/workspace rows (keyed by user_id).
     with tenant_agnostic():
         rows = session.execute(
             select(RoleGrant, Workspace)
@@ -419,6 +419,8 @@ def _workspace_default_country(workspace: Workspace) -> str:
 def _client_binding_org_ids(
     session: Session, *, workspace_id: str, user_id: str
 ) -> list[str]:
+    # justification: role_grant read bounded by explicit workspace_id ==
+    # workspace_id and user_id predicates; bare-host /auth/me, no ambient ctx.
     with tenant_agnostic():
         rows = session.scalars(
             select(RoleGrant.binding_org_id)
@@ -439,6 +441,8 @@ def _client_binding_org_ids(
 
 
 def _active_workspace_ids_for_user(session: Session, *, user_id: str) -> list[str]:
+    # justification: bare-host /auth/me; enumerates the user's own
+    # user_workspace memberships (keyed by user_id) for the switcher.
     with tenant_agnostic():
         return list(
             session.scalars(
@@ -454,6 +458,8 @@ def _active_workspace_ids_for_user(session: Session, *, user_id: str) -> list[st
 def _is_active_workspace_id(session: Session, *, workspace_id: str | None) -> bool:
     if workspace_id is None:
         return False
+    # justification: workspace is a deployment-global table; probed by its own
+    # id to test the archived flag. Runs on bare-host /auth/me.
     with tenant_agnostic():
         return (
             session.scalar(
@@ -488,6 +494,8 @@ def _current_workspace_id(
 
 
 def _workspace_role(session: Session, *, user_id: str, workspace_id: str) -> str:
+    # justification: role_grant and permission_group_member are each bounded by
+    # an explicit workspace_id == workspace_id predicate (bare-host /auth/me).
     with tenant_agnostic():
         grants = list(
             session.scalars(
@@ -959,6 +967,8 @@ def build_me_workspaces_router(
         except (auth_session.SessionInvalid, auth_session.SessionExpired) as exc:
             raise auth_unauthorized("session_invalid") from exc
 
+        # justification: bare-host switcher route before a WorkspaceContext
+        # exists; user is identity-scoped, keyed by the session's user_id.
         with tenant_agnostic():
             user = session.get(User, user_id)
         if user is None:

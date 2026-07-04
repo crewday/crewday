@@ -197,6 +197,8 @@ def _resolve_session_user(
         raise auth_unauthorized("session_invalid") from exc
 
     # ``user`` is identity-scoped — no workspace filter to apply.
+    # justification: user is identity-scoped (no workspace_id column); keyed by
+    # the session's own user_id.
     with tenant_agnostic():
         user = session.get(User, user_id)
     if user is None:

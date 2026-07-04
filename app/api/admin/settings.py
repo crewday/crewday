@@ -457,6 +457,8 @@ class DeploymentSettingAgentPreview:
 
 def _existing_row(session: Session, *, key: str) -> DeploymentSetting | None:
     """Tenant-agnostic ``session.get`` for one ``deployment_setting`` row."""
+    # justification: deployment_setting is deployment-global (no
+    # workspace_id column); the ORM tenant filter does not apply.
     with tenant_agnostic():
         return session.get(DeploymentSetting, key)
 
@@ -624,6 +626,8 @@ def write_deployment_setting(
         raise _problem(_ERROR_VALUE_TYPE, message=str(exc)) from exc
 
     now = datetime.now(UTC)
+    # justification: deployment_setting is deployment-global (no
+    # workspace_id column); deployment admin writes install-wide config.
     with tenant_agnostic():
         row = _existing_row(session, key=key)
         previous: Any
@@ -701,6 +705,8 @@ def build_admin_settings_router() -> APIRouter:
         root-only flag, last-write metadata) for every key —
         whether or not a row exists.
         """
+        # justification: deployment_setting is deployment-global (no
+        # workspace_id column); deployment admin lists install-wide config.
         with tenant_agnostic():
             rows = {
                 row.key: row for row in session.scalars(select(DeploymentSetting)).all()

@@ -463,6 +463,8 @@ def _audit_distinct_emails_one_ip_if_suspicious(
     try:
         with make_uow() as uow_session:
             assert isinstance(uow_session, Session)
+            # justification: signup_attempt is a deployment-global abuse-signal
+            # table (no workspace_id); keyed by ip_hash + time window pre-auth.
             with tenant_agnostic():
                 email_hashes = set(
                     uow_session.scalars(

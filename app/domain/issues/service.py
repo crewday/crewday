@@ -223,6 +223,8 @@ def list_issues(
     stmt = stmt.order_by(IssueReport.created_at.desc(), IssueReport.id.desc()).limit(
         limit
     )
+    # justification: stmt carries an explicit IssueReport.workspace_id ==
+    # ctx.workspace_id predicate (plus role scoping) before execution.
     with tenant_agnostic():
         rows = session.scalars(stmt).all()
     return [_row_to_view(row) for row in rows]
@@ -299,6 +301,8 @@ def update_issue(
 
 
 def _load_issue(session: Session, ctx: WorkspaceContext, issue_id: str) -> IssueReport:
+    # justification: query is keyed by explicit IssueReport.workspace_id ==
+    # ctx.workspace_id.
     with tenant_agnostic():
         row = session.scalars(
             select(IssueReport).where(
@@ -320,6 +324,8 @@ def _assert_can_create(ctx: WorkspaceContext) -> None:
 def _validate_property_visible(
     session: Session, ctx: WorkspaceContext, property_id: str
 ) -> None:
+    # justification: joins property_workspace with an explicit
+    # workspace_id == ctx.workspace_id predicate.
     with tenant_agnostic():
         exists = session.scalar(  # code-health: ignore[duplicate] Property visibility SQL is explicit per domain.  # noqa: E501
             select(Property.id)
@@ -339,6 +345,8 @@ def _validate_property_visible(
 def _assert_worker_property_grant(
     session: Session, ctx: WorkspaceContext, property_id: str
 ) -> None:
+    # justification: role_grant query carries explicit
+    # RoleGrant.workspace_id == ctx.workspace_id.
     with tenant_agnostic():  # code-health: ignore[duplicate] Boundary field list kept explicit.  # noqa: E501
         grant = session.scalar(
             select(RoleGrant.id)
@@ -362,6 +370,8 @@ def _assert_worker_property_grant(
 
 
 def _validate_area(session: Session, *, property_id: str, area_id: str) -> None:
+    # justification: area scopes through property_workspace (no workspace_id
+    # column); bound to a property already validated visible to the workspace.
     with tenant_agnostic():
         exists = session.scalar(
             select(Area.id)
@@ -379,6 +389,8 @@ def _validate_area(session: Session, *, property_id: str, area_id: str) -> None:
 def _validate_task(
     session: Session, ctx: WorkspaceContext, *, task_id: str, property_id: str
 ) -> None:
+    # justification: query carries explicit Occurrence.workspace_id ==
+    # ctx.workspace_id.
     with tenant_agnostic():
         exists = session.scalar(
             select(Occurrence.id)

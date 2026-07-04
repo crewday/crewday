@@ -77,6 +77,8 @@ def _upcoming_stays(
     now: datetime,
     window_end: datetime,
 ) -> tuple[StayUpcomingView, ...]:
+    # justification: worker read keyed by an explicit
+    # Reservation.workspace_id predicate, not the ambient tenant filter.
     with tenant_agnostic():
         rows = session.scalars(
             select(Reservation)
@@ -107,6 +109,8 @@ def _upcoming_stays(
 def _assigned_worker_user_ids(
     session: Session, *, ctx: WorkspaceContext, stay_id: str
 ) -> tuple[str, ...]:
+    # justification: worker read keyed by an explicit
+    # Occurrence.workspace_id predicate, not the ambient tenant filter.
     with tenant_agnostic():
         user_ids = session.scalars(
             select(Occurrence.assignee_user_id)
@@ -124,6 +128,8 @@ def _assigned_worker_user_ids(
 def _already_notified(
     session: Session, *, stay: StayUpcomingView, recipient_user_id: str
 ) -> bool:
+    # justification: worker read keyed by an explicit
+    # Notification.workspace_id predicate, not the ambient tenant filter.
     with tenant_agnostic():
         rows = session.scalars(
             select(Notification).where(

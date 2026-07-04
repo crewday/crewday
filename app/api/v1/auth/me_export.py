@@ -97,6 +97,8 @@ def _select_workspace_context(session: Session, *, user_id: str) -> WorkspaceCon
     caller can surface a 4xx (an unaffiliated user requesting an
     export is a deployment bug, not a data path).
     """
+    # justification: bare-host caller, no ambient workspace; resolves the user's
+    # first user_workspace membership (keyed by user_id) to pin a delivery ctx.
     with tenant_agnostic():
         row = session.execute(
             select(UserWorkspace.workspace_id, Workspace.slug)

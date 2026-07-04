@@ -113,6 +113,8 @@ def seed_starter_work_roles(
     the starter catalog idempotent without undoing an operator's later edits
     or deletions.
     """
+    # justification: starter-role seeding pins workspace_id explicitly while
+    # bootstrapping a new workspace's catalog.
     with tenant_agnostic():
         existing_keys = set(
             session.scalars(

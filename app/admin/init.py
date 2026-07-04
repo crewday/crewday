@@ -139,6 +139,8 @@ def _seed_deployment_settings(
     updated_by: str,
 ) -> int:
     seeded = 0
+    # justification: deployment admin acts across the whole install by design;
+    # deployment_setting is deployment-global.
     with tenant_agnostic():
         for field in fields(DeploymentSettings):
             if session.get(DeploymentSetting, field.name) is not None:
@@ -170,6 +172,8 @@ def _seed_first_deployment_owner(
     clock: Clock | None = None,
 ) -> bool:
     """Seed the first deployment owner/admin, returning whether it was new."""
+    # justification: deployment-owner bootstrap; deployment_owner is a global
+    # table and the role_grant rows are deployment-scoped (workspace_id NULL).
     with tenant_agnostic():
         existing_owner = session.scalar(select(DeploymentOwner.user_id).limit(1))
         if existing_owner is not None:
@@ -266,6 +270,8 @@ def _ensure_user(
     now: datetime,
     clock: Clock | None = None,
 ) -> tuple[User, bool]:
+    # justification: user is identity-scoped (no workspace_id column); the
+    # ORM tenant filter does not apply.
     with tenant_agnostic():
         existing = session.scalar(select(User).where(User.email_lower == email_lower))
         if existing is not None:
@@ -289,6 +295,8 @@ def _pending_invite(
     workspace_id: str,
     email_lower: str,
 ) -> Invite | None:
+    # justification: invite lookup keyed by explicit workspace_id predicate;
+    # the predicate is spelled out, not the ambient filter.
     with tenant_agnostic():
         return session.scalar(
             select(Invite).where(
@@ -300,6 +308,8 @@ def _pending_invite(
 
 
 def _delete_pending_invite_nonces(session: Session, *, invite_id: str) -> None:
+    # justification: magic_link_nonce is identity-scoped (no workspace_id
+    # column); the ORM tenant filter does not apply.
     with tenant_agnostic():
         session.execute(
             delete(MagicLinkNonce)
@@ -360,6 +370,8 @@ def admin_init(
     """
     _require_not_demo(settings)
     now = _now(clock)
+    # justification: deployment admin acts across the whole install by design;
+    # deployment_setting is deployment-global.
     with tenant_agnostic():
         completed = session.get(DeploymentSetting, _INIT_MARKER_KEY)
         if completed is not None:
@@ -370,6 +382,8 @@ def admin_init(
                 llm_provider_model_id="",
             )
     seeded = _seed_deployment_settings(session, now=now, updated_by="system")
+    # justification: deployment admin acts across the whole install by design;
+    # deployment_setting/llm_provider_model global, audit row deployment-scoped.
     with tenant_agnostic():
         provider_model = _seed_llm_registry(session, settings=settings, clock=clock)
         if generated_root_key is not None:
@@ -412,6 +426,8 @@ def admin_init(
 
 def is_admin_initialized(session: Session) -> bool:
     """Return whether ``crewday admin init`` has already completed."""
+    # justification: deployment admin acts across the whole install by design;
+    # deployment_setting is deployment-global.
     with tenant_agnostic():
         return session.get(DeploymentSetting, _INIT_MARKER_KEY) is not None
 
@@ -435,6 +451,8 @@ def invite_user(
     email_lower = canonicalise_email(email)
     if not email_lower or "@" not in email_lower:
         raise ValueError("email must be a valid address")
+    # justification: workspace is deployment-global (no workspace_id column);
+    # the ORM tenant filter does not apply.
     with tenant_agnostic():
         workspace = session.scalar(
             select(Workspace).where(Workspace.slug == workspace_slug)
@@ -461,6 +479,8 @@ def invite_user(
     ]
     group_memberships: list[dict[str, str]] = []
     if role == "owner":
+        # justification: cross-workspace lookup keyed by explicit
+        # workspace_id == workspace.id; the predicate is spelled out.
         with tenant_agnostic():
             owners = session.scalar(
                 select(PermissionGroup).where(
@@ -567,6 +587,8 @@ def workspace_bootstrap(
     owner_email_lower = canonicalise_email(owner_email)
     if not owner_email_lower or "@" not in owner_email_lower:
         raise ValueError("owner email must be a valid address")
+    # justification: workspace is deployment-global (no workspace_id column);
+    # the ORM tenant filter does not apply.
     with tenant_agnostic():
         existing = session.scalar(select(Workspace).where(Workspace.slug == slug))
     if existing is not None:
@@ -585,6 +607,8 @@ def workspace_bootstrap(
         if capabilities is not None
         else FREE_TIER_DEFAULTS["llm_budget_cents_30d"]
     )
+    # justification: workspace bootstrap creates the new workspace and its
+    # child rows stamped with the just-minted workspace_id (no tenant yet).
     with tenant_agnostic():
         workspace = Workspace(
             id=workspace_id,

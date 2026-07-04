@@ -98,6 +98,8 @@ class SignupSettingsPayload(BaseModel):
 
 def _setting(session: Session, *, key: str) -> DeploymentSetting | None:
     """Tenant-agnostic ``session.get`` for a :class:`DeploymentSetting` row."""
+    # justification: deployment_setting is deployment-global (no
+    # workspace_id column); the ORM tenant filter does not apply.
     with tenant_agnostic():
         return session.get(DeploymentSetting, key)
 
@@ -131,6 +133,8 @@ def _write_setting(
     previous: Any
     if row is None:
         previous = None
+        # justification: deployment_setting is deployment-global (no
+        # workspace_id column); the ORM tenant filter does not apply.
         with tenant_agnostic():
             session.add(
                 DeploymentSetting(
@@ -269,6 +273,8 @@ def build_admin_signup_router() -> APIRouter:
         """
         now = datetime.now(UTC)
         diff: dict[str, dict[str, Any]] = {}
+        # justification: deployment_setting is deployment-global (no
+        # workspace_id column); deployment admin writes install config.
         with tenant_agnostic():
             if payload.signup_enabled is not None:
                 previous = _write_setting(

@@ -204,6 +204,8 @@ def _members_count(session: Session, *, workspace_id: str) -> int:
     this workspace" — exactly the join the refresh worker
     populates.
     """
+    # justification: user_workspace keyed by an explicit workspace_id (one
+    # target workspace's members), spelled out, not the ambient filter.
     with tenant_agnostic():
         count = session.scalar(
             select(func.count())
@@ -215,6 +217,8 @@ def _members_count(session: Session, *, workspace_id: str) -> int:
 
 def _property_counts(session: Session) -> dict[str, int]:
     """Return active property-membership counts keyed by workspace id."""
+    # justification: property_workspace counts aggregated across the whole
+    # install for the deployment-admin workspace directory; grouped by ws.
     with tenant_agnostic():
         rows = session.execute(
             select(PropertyWorkspace.workspace_id, func.count())
@@ -241,6 +245,8 @@ def _llm_window_aggregates(
     lack of context.
     """
     cutoff = now - _ROLLING_30D
+    # justification: llm_usage keyed by an explicit workspace_id (the target
+    # workspace's detail card), spelled out, not the ambient filter.
     with tenant_agnostic():
         rows = session.execute(
             select(
@@ -445,6 +451,8 @@ def build_admin_workspaces_router() -> APIRouter:
         previous = verification_state_of(workspace)
         if previous == "trusted":
             return WorkspaceTrustResponse(id=workspace.id, verification_state="trusted")
+        # justification: workspace trust flip + audit keyed by explicit id;
+        # the workspace row is the tenant itself, not workspace-scoped.
         with tenant_agnostic():
             set_verification_state(workspace, value="trusted")
             audit_admin(
@@ -505,6 +513,8 @@ def build_admin_workspaces_router() -> APIRouter:
         if workspace is None:
             raise _not_found()
         moment = datetime.now(UTC)
+        # justification: workspace archive + audit keyed by explicit id;
+        # the workspace row is the tenant itself, not workspace-scoped.
         with tenant_agnostic():
             archived_at, changed = archive_workspace_if_needed(
                 session, workspace, when=moment

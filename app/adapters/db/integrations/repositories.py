@@ -184,6 +184,8 @@ class SqlAlchemyWebhookRepository(WebhookRepository):
         paused_at: datetime,
         updated_at: datetime,
     ) -> WebhookSubscriptionRow:
+        # justification: health worker auto-pauses unhealthy subscriptions
+        # deployment-wide by primary key from the cross-workspace scan.
         with tenant_agnostic():
             row = self._session.get(WebhookSubscription, sub_id)
             if row is None:
@@ -241,6 +243,8 @@ class SqlAlchemyWebhookRepository(WebhookRepository):
         # Service-layer callers that already hold a context still get
         # the right scoping because they re-check workspace_id on the
         # returned row.
+        # justification: worker tick loads a subscription by primary key
+        # cross-tenant; service callers re-check workspace_id on the row.
         with tenant_agnostic():
             row = self._session.get(WebhookSubscription, sub_id)
         if row is None:
@@ -296,6 +300,8 @@ class SqlAlchemyWebhookRepository(WebhookRepository):
             .where(WebhookSubscription.active.is_(True))
             .order_by(WebhookSubscription.created_at.asc())
         )
+        # justification: health worker scans delivery outcomes across every
+        # workspace to find unhealthy subscriptions; a deployment-wide sweep.
         with tenant_agnostic():
             rows = list(self._session.execute(stmt).all())
         return tuple(
@@ -347,6 +353,8 @@ class SqlAlchemyWebhookRepository(WebhookRepository):
     def get_delivery(self, *, delivery_id: str) -> WebhookDeliveryRow | None:
         # Worker tick reads cross-tenant; same posture as
         # ``get_subscription``.
+        # justification: worker tick loads a delivery by primary key
+        # cross-tenant; the row carries its own workspace_id.
         with tenant_agnostic():
             row = self._session.get(WebhookDelivery, delivery_id)
         if row is None:
@@ -371,6 +379,8 @@ class SqlAlchemyWebhookRepository(WebhookRepository):
         # subscription via the FK without leaning on an ambient
         # WorkspaceContext.
         # code-health: ignore[params] Adapter DI params define integration boundary.  # noqa: E501
+        # justification: worker tick updates a delivery by primary key
+        # cross-tenant; the row carries its own workspace_id.
         with tenant_agnostic():
             row = self._session.get(WebhookDelivery, delivery_id)
             if row is None:

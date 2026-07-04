@@ -66,6 +66,8 @@ def _make_demo_usage_rollup_body(clock: Clock) -> Callable[[], None]:
         total_cents = 0
         with make_uow() as session:
             assert isinstance(session, Session)
+            # justification: fan-out enumerates every demo workspace
+            # anchor row (no workspace_id) before re-scoping each iteration.
             with tenant_agnostic():
                 rows = list(
                     session.execute(
@@ -120,6 +122,8 @@ def purge_expired_demo_workspaces(
     now = clock.now()
     with make_uow() as session:
         assert isinstance(session, Session)
+        # justification: deployment-scope demo GC deletes expired demo
+        # workspaces, keyed by DemoWorkspace.expires_at then Workspace.id.
         with tenant_agnostic():
             ids = tuple(
                 session.scalars(
@@ -141,6 +145,8 @@ def count_workspace_id_orphans(session: Session) -> int:
     """Return the number of workspace-scoped rows with no workspace parent."""
     total = 0
     workspace_table = Workspace.__table__
+    # justification: deployment-global integrity sweep scans every
+    # workspace-scoped table across tenants to count orphaned rows.
     with tenant_agnostic():
         for table in Base.metadata.sorted_tables:
             if table is workspace_table or "workspace_id" not in table.c:

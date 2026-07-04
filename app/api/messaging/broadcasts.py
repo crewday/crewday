@@ -120,6 +120,8 @@ class SqlAlchemyBroadcastGateway:
         self, ctx: WorkspaceContext
     ) -> tuple[tuple[str, ...], tuple[str, ...], tuple[str, ...]]:
         today = datetime.now(UTC).date()
+        # justification: role_grant, work_engagement and permission_group* are
+        # each filtered by explicit workspace_id == ctx.workspace_id predicates.
         with tenant_agnostic():
             manager_user_ids = self._session.scalars(
                 select(RoleGrant.user_id).where(
@@ -162,6 +164,8 @@ class SqlAlchemyBroadcastGateway:
         ids = tuple(dict.fromkeys(user_ids))
         if not ids:
             return ()
+        # justification: user is identity-scoped (no workspace_id column);
+        # keyed by the already-authorised recipient user ids.
         with tenant_agnostic():
             users = self._session.scalars(
                 select(User)
@@ -186,6 +190,8 @@ class SqlAlchemyBroadcastGateway:
         recipient_order: dict[str, int],
     ) -> tuple[BroadcastAudienceGroup, ...]:
         today = datetime.now(UTC).date()
+        # justification: work_role, user_work_role and work_engagement are each
+        # filtered by explicit workspace_id == ctx.workspace_id predicates.
         with tenant_agnostic():
             rows = self._session.execute(
                 select(WorkRole.id, WorkRole.name, UserWorkRole.user_id)

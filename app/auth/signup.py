@@ -440,9 +440,7 @@ def _existing_active_slugs(session: Session) -> list[str]:
     predicate. Until that lands, every row is considered active.
     """
     # justification: signup runs before a WorkspaceContext exists; the
-    # workspace table is workspace-scoped and the ORM tenant filter
-    # would otherwise reject this SELECT for want of a workspace_id
-    # predicate.
+    # workspace table would otherwise reject this SELECT for lack of a predicate.
     with tenant_agnostic():
         rows = session.scalars(select(Workspace.slug)).all()
     return list(rows)
@@ -645,9 +643,8 @@ def _invalidate_pending_nonces(session: Session, *, subject_id: str) -> None:
 
 def _load_signup_attempt(session: Session, *, signup_attempt_id: str) -> SignupAttempt:
     """Load the signup-attempt row or raise :class:`SignupAttemptMissing`."""
-    # justification: signup_attempt is identity-scoped (tenant-agnostic
-    # by design; see the model docstring). The ORM tenant filter has
-    # nothing to apply.
+    # justification: signup_attempt is identity-scoped (tenant-agnostic by
+    # design; see the model docstring). The ORM tenant filter has nothing to apply.
     with tenant_agnostic():
         row = session.get(SignupAttempt, signup_attempt_id)
     if row is None:
@@ -1073,6 +1070,8 @@ def provision_workspace_and_owner_seat(
     # verified) call :func:`new_ledger_row` directly with the full
     # value, and the policy stays in the signup/dev-login seam.
     cap_cents = tight_cap_cents(full_cap_cents)
+    # justification: creating the tenancy anchor row before any
+    # WorkspaceContext exists; there is no ambient tenant to filter by.
     with tenant_agnostic():
         workspace = Workspace(
             id=workspace_id,
@@ -1379,6 +1378,8 @@ def complete_signup(
     # attempt re-usable until its own TTL elapses.
     attempt.completed_at = resolved_now
     attempt.workspace_id = workspace_id
+    # justification: signup_attempt is identity-scoped; the flush touches
+    # no workspace_id column for the ORM tenant filter to apply.
     with tenant_agnostic():
         session.flush()
 

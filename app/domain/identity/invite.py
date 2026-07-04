@@ -842,6 +842,8 @@ def _lookup_user_by_email(session: DbSession, *, email_lower: str) -> User | Non
     ``user`` is identity-scoped (not workspace-scoped) so the lookup
     runs under :func:`tenant_agnostic`.
     """
+    # justification: user is identity-scoped (no workspace_id column); the
+    # tenant filter does not apply.
     with tenant_agnostic():
         return session.scalar(select(User).where(User.email_lower == email_lower))
 
@@ -879,6 +881,8 @@ def _invalidate_pending_invite_nonces(session: DbSession, *, invite_id: str) -> 
     ``purpose='grant_invite'`` defensively so a freak ULID collision
     against a sibling-purpose nonce can never sweep unrelated rows.
     """
+    # justification: magic_link_nonce is identity/global-scoped (no
+    # workspace_id column); scoped by subject_id and purpose.
     with tenant_agnostic():
         session.execute(
             delete(MagicLinkNonce)
@@ -959,6 +963,8 @@ def prune_stale_invites(
     bus = event_bus if event_bus is not None else default_event_bus
     cutoff = _aware_utc(now)
 
+    # justification: deployment-wide TTL sweep flips every workspace's stale
+    # pending invites; each row re-scopes its event via row.workspace_id.
     with tenant_agnostic():
         stmt = (
             select(Invite)
@@ -1123,6 +1129,8 @@ def invite(
             agent_approval_mode=default_approval_mode_for_workspace(session, ctx),
             created_at=resolved_now,
         )
+        # justification: user is identity-scoped (no workspace_id column);
+        # this creates the shared identity row before grants activate.
         with tenant_agnostic():
             session.add(user)
             session.flush()
@@ -1354,6 +1362,7 @@ def _resolve_inviter_display_name(session: DbSession, *, user_id: str | None) ->
     """
     if user_id is None:
         return ""
+    # justification: user is identity-scoped (no workspace_id column).
     with tenant_agnostic():
         row = session.get(User, user_id)
     return row.display_name if row is not None else ""
@@ -1441,6 +1450,8 @@ def introspect_invite(
     )
     invite_id = outcome.subject_id
 
+    # justification: invite fetched by PK resolved from the validated magic
+    # link token, before any WorkspaceContext exists (bare-host preview).
     with tenant_agnostic():  # code-health: ignore[duplicate] Boundary field list kept explicit.  # noqa: E501
         invite_row = session.get(Invite, invite_id)
     if invite_row is None:
@@ -1459,6 +1470,8 @@ def introspect_invite(
     if user_id is None:
         raise InviteStateInvalid(f"invite {invite_id!r} has no linked user_id")
 
+    # justification: workspace is deployment-global (no workspace_id column);
+    # fetched by the invite row's workspace_id.
     with tenant_agnostic():
         workspace = session.get(Workspace, invite_row.workspace_id)
     if workspace is None:
@@ -1478,6 +1491,7 @@ def introspect_invite(
         session, user_id=invite_row.invited_by_user_id
     )
 
+    # justification: user is identity-scoped (no workspace_id column).
     with tenant_agnostic():
         invitee = session.get(User, user_id)
     email_lower = (
@@ -1568,6 +1582,8 @@ def consume_invite_token(
     )
     invite_id = outcome.subject_id
 
+    # justification: invite fetched by PK resolved from the consumed magic
+    # link token, before any WorkspaceContext exists (bare-host accept).
     with tenant_agnostic():
         invite_row = session.get(Invite, invite_id)
     if invite_row is None:
@@ -1605,6 +1621,7 @@ def consume_invite_token(
         # cd-kd26 folded the accept-completion into
         # :func:`register_invite_passkey_finish`, so finish-success
         # activates the grants atomically.
+        # justification: user is identity-scoped (no workspace_id column).
         with tenant_agnostic():
             user = session.get(User, user_id)
         if user is None:
@@ -1629,6 +1646,8 @@ def consume_invite_token(
             f"invite {invite_id!r} requires a passkey session for user {user_id!r}"
         )
 
+    # justification: workspace is deployment-global (no workspace_id column);
+    # fetched by the invite row's workspace_id.
     with tenant_agnostic():
         workspace = session.get(Workspace, invite_row.workspace_id)
     if workspace is None:
@@ -1970,6 +1989,8 @@ def _load_pending_invite_for_accept(
     :func:`tenant_agnostic` because accept flows runs at the bare
     host / under the incoming user's own ctx.
     """
+    # justification: invite fetched by PK in a bare-host accept flow with no
+    # active WorkspaceContext; state/TTL verified below.
     with tenant_agnostic():
         invite_row = session.get(Invite, invite_id)
     if invite_row is None:
@@ -2173,6 +2194,8 @@ def _assert_magic_link_consumed(session: DbSession, *, invite_id: str) -> None:
     invite-state error so the SPA's existing "redirect to /accept"
     handler covers this case naturally.
     """
+    # justification: magic_link_nonce is identity/global-scoped (no
+    # workspace_id column); scoped by subject_id and purpose.
     with tenant_agnostic():
         consumed = session.scalar(
             select(MagicLinkNonce)
@@ -2225,6 +2248,7 @@ def _load_pending_invite_for_passkey(
         raise InvitePasskeyAlreadyRegistered(
             f"invite {invite_id!r}: user {user_id!r} already has a passkey"
         )
+    # justification: user is identity-scoped (no workspace_id column).
     with tenant_agnostic():
         user = session.get(User, user_id)
     if user is None:
@@ -2345,6 +2369,8 @@ def register_invite_passkey_finish(
     # user row, then re-check under the lock — another transaction
     # may have just committed the first credential between the
     # initial gate read and our lock acquisition.
+    # justification: user is identity-scoped (no workspace_id column); row
+    # lock serialises concurrent passkey-finish races.
     with tenant_agnostic():
         session.execute(select(User.id).where(User.id == user.id).with_for_update())
     if _user_has_passkey(session, user_id=user.id):

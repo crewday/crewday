@@ -443,6 +443,8 @@ def _list_workspace_user_rows(
     if after_id is not None:
         stmt = stmt.where(User.id > after_id)
 
+    # justification: user is identity-scoped; the user_workspace join carries an
+    # explicit workspace_id == ctx.workspace_id predicate.
     with tenant_agnostic():
         rows = list(session.scalars(stmt).all())
     page = paginate(rows, limit=limit, key_getter=lambda row: row.id)
@@ -503,6 +505,8 @@ def _client_ip(request: Request) -> str:
 
 def _resolve_inviter_display_name(session: Session, *, user_id: str) -> str:
     """Return the inviter's display name for the invite email copy."""
+    # justification: user is identity-scoped (no workspace_id column); the
+    # ORM tenant filter does not apply. Keyed by the inviter's user id.
     with tenant_agnostic():
         user = session.get(User, user_id)
     if user is None:
@@ -542,6 +546,8 @@ def _load_user(session: Session, *, user_id: str) -> User:
     against the caller's workspace MUST be verified independently
     before this is called.
     """
+    # justification: user is identity-scoped (no workspace_id column); the
+    # ORM tenant filter does not apply. Membership is verified by the caller.
     with tenant_agnostic():
         row = session.get(User, user_id)
     if row is None:

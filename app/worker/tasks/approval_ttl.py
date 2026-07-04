@@ -136,6 +136,8 @@ def sweep_expired_approvals(*, clock: Clock | None = None) -> ExpireDueReport:
 def _notify_expired_approvals(session: Session, report: ExpireDueReport) -> None:
     if not report.expired_ids:
         return
+    # justification: deployment-scope TTL sweep re-loads rows just
+    # expired by expire_due, by primary-key id; each re-scoped per-row below.
     with tenant_agnostic():
         rows = session.scalars(
             select(ApprovalRequest).where(ApprovalRequest.id.in_(report.expired_ids))
@@ -159,6 +161,8 @@ def _notify_expired_approvals(session: Session, report: ExpireDueReport) -> None
 def _system_context_for_approval(
     session: Session, row: ApprovalRequest
 ) -> WorkspaceContext:
+    # justification: workspace is the tenancy anchor (no workspace_id
+    # column of its own); the lookup is keyed by explicit Workspace.id.
     with tenant_agnostic():
         workspace = session.get(Workspace, row.workspace_id)
     workspace_slug = workspace.slug if workspace is not None else row.workspace_id

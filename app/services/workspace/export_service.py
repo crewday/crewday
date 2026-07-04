@@ -209,6 +209,8 @@ def build_workspace_export(
     resolved_clock = clock if clock is not None else SystemClock()
     exported_at = resolved_clock.now().astimezone(UTC)
 
+    # justification: owner-gated workspace export reads allowlisted tables keyed by
+    # explicit workspace_id=ctx.workspace_id; Workspace itself is the tenant root.
     with tenant_agnostic():
         workspace = session.get(Workspace, ctx.workspace_id)
         if workspace is None:

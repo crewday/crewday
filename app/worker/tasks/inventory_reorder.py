@@ -57,6 +57,8 @@ def check_reorder_points_for_all_workspaces(  # code-health: ignore[nloc] Worker
 
     with make_uow() as session:
         assert isinstance(session, Session)
+        # justification: fan-out enumerates every tenant's workspace
+        # anchor row (no workspace_id) before re-scoping each iteration.
         with tenant_agnostic():
             rows = list(session.execute(select(Workspace.id, Workspace.slug)).all())
 
@@ -151,6 +153,8 @@ def _check_changed_item(
     clock: Clock,
     event_bus: EventBus,
 ) -> None:
+    # justification: workspace is the tenancy anchor (no workspace_id
+    # column of its own); the lookup is keyed by explicit Workspace.id.
     with tenant_agnostic():
         slug = session.scalar(
             select(Workspace.slug).where(Workspace.id == event.workspace_id)

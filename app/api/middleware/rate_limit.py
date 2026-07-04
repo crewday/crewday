@@ -340,6 +340,8 @@ class PersistentRateLimitBackend:
         now = clock.time()
         with self._uow_factory() as db_session:
             assert isinstance(db_session, DbSession)
+            # justification: rate_limit_bucket is deployment-wide (no
+            # workspace_id column); buckets are keyed by bucket_key, not tenant.
             with tenant_agnostic():
                 _lock_bucket(db_session, bucket_key=bucket_key)
                 row = db_session.get(RateLimitBucket, bucket_key)

@@ -393,6 +393,8 @@ def _row_counts(session: Session) -> dict[str, int]:
     bind = session.get_bind()
     existing = set(inspect(bind).get_table_names())
     counts: dict[str, int] = {}
+    # justification: deployment backup counts rows across every table in the
+    # whole install by design; a full snapshot must not be tenant-filtered.
     with tenant_agnostic():
         for table in sorted(Base.metadata.tables.values(), key=lambda t: t.name):
             if table.name not in existing:
@@ -409,6 +411,8 @@ def _row_counts(session: Session) -> dict[str, int]:
 
 
 def _secret_envelope_rows(session: Session) -> list[dict[str, object]]:
+    # justification: secret_envelope is deployment-global (no workspace_id
+    # column); the ORM tenant filter does not apply.
     with tenant_agnostic():
         rows = session.scalars(select(SecretEnvelope).order_by(SecretEnvelope.id)).all()
         return [
@@ -544,6 +548,8 @@ def _root_key_slot_fps(settings: Settings) -> set[str]:
         if not inspect(engine).has_table("root_key_slot"):
             return set()
         factory = sessionmaker(bind=engine, expire_on_commit=False, class_=Session)
+        # justification: root_key_slot is deployment-global (no workspace_id
+        # column); the ORM tenant filter does not apply.
         with factory() as session, tenant_agnostic():
             refs = session.scalars(select(RootKeySlot.key_ref)).all()
         fps: set[str] = set()

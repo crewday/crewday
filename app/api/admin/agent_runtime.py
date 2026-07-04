@@ -786,6 +786,8 @@ def _prompt(*, message: str, page_context: str) -> list[ChatMessage]:
 
 
 def _resolve_admin_model_id(session: Session) -> str | None:
+    # justification: no ambient WorkspaceContext on the admin host; builds an
+    # explicit synthetic deployment-admin workspace to resolve the model.
     with tenant_agnostic():
         ctx = WorkspaceContext(
             workspace_id="__deployment_admin_llm__",

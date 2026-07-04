@@ -145,6 +145,8 @@ def _query_rows(
         )
         .order_by(AuditLog.created_at.desc(), AuditLog.id.desc())
     )
+    # justification: audit_log deployment partition (scope_kind='deployment',
+    # workspace_id NULL); reads install-wide suspicious-signup audit rows.
     with tenant_agnostic():
         rows = list(session.scalars(stmt).all())
     if kind is None:

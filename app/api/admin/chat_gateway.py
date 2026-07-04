@@ -535,6 +535,8 @@ def _credential(
 
 def _last_webhook_by_provider(session: Session) -> dict[str, datetime]:
     rows: list[tuple[str, datetime]] = []
+    # justification: chat_gateway_binding aggregated per provider across the
+    # whole install for the deployment-admin provider-health panel by design.
     with tenant_agnostic():
         for provider, last_at in session.execute(
             select(
@@ -550,6 +552,8 @@ def _last_webhook_by_provider(session: Session) -> dict[str, datetime]:
 
 
 def _workspace_exists(session: Session, *, workspace_id: str) -> bool:
+    # justification: workspace is the tenant row itself (no workspace_id
+    # column); existence check by explicit primary-key id.
     with tenant_agnostic():
         return session.get(Workspace, workspace_id) is not None
 

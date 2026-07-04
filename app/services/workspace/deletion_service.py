@@ -40,6 +40,8 @@ def purge_due_workspaces(
 ) -> WorkspacePurgeReport:
     """Hard-delete workspaces whose owner-delete deadline has elapsed."""
     now = aware_utc(clock.now())
+    # justification: deployment purge worker; Workspace is the tenant root (no
+    # workspace_id); blob-ref scans span the whole install by design.
     with tenant_agnostic():
         stmt = (
             select(Workspace)

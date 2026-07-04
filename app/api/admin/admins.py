@@ -256,6 +256,8 @@ def _resolve_target_user(
             _ERROR_AMBIGUOUS_TARGET,
             message="specify exactly one of user_id or email",
         )
+    # justification: user is identity-scoped (no workspace_id column);
+    # the ORM tenant filter does not apply.
     with tenant_agnostic():
         user: User | None = None
         if request_body.user_id is not None:
@@ -319,6 +321,8 @@ def _format_added_at(value: datetime) -> str:
 
 def _owner_members(session: Session) -> list[GroupMemberInfo]:
     """Return explicit ``owners@deployment`` members."""
+    # justification: deployment_owner + user are deployment-global /
+    # identity-scoped (no workspace_id); reads the install owners roster.
     with tenant_agnostic():
         rows = session.execute(
             select(DeploymentOwner, User)
@@ -340,6 +344,8 @@ def _owner_members(session: Session) -> list[GroupMemberInfo]:
 def _manager_members(session: Session) -> list[GroupMemberInfo]:
     """Return deployment managers derived from live deployment admin grants."""
     # code-health: ignore[duplicate] Repeated DTO/event field lists keep external wire contracts explicit at each boundary.  # noqa: E501
+    # justification: role_grant deployment partition (scope_kind==
+    # 'deployment', workspace_id NULL); derives the managers roster.
     with tenant_agnostic():
         # code-health: ignore[duplicate] Repeated DTO/event field lists keep external wire contracts explicit at each boundary.  # noqa: E501
         rows = session.execute(
@@ -373,6 +379,8 @@ def _existing_grant(session: Session, *, user_id: str) -> RoleGrant | None:
     matches — the lookup pins on ``revoked_at IS NULL`` and uses
     ``.first()``.
     """
+    # justification: role_grant deployment partition (scope_kind==
+    # 'deployment', workspace_id NULL) pinned to one user's grant.
     with tenant_agnostic():
         return session.scalars(
             select(RoleGrant)
@@ -419,6 +427,8 @@ def build_admin_admins_router() -> APIRouter:
         ``/admins/groups`` route exposes the group rosters.
         """
         # code-health: ignore[duplicate] Repeated DTO/event field lists keep external wire contracts explicit at each boundary.  # noqa: E501
+        # justification: role_grant deployment partition (scope_kind==
+        # 'deployment', workspace_id NULL); lists install admin grants.
         with tenant_agnostic():
             # code-health: ignore[duplicate] Repeated DTO/event field lists keep external wire contracts explicit at each boundary.  # noqa: E501
             rows = session.execute(
@@ -485,6 +495,8 @@ def build_admin_admins_router() -> APIRouter:
                 )
             )
         now = datetime.now(UTC)
+        # justification: role_grant deployment partition -- mints a grant
+        # with workspace_id=None, scope_kind='deployment'; install-wide op.
         with tenant_agnostic():
             grant = RoleGrant(
                 id=new_ulid(),
@@ -565,6 +577,8 @@ def build_admin_admins_router() -> APIRouter:
         """
         ensure_deployment_owner(session, ctx=ctx)
         now = datetime.now(UTC)
+        # justification: role_grant deployment partition -- only mutates a
+        # grant whose scope_kind=='deployment' (workspace_id NULL), else 404s.
         with tenant_agnostic():
             grant = session.get(RoleGrant, id)
             if (

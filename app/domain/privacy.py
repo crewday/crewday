@@ -151,6 +151,8 @@ def request_user_export(
         completed_at=None,
         expires_at=None,
     )
+    # justification: subject-user export keyed by user_id; PrivacyExport
+    # job row has no workspace_id column (identity-scoped).
     with tenant_agnostic():
         session.add(job)
         payload = _build_export_bundle(session, storage, user_id=user_id, now=now)
@@ -189,6 +191,8 @@ def get_user_export(
     export_id: str,
     clock: Clock | None = None,
 ) -> ExportResult | None:
+    # justification: PrivacyExport is user-keyed (no workspace_id column);
+    # fetched by PK then verified against user_id below.
     with tenant_agnostic():
         job = session.get(PrivacyExport, export_id)
     if job is None or job.user_id != user_id:
@@ -234,6 +238,8 @@ def purge_person(
     """Anonymise one person and scrub dependent free-text/routing data."""
     # code-health: ignore[nloc] Policy txn keeps auth, validation, state, and events together.  # noqa: E501
     now = _now(clock)
+    # justification: cross-workspace privacy purge; every query is keyed by
+    # explicit workspace_id.in_(workspace_ids) for this person or by user_id.
     with tenant_agnostic():
         workspace_ids = _workspace_ids_for_person(session, person_id, workspace_id)
         payout_destinations = session.scalars(
@@ -382,6 +388,8 @@ def payout_manifest_available(
     payslip_id: str,
     workspace_id: str,
 ) -> bool:
+    # justification: payslip fetched by PK, then explicitly verified against
+    # the caller's workspace_id before returning.
     with tenant_agnostic():
         payslip = session.get(Payslip, payslip_id)
     return (
@@ -399,6 +407,8 @@ def rotate_operational_logs(
 ) -> tuple[RetentionResult, ...]:
     now = _now(clock)
     results: list[RetentionResult] = []
+    # justification: deployment retention sweep fans out over every workspace;
+    # each _archive_and_delete re-scopes by explicit workspace_id per row.
     with tenant_agnostic():
         workspaces = session.scalars(select(Workspace)).all()
         for table_name in RETENTION_DEFAULT_DAYS:

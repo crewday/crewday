@@ -260,6 +260,8 @@ def _select_stragglers(
     that copies the inbound binding) doesn't quietly fall back into
     the sweep's claws.
     """
+    # justification: deployment-scope straggler sweep; each chat_gateway
+    # row re-scoped per-row via _system_ctx(workspace_id) before requeue.
     with tenant_agnostic():
         stmt = (
             select(

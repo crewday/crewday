@@ -220,6 +220,8 @@ def _query_rows(
         # filter raises :class:`TenantFilterMissing` at execute
         # time. The block below covers both the cursor
         # resolution and the SELECT it parameterises.
+        # justification: cursor anchor for the audit_log deployment
+        # partition (scope_kind='deployment' feed, workspace_id NULL).
         with tenant_agnostic():
             cursor_row = session.get(AuditLog, cursor)
         if cursor_row is None:
@@ -242,6 +244,8 @@ def _query_rows(
     # Fetch one extra row to learn whether there's a next page
     # without a second COUNT query.
     stmt = stmt.limit(limit + 1)
+    # justification: audit_log deployment partition (scope_kind='deployment',
+    # workspace_id NULL); deployment admin reads its install-wide audit feed.
     with tenant_agnostic():
         return list(session.scalars(stmt).all())
 
@@ -269,6 +273,8 @@ def _query_newer_rows(
                 & (AuditLog.id > cursor.row_id)
             )
         )
+    # justification: audit_log deployment partition (scope_kind='deployment',
+    # workspace_id NULL); deployment admin reads its install-wide audit feed.
     with tenant_agnostic():
         return list(session.scalars(stmt).all())
 

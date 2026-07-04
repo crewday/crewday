@@ -589,10 +589,8 @@ def _auto_revoke_credential_fresh_uow(
     try:
         with make_uow() as uow_session:
             assert isinstance(uow_session, Session)
-            # justification: passkey_credential is identity-scoped;
-            # mirrors the tenant_agnostic gate on every other
-            # credential-table read in this module (and in
-            # app.auth.passkey.revoke_passkey).
+            # justification: passkey_credential is identity-scoped (no
+            # workspace_id); keyed by its own credential_id.
             with tenant_agnostic():
                 row = uow_session.get(PasskeyCredential, credential_id)
             if row is None:

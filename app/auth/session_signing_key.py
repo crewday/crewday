@@ -60,6 +60,8 @@ class SessionSigningKeySource:
     def current(self) -> bytes:
         """Return active row-backed signing material or the root-key fallback."""
         settings = self._settings if self._settings is not None else get_settings()
+        # justification: the session signing key lives in secret_envelope,
+        # a deployment-global table with no workspace_id column.
         with tenant_agnostic():
             row = self._session.scalars(
                 select(SecretEnvelope)

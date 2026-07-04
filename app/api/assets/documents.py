@@ -146,6 +146,8 @@ def _asset_property_ids(
     asset_ids = {view.asset_id for view in views if view.asset_id is not None}
     if not asset_ids:
         return {}
+    # justification: asset read is bounded by an explicit workspace_id ==
+    # ctx.workspace_id predicate (plus id set), not the ambient filter.
     with tenant_agnostic():
         rows = session.execute(
             select(AssetRow.id, AssetRow.property_id).where(

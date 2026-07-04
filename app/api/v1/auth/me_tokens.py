@@ -275,6 +275,8 @@ def _revoke_personal_for_user(
     user_id: str,
 ) -> Response:
     """Revoke ``token_id`` for ``user_id`` and write the identity audit row."""
+    # justification: api_token is identity-scoped (not tenant-filtered); keyed
+    # by token_id and re-checked against subject_user_id below.
     with tenant_agnostic():
         prior_row = session.get(ApiToken, token_id)
     already_revoked = (

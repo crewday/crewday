@@ -371,6 +371,8 @@ def _query_usage_rows(
         # by id, then narrow to (created_at, id) tuples strictly
         # less than the cursor row's. Stale cursors collapse to
         # an empty page so the client treats them as exhausted.
+        # justification: cursor anchor for the deployment-admin usage feed;
+        # single llm_usage row by pk, feed spans the whole install by design.
         with tenant_agnostic():
             cursor_row = session.get(LlmUsage, cursor)
         if cursor_row is None:
@@ -385,6 +387,8 @@ def _query_usage_rows(
     # Fetch one extra row to learn whether there's a next page
     # without a second COUNT query.
     stmt = stmt.limit(limit + 1)
+    # justification: deployment-admin LLM usage feed spanning the whole
+    # install (optional explicit workspace_id filter above), op by design.
     with tenant_agnostic():
         return list(session.scalars(stmt).all())
 
@@ -408,6 +412,8 @@ def _list_capability_aggregates(
     cutoff: datetime,
 ) -> list[UsageSummaryEntry]:
     """Return per-capability aggregates ordered by spend, descending."""
+    # justification: llm_usage aggregated per capability across the whole
+    # install for the deployment-admin usage summary; op by design.
     with tenant_agnostic():
         rows = session.execute(
             select(
@@ -430,6 +436,8 @@ def _list_capability_aggregates(
 
 
 def _list_workspaces(session: Session) -> list[Workspace]:
+    # justification: workspace is the tenant row itself (no workspace_id
+    # column); deployment admin lists every workspace on the install.
     with tenant_agnostic():
         return list(
             session.scalars(
@@ -690,6 +698,8 @@ def build_admin_usage_router() -> APIRouter:
             return UsageCapResponse(
                 workspace_id=workspace.id, cap_cents_30d=payload.cap_cents_30d
             )
+        # justification: workspace quota mutation + audit keyed by explicit
+        # id; the workspace row is the tenant itself, not workspace-scoped.
         with tenant_agnostic():
             updated_quota = dict(previous_quota)
             updated_quota[_QUOTA_CAP_KEY] = payload.cap_cents_30d

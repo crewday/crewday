@@ -1681,6 +1681,8 @@ def _missing_model_capabilities(
 def _load_graph(session: Session) -> LlmGraphPayload:
     # code-health: ignore[ccn nloc] API fields are generated schema contract.  # noqa: E501
     cutoff = _now() - timedelta(days=30)
+    # justification: deployment-admin LLM dashboard reads deployment-global config
+    # plus cross-workspace llm_usage aggregation across all workspaces, by design.
     with tenant_agnostic():
         providers = list(
             session.scalars(
@@ -2937,6 +2939,8 @@ def build_admin_llm_router() -> APIRouter:
         openapi_extra=_llm_cli("providers-list", "List LLM providers", mutates=False),
     )
     def list_providers(_ctx: _ReadCtx, session: _Db) -> list[LlmProviderResponse]:
+        # justification: deployment admin manages install-wide LLM config by
+        # design; llm_provider_model is deployment-global (no workspace_id column).
         with tenant_agnostic():
             provider_models = list(session.scalars(select(LlmProviderModel)).all())
             providers = list(
@@ -2971,6 +2975,8 @@ def build_admin_llm_router() -> APIRouter:
             updated_at=now,
             updated_by_user_id=ctx.user_id,
         )
+        # justification: deployment admin manages install-wide LLM config by
+        # design; llm_provider is deployment-global (no workspace_id column).
         with tenant_agnostic():
             _validate_provider_payload(session, payload)
             session.add(row)
@@ -2988,6 +2994,8 @@ def build_admin_llm_router() -> APIRouter:
     def get_provider(
         _ctx: _ReadCtx, session: _Db, provider_id: str
     ) -> LlmProviderResponse:
+        # justification: deployment admin manages install-wide LLM config by
+        # design; llm_provider is deployment-global (no workspace_id column).
         with tenant_agnostic():
             row = session.get(LlmProvider, provider_id)
             if row is None:
@@ -3014,6 +3022,8 @@ def build_admin_llm_router() -> APIRouter:
         provider_id: str,
         payload: ProviderPayload,
     ) -> LlmProviderResponse:
+        # justification: deployment admin manages install-wide LLM config by
+        # design; llm_provider is deployment-global (no workspace_id column).
         with tenant_agnostic():
             row = session.get(LlmProvider, provider_id)
             if row is None:
@@ -3054,6 +3064,8 @@ def build_admin_llm_router() -> APIRouter:
         payload: LlmProviderKeyPayload,
     ) -> LlmProviderResponse:
         settings = _settings_from_request(request)
+        # justification: deployment admin manages install-wide LLM config by
+        # design; llm_provider is deployment-global (no workspace_id column).
         with tenant_agnostic():
             row = session.get(LlmProvider, provider_id)
             if row is None:
@@ -3090,6 +3102,8 @@ def build_admin_llm_router() -> APIRouter:
         session: _Db,
         provider_id: str,
     ) -> LlmProviderResponse:
+        # justification: deployment admin manages install-wide LLM config by
+        # design; llm_provider is deployment-global (no workspace_id column).
         with tenant_agnostic():
             row = session.get(LlmProvider, provider_id)
             if row is None:
@@ -3118,6 +3132,8 @@ def build_admin_llm_router() -> APIRouter:
     def delete_provider(
         ctx: _WriteCtx, request: Request, session: _Db, provider_id: str
     ) -> None:
+        # justification: deployment admin manages install-wide LLM config by
+        # design; llm_provider is deployment-global (no workspace_id column).
         with tenant_agnostic():
             row = session.get(LlmProvider, provider_id)
             if row is None:
@@ -3140,6 +3156,8 @@ def build_admin_llm_router() -> APIRouter:
         openapi_extra=_llm_cli("models-list", "List LLM models", mutates=False),
     )
     def list_models(_ctx: _ReadCtx, session: _Db) -> list[LlmModelResponse]:
+        # justification: deployment admin manages install-wide LLM config by
+        # design; llm_model is deployment-global (no workspace_id column).
         with tenant_agnostic():
             provider_models = list(session.scalars(select(LlmProviderModel)).all())
             models = list(
@@ -3179,6 +3197,8 @@ def build_admin_llm_router() -> APIRouter:
             updated_at=now,
             updated_by_user_id=ctx.user_id,
         )
+        # justification: deployment admin manages install-wide LLM config by
+        # design; llm_model is deployment-global (no workspace_id column).
         with tenant_agnostic():
             _validate_model_payload(session, payload)
             session.add(row)
@@ -3201,6 +3221,8 @@ def build_admin_llm_router() -> APIRouter:
         session: _Db,
         payload: OpenRouterModelPreviewRequest,
     ) -> OpenRouterModelPreviewResponse:
+        # justification: deployment admin manages install-wide LLM config by
+        # design; llm_provider_model is deployment-global (no workspace_id column).
         with tenant_agnostic():
             response, pricing_changed = _openrouter_metadata_preview(session, payload)
             if pricing_changed:
@@ -3214,6 +3236,8 @@ def build_admin_llm_router() -> APIRouter:
         openapi_extra=_llm_cli("models-show", "Show an LLM model", mutates=False),
     )
     def get_model(_ctx: _ReadCtx, session: _Db, model_id: str) -> LlmModelResponse:
+        # justification: deployment admin manages install-wide LLM config by
+        # design; llm_model is deployment-global (no workspace_id column).
         with tenant_agnostic():
             row = session.get(LlmModel, model_id)
             if row is None:
@@ -3238,6 +3262,8 @@ def build_admin_llm_router() -> APIRouter:
         model_id: str,
         payload: ModelPayload,
     ) -> LlmModelResponse:
+        # justification: deployment admin manages install-wide LLM config by
+        # design; llm_model is deployment-global (no workspace_id column).
         with tenant_agnostic():
             row = session.get(LlmModel, model_id)
             if row is None:
@@ -3277,6 +3303,8 @@ def build_admin_llm_router() -> APIRouter:
     def delete_model(
         ctx: _WriteCtx, request: Request, session: _Db, model_id: str
     ) -> None:
+        # justification: deployment admin manages install-wide LLM config by
+        # design; llm_model is deployment-global (no workspace_id column).
         with tenant_agnostic():
             row = session.get(LlmModel, model_id)
             if row is None:
@@ -3313,6 +3341,8 @@ def build_admin_llm_router() -> APIRouter:
             stmt = stmt.where(LlmProviderModel.provider_id == provider_id)
         if model_id is not None:
             stmt = stmt.where(LlmProviderModel.model_id == model_id)
+        # justification: deployment admin manages install-wide LLM config by
+        # design; llm_provider_model is deployment-global (no workspace_id column).
         with tenant_agnostic():
             rows = list(session.scalars(stmt).all())
             models_by_id = {
@@ -3363,6 +3393,8 @@ def build_admin_llm_router() -> APIRouter:
             created_at=now,
             updated_at=now,
         )
+        # justification: deployment admin manages install-wide LLM config by
+        # design; llm_provider_model is deployment-global (no workspace_id column).
         with tenant_agnostic():
             _validate_provider_model_payload(session, payload)
             session.add(row)
@@ -3387,6 +3419,8 @@ def build_admin_llm_router() -> APIRouter:
     def get_provider_model(
         _ctx: _ReadCtx, session: _Db, provider_model_id: str
     ) -> LlmProviderModelResponse:
+        # justification: deployment admin manages install-wide LLM config by
+        # design; llm_provider_model is deployment-global (no workspace_id column).
         with tenant_agnostic():
             row = _provider_model(session, provider_model_id)
             model = session.get(LlmModel, row.model_id)
@@ -3408,6 +3442,8 @@ def build_admin_llm_router() -> APIRouter:
         session: _Db,
         provider_model_id: str,
     ) -> LlmProviderModelSyncPricingResponse:
+        # justification: deployment admin manages install-wide LLM config by
+        # design; llm_provider_model is deployment-global (no workspace_id column).
         with tenant_agnostic():
             row = _provider_model(session, provider_model_id)
             model = session.get(LlmModel, row.model_id)
@@ -3438,6 +3474,8 @@ def build_admin_llm_router() -> APIRouter:
         provider_model_id: str,
         payload: LlmProviderModelEmbeddingSmokeRequest,
     ) -> LlmProviderModelEmbeddingSmokeResponse:
+        # justification: deployment admin manages install-wide LLM config by
+        # design; llm_provider_model is deployment-global (no workspace_id column).
         with tenant_agnostic():
             provider_model, provider, model = _load_playground_target(
                 session, provider_model_id
@@ -3555,6 +3593,8 @@ def build_admin_llm_router() -> APIRouter:
         payload, image_url, upload_audio_ref = await _playground_request_payload(
             request
         )
+        # justification: deployment admin manages install-wide LLM config by
+        # design; llm_provider_model is deployment-global (no workspace_id column).
         with tenant_agnostic():
             provider_model, provider, model = _load_playground_target(
                 session, provider_model_id
@@ -3679,6 +3719,8 @@ def build_admin_llm_router() -> APIRouter:
         provider_model_id: str,
         payload: ProviderModelPayload,
     ) -> LlmProviderModelResponse:
+        # justification: deployment admin manages install-wide LLM config by
+        # design; llm_provider_model is deployment-global (no workspace_id column).
         with tenant_agnostic():
             row = _provider_model(session, provider_model_id)
             _validate_provider_model_payload(
@@ -3743,6 +3785,8 @@ def build_admin_llm_router() -> APIRouter:
     def delete_provider_model(
         ctx: _WriteCtx, request: Request, session: _Db, provider_model_id: str
     ) -> None:
+        # justification: deployment admin manages install-wide LLM config by
+        # design; llm_provider_model is deployment-global (no workspace_id column).
         with tenant_agnostic():
             row = _provider_model(session, provider_model_id)
             references = session.scalar(
@@ -3766,6 +3810,8 @@ def build_admin_llm_router() -> APIRouter:
     )
     def list_assignments(_ctx: _ReadCtx, session: _Db) -> list[LlmAssignmentResponse]:
         cutoff = _now() - timedelta(days=30)
+        # justification: deployment-admin LLM dashboard reads deployment-global config
+        # plus cross-workspace llm_usage aggregation across all workspaces, by design.
         with tenant_agnostic():
             rows = list(
                 session.scalars(
@@ -3803,6 +3849,8 @@ def build_admin_llm_router() -> APIRouter:
     def list_inheritance(
         _ctx: _ReadCtx, session: _Db
     ) -> list[LlmCapabilityInheritanceResponse]:
+        # justification: deployment-level llm_capability_inheritance; workspace_id
+        # is a legacy NULL column, not a live tenant boundary (deployment-admin).
         with tenant_agnostic():
             rows = list(
                 session.scalars(
@@ -3827,6 +3875,8 @@ def build_admin_llm_router() -> APIRouter:
         request: Request,
         payload: CapabilityInheritancePayload,
     ) -> LlmCapabilityInheritanceResponse:
+        # justification: deployment-level llm_capability_inheritance; workspace_id
+        # is a legacy NULL column, not a live tenant boundary (deployment-admin).
         with tenant_agnostic():
             _validate_inheritance_edge(
                 session,
@@ -3877,6 +3927,8 @@ def build_admin_llm_router() -> APIRouter:
         capability: str,
         payload: CapabilityInheritanceUpdatePayload,
     ) -> LlmCapabilityInheritanceResponse:
+        # justification: deployment-level llm_capability_inheritance; workspace_id
+        # is a legacy NULL column, not a live tenant boundary (deployment-admin).
         with tenant_agnostic():
             row = _explicit_inheritance(session, capability)
             _validate_inheritance_edge(
@@ -3905,6 +3957,8 @@ def build_admin_llm_router() -> APIRouter:
         request: Request,
         capability: str,
     ) -> None:
+        # justification: deployment-level llm_capability_inheritance; workspace_id
+        # is a legacy NULL column, not a live tenant boundary (deployment-admin).
         with tenant_agnostic():
             row = _explicit_inheritance(session, capability)
             session.delete(row)
@@ -3922,6 +3976,8 @@ def build_admin_llm_router() -> APIRouter:
         ctx: _WriteCtx, session: _Db, request: Request, payload: AssignmentPayload
     ) -> LlmAssignmentResponse:
         now = _now()
+        # justification: deployment-level llm_assignment config; workspace_id is a
+        # legacy NULL column, not a live tenant boundary. Deployment-admin by design.
         with tenant_agnostic():
             provider_model = _provider_model(session, payload.provider_model_id)
             provider = session.get(LlmProvider, provider_model.provider_id)
@@ -3987,6 +4043,8 @@ def build_admin_llm_router() -> APIRouter:
         payload: list[AssignmentReorderItem],
     ) -> list[LlmAssignmentResponse]:
         changed = False
+        # justification: deployment-level llm_assignment config; workspace_id is a
+        # legacy NULL column, not a live tenant boundary. Deployment-admin by design.
         with tenant_agnostic():
             for group in payload:
                 rows = list(
@@ -4056,6 +4114,8 @@ def build_admin_llm_router() -> APIRouter:
         _ctx: _ReadCtx, session: _Db, assignment_id: str
     ) -> LlmAssignmentResponse:
         cutoff = _now() - timedelta(days=30)
+        # justification: deployment-admin LLM dashboard reads deployment-global config
+        # plus cross-workspace llm_usage aggregation across all workspaces, by design.
         with tenant_agnostic():
             row = _assignment(session, assignment_id)
             usage = _assignment_usage(session, cutoff)
@@ -4085,6 +4145,8 @@ def build_admin_llm_router() -> APIRouter:
         payload: AssignmentUpdatePayload,
     ) -> LlmAssignmentResponse:
         # code-health: ignore[nloc] Router owns auth, deps, and route registration.  # noqa: E501
+        # justification: deployment-level llm_assignment config; workspace_id is a
+        # legacy NULL column, not a live tenant boundary. Deployment-admin by design.
         with tenant_agnostic():
             row = _assignment(session, assignment_id)
             sent = payload.model_fields_set
@@ -4169,6 +4231,8 @@ def build_admin_llm_router() -> APIRouter:
         request: Request,
         assignment_id: str,
     ) -> None:
+        # justification: deployment-level llm_assignment config; workspace_id is a
+        # legacy NULL column, not a live tenant boundary. Deployment-admin by design.
         with tenant_agnostic():
             row = _assignment(session, assignment_id)
             session.delete(row)
@@ -4183,6 +4247,8 @@ def build_admin_llm_router() -> APIRouter:
         openapi_extra=_llm_cli("prompts-list", "List LLM prompts", mutates=False),
     )
     def list_prompts(_ctx: _ReadCtx, session: _Db) -> list[LlmPromptTemplateResponse]:
+        # justification: deployment admin manages install-wide LLM config by
+        # design; llm_prompt_template is deployment-global (no workspace_id column).
         with tenant_agnostic():
             rows = list(
                 session.scalars(
@@ -4214,6 +4280,8 @@ def build_admin_llm_router() -> APIRouter:
     def get_prompt(
         _ctx: _ReadCtx, session: _Db, prompt_id: str
     ) -> LlmPromptTemplateDetail:
+        # justification: deployment admin manages install-wide LLM config by
+        # design; llm_prompt_template is deployment-global (no workspace_id column).
         with tenant_agnostic():
             row = session.get(LlmPromptTemplate, prompt_id)
             if row is None:
@@ -4239,6 +4307,8 @@ def build_admin_llm_router() -> APIRouter:
     def update_prompt(
         ctx: _WriteCtx, session: _Db, prompt_id: str, payload: PromptUpdatePayload
     ) -> LlmPromptTemplateDetail:
+        # justification: deployment admin manages install-wide LLM config by
+        # design; llm_prompt_template is deployment-global (no workspace_id column).
         with tenant_agnostic():
             row = session.get(LlmPromptTemplate, prompt_id)
             if row is None:
@@ -4280,6 +4350,8 @@ def build_admin_llm_router() -> APIRouter:
     def prompt_revisions(
         _ctx: _ReadCtx, session: _Db, prompt_id: str
     ) -> list[LlmPromptRevisionResponse]:
+        # justification: deployment admin manages install-wide LLM config by
+        # design; llm_prompt_template is deployment-global (no workspace_id column).
         with tenant_agnostic():
             if session.get(LlmPromptTemplate, prompt_id) is None:
                 raise _not_found()
@@ -4314,6 +4386,8 @@ def build_admin_llm_router() -> APIRouter:
     def reset_prompt(
         ctx: _WriteCtx, session: _Db, prompt_id: str
     ) -> LlmPromptTemplateDetail:
+        # justification: deployment admin manages install-wide LLM config by
+        # design; llm_prompt_template is deployment-global (no workspace_id column).
         with tenant_agnostic():
             row = session.get(LlmPromptTemplate, prompt_id)
             if row is None:
@@ -4364,6 +4438,8 @@ def build_admin_llm_router() -> APIRouter:
         # code-health: ignore[nloc] Router owns auth, deps, and route registration.  # noqa: E501
         provider_model_filter_values: tuple[str, ...] = ()
         if provider_model_id is not None:
+            # justification: deployment admin manages install-wide LLM config by
+            # design; llm_provider_model is deployment-global (no workspace_id column).
             with tenant_agnostic():
                 provider_model = session.get(LlmProviderModel, provider_model_id)
             provider_model_filter_values = (
@@ -4391,6 +4467,8 @@ def build_admin_llm_router() -> APIRouter:
             stmt = stmt.where(LlmUsage.assignment_id == assignment_id)
         if fallback_attempts_gt is not None:
             stmt = stmt.where(LlmUsage.fallback_attempts > fallback_attempts_gt)
+        # justification: deployment-admin cross-workspace llm_usage call log, aggregated
+        # across every workspace for admin observability, by design.
         with tenant_agnostic():
             rows = list(session.scalars(stmt).all())
             provider_models = list(session.scalars(select(LlmProviderModel)).all())
@@ -4436,6 +4514,8 @@ def build_admin_llm_router() -> APIRouter:
     ) -> LlmSyncPricingResult:
         started_at = _now()
         payload = payload or LlmSyncPricingPayload()
+        # justification: deployment admin manages install-wide LLM config by
+        # design; llm_provider_model is deployment-global (no workspace_id column).
         with tenant_agnostic():
             stmt = select(LlmProviderModel).order_by(
                 LlmProviderModel.api_model_id, LlmProviderModel.id

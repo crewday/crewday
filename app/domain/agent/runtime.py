@@ -2121,6 +2121,8 @@ def _write_approval_request(
         resolved_user_mode=resolved_user_mode,
         created_at=created_at,
     )
+    # justification: inserts an approval_request row carrying an explicit
+    # workspace_id == ctx.workspace_id.
     with tenant_agnostic():
         session.add(row)
         session.flush()
