@@ -53,6 +53,7 @@ See ``docs/specs/04-properties-and-stays.md`` §"iCal feed",
 from __future__ import annotations
 
 import base64
+import logging
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime
@@ -81,6 +82,8 @@ from app.domain.settings.cascade import SettingScopeChain, resolve_most_specific
 from app.tenancy import WorkspaceContext
 from app.util.clock import Clock, SystemClock
 from app.util.ulid import new_ulid
+
+_log = logging.getLogger(__name__)
 
 __all__ = [
     "IcalFeedCreate",
@@ -757,7 +760,19 @@ def _str_to_ciphertext(stored: str) -> bytes:
         try:
             return base64.b64decode(encoded.encode("ascii"), validate=True)
         except ValueError, UnicodeEncodeError:
-            pass
+            # The value carries the b64 prefix but its body is not
+            # valid strict base64 (a truncated / corrupted write).
+            # Fall through to the legacy latin-1 path rather than
+            # raising so one bad row cannot wedge the feed-list read;
+            # the downstream envelope decrypt still fails loudly if the
+            # recovered bytes are genuinely unusable. Logged at debug
+            # because a single malformed secret is an operator-data
+            # concern, not a request-path error.
+            _log.debug(
+                "ical secret ciphertext carried the b64 prefix but "
+                "failed strict base64 decode; falling back to latin-1",
+                extra={"event": "ical_ciphertext_b64_decode_fallback"},
+            )
     return stored.encode("latin-1")
 
 
