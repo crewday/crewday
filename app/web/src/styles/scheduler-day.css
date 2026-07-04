@@ -231,6 +231,8 @@
   position: absolute;
   right: 3px;
   font-family: "JetBrains Mono", ui-monospace, monospace;
+  /* Off-scale dense-scheduler micro-label; intentional exception per
+     DESIGN.md typography (no sub-11px rung). */
   font-size: 8.5px;
   letter-spacing: 0.02em;
   color: var(--ink-4);
@@ -316,6 +318,8 @@
   top: 3px;
   right: 4px;
   font-family: "JetBrains Mono", ui-monospace, monospace;
+  /* Off-scale dense-scheduler micro-label; intentional exception per
+     DESIGN.md typography (no sub-11px rung). */
   font-size: 8.5px;
   font-weight: 700;
   letter-spacing: 0.14em;
@@ -389,6 +393,8 @@
   align-items: center;
   color: var(--ink);
   text-decoration: none;
+  /* Off-scale dense-scheduler label; intentional exception per
+     DESIGN.md typography. */
   font-size: 11.5px;
   line-height: 1.2;
   box-shadow:
@@ -449,6 +455,8 @@
 .schedule-day__chip-title {
   font-family: "Inter Tight", sans-serif;
   font-weight: 500;
+  /* Off-scale dense-scheduler label; intentional exception per
+     DESIGN.md typography. */
   font-size: 11.5px;
 }
 .schedule-day__chip--completed {

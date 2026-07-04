@@ -25,6 +25,8 @@
   color: inherit;
 }
 .desk__agent-title {
+  /* Compact sub-1rem serif title; intentional off-scale exception per
+     DESIGN.md typography. */
   font-family: "Fraunces", serif; font-weight: 600; font-size: 15px;
 }
 .desk__agent-status {

@@ -277,6 +277,20 @@ new screen should pick from. If a one-off needs a size between
 two levels, prefer the closer level over inventing a new one;
 file a PR if a missing level keeps recurring.
 
+**Smallest rungs, and off-scale exceptions.** The scale bottoms out
+at `mono-sm` (11px) and `label-sm` (12px); nothing below 11px is a
+sanctioned rung. Two families of literals sit below the scale on
+purpose, and only in information-dense views: (a) the day/week
+scheduler's dense micro-labels — hour rail, block flags, in-block
+chips, mini-calendar closures — at roughly 8.5-11.5px, and (b) compact
+serif (Fraunces) card and panel titles below 1rem. These are
+intentional off-scale exceptions, not a sanctioned "micro" level. New
+UI must not introduce sub-11px text outside these documented dense
+contexts: tiny type is an accessibility cost we accept only where
+density is the whole point, and minting a rung for it would invite it
+to spread. CSS carrying these literals points back to this note rather
+than restating the rationale.
+
 **Casing.** Sentence case for buttons, labels, titles. Uppercase
 only on `section-title` (with the `0.09em` letterspacing) — the
 small-caps effect that marks list dividers. Never `text-transform:

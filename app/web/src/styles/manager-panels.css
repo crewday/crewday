@@ -410,6 +410,8 @@
     min-height: 24px;
     padding: 2px 3px;
   }
+  /* Off-scale dense mini-calendar micro-labels; intentional exception
+     per DESIGN.md typography (no sub-11px rung). */
   .mini-cal__closure-reason {
     font-size: 9px;
     line-height: 1.05;
