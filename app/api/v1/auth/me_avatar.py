@@ -76,7 +76,6 @@ from fastapi import (
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
-from app.adapters.db.identity.models import User
 from app.adapters.storage.ports import Storage
 from app.api.deps import db_session, get_storage
 from app.api.uploads import (
@@ -84,13 +83,13 @@ from app.api.uploads import (
     require_allowed_upload_content_type,
 )
 from app.api.v1._problem_json import IDENTITY_PROBLEM_RESPONSES
-from app.api.v1.auth.errors import auth_bad_request, auth_unauthorized
+from app.api.v1.auth._session_user import resolve_bare_host_session_user
+from app.api.v1.auth.errors import auth_bad_request
 from app.audit import write_audit
 from app.auth import session as auth_session
 from app.auth.audit import agnostic_audit_ctx as _identity_audit_ctx
 from app.auth.session_cookie import DEV_SESSION_COOKIE_NAME
 from app.domain.errors import DomainError, PayloadTooLarge, UnsupportedMediaType
-from app.tenancy import tenant_agnostic
 
 __all__ = [
     "AvatarResponse",
@@ -143,70 +142,6 @@ class AvatarResponse(BaseModel):
     """
 
     avatar_url: str | None
-
-
-def _client_headers(request: Request) -> tuple[str, str]:
-    """Return ``(ua, accept_language)`` for :func:`auth_session.validate`.
-
-    Mirrors the helper in :mod:`app.api.v1.auth.me` — the session
-    fingerprint gate reads both headers. Empty strings skip the gate
-    (see :func:`auth_session.validate`); the SPA always sends them, so
-    prod traffic exercises the full check.
-    """
-    return (
-        request.headers.get("user-agent", ""),
-        request.headers.get("accept-language", ""),
-    )
-
-
-def _resolve_session_user(
-    session: Session,
-    request: Request,
-    *,
-    cookie_primary: str | None,
-    cookie_dev: str | None,
-) -> User:
-    """Return the authenticated :class:`User` or raise ``DomainError``.
-
-    Same shape as :func:`app.api.v1.auth.me_tokens._resolve_session_user`
-    but returns the hydrated :class:`User` row instead of just the id —
-    the avatar router mutates the row directly, so saving a second
-    ``session.get(User, user_id)`` bounce is worth the wider return
-    type.
-    """
-    cookie_value = cookie_primary or cookie_dev
-    if not cookie_value:
-        raise auth_unauthorized("session_required")
-    ua, accept_language = _client_headers(request)
-    try:
-        user_id = auth_session.validate(
-            session,
-            cookie_value=cookie_value,
-            ua=ua,
-            accept_language=accept_language,
-        )
-    except auth_session.UserArchived as exc:
-        # Archive gate (cd-uceg, §03 "Sessions"). Bare-host avatar
-        # routes don't go through the tenancy middleware archive 401
-        # branch — surface the typed wire code locally so the SPA
-        # can route the operator to "have a deployment owner
-        # reinstate this user" instead of the generic
-        # ``session_invalid``.
-        raise auth_unauthorized(auth_session.USER_ARCHIVED_WIRE_CODE) from exc
-    except (auth_session.SessionInvalid, auth_session.SessionExpired) as exc:
-        raise auth_unauthorized("session_invalid") from exc
-
-    # ``user`` is identity-scoped — no workspace filter to apply.
-    # justification: user is identity-scoped (no workspace_id column); keyed by
-    # the session's own user_id.
-    with tenant_agnostic():
-        user = session.get(User, user_id)
-    if user is None:
-        # Row referenced by the session was hard-deleted between
-        # validate and lookup. Collapse to 401 — same shape the SPA
-        # already handles on a stale session.
-        raise auth_unauthorized("session_invalid")
-    return user
 
 
 def _read_capped(upload: UploadFile) -> bytes:
@@ -345,11 +280,12 @@ def build_me_avatar_router() -> APIRouter:
             rejected=_avatar_content_type_rejected,
         )
 
-        user = _resolve_session_user(
+        user = resolve_bare_host_session_user(
             session,
-            request,
+            request=request,
             cookie_primary=session_cookie_primary,
             cookie_dev=session_cookie_dev,
+            hydrate=True,
         )
 
         payload = _read_capped(image)
@@ -439,11 +375,12 @@ def build_me_avatar_router() -> APIRouter:
         gets a ``200`` with ``avatar_url=None``. The preserved blob is
         eventually reaped by the GC sweep (see module docstring).
         """
-        user = _resolve_session_user(
+        user = resolve_bare_host_session_user(
             session,
-            request,
+            request=request,
             cookie_primary=session_cookie_primary,
             cookie_dev=session_cookie_dev,
+            hydrate=True,
         )
         prior_hash = user.avatar_blob_hash
         user.avatar_blob_hash = None

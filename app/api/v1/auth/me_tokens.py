@@ -81,7 +81,8 @@ from sqlalchemy.orm import Session
 from app.adapters.db.identity.models import ApiToken
 from app.api.deps import db_session
 from app.api.v1._problem_json import IDENTITY_PROBLEM_RESPONSES
-from app.api.v1.auth.errors import auth_not_found, auth_unauthorized
+from app.api.v1.auth._session_user import resolve_bare_host_session_user
+from app.api.v1.auth.errors import auth_not_found
 from app.audit import write_audit
 from app.auth import session as auth_session
 from app.auth.audit import agnostic_audit_ctx
@@ -199,31 +200,6 @@ class TokenAuditEntryResponse(BaseModel):
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
-
-
-def _resolve_session_user(
-    session: Session,
-    *,
-    cookie_primary: str | None,
-    cookie_dev: str | None,
-) -> str:
-    """Return the authenticated user's id or raise HTTP 401.
-
-    Both the prod ``__Host-crewday_session`` and the dev fallback
-    ``crewday_session`` are accepted — matches the pattern used by
-    :mod:`app.api.v1.auth.me`. No fingerprint / UA hints are plumbed
-    through on v1 because the PAT router is itself only reachable
-    from an authenticated SPA session that already passed the
-    fingerprint gate on its last validate; a stricter gate here is
-    tracked as cd-i1qe-me-tokens-fingerprint.
-    """
-    cookie_value = cookie_primary or cookie_dev
-    if not cookie_value:
-        raise auth_unauthorized("session_required")
-    try:
-        return auth_session.validate(session, cookie_value=cookie_value)
-    except (auth_session.SessionInvalid, auth_session.SessionExpired) as exc:
-        raise auth_unauthorized("session_invalid") from exc
 
 
 def _resolve_expires_at(body: MintPersonalTokenBody, now: datetime) -> datetime | None:
@@ -367,7 +343,7 @@ def build_me_tokens_router() -> APIRouter:
     ) -> MintPersonalTokenResponse:
         # code-health: ignore[nloc] Router owns auth, deps, and route registration.  # noqa: E501
         """Create a PAT for the session user, limited to the ``me:*`` scopes."""
-        user_id = _resolve_session_user(
+        user_id = resolve_bare_host_session_user(
             session,
             cookie_primary=session_cookie_primary,
             cookie_dev=session_cookie_dev,
@@ -491,7 +467,7 @@ def build_me_tokens_router() -> APIRouter:
         ] = None,
     ) -> list[TokenSummaryResponse]:
         """Return every PAT (active + revoked) for the session user."""
-        user_id = _resolve_session_user(
+        user_id = resolve_bare_host_session_user(
             session,
             cookie_primary=session_cookie_primary,
             cookie_dev=session_cookie_dev,
@@ -526,7 +502,7 @@ def build_me_tokens_router() -> APIRouter:
         ] = None,
     ) -> Response:
         """Revoke a PAT owned by the session user. Idempotent."""
-        user_id = _resolve_session_user(
+        user_id = resolve_bare_host_session_user(
             session,
             cookie_primary=session_cookie_primary,
             cookie_dev=session_cookie_dev,
@@ -560,7 +536,7 @@ def build_me_tokens_router() -> APIRouter:
         ] = None,
     ) -> Response:
         """POST alias for :func:`delete_me_token`."""
-        user_id = _resolve_session_user(
+        user_id = resolve_bare_host_session_user(
             session,
             cookie_primary=session_cookie_primary,
             cookie_dev=session_cookie_dev,
@@ -594,7 +570,7 @@ def build_me_tokens_router() -> APIRouter:
         ] = None,
     ) -> MintPersonalTokenResponse:
         """Rotate a PAT owned by the session user and return new plaintext."""
-        user_id = _resolve_session_user(
+        user_id = resolve_bare_host_session_user(
             session,
             cookie_primary=session_cookie_primary,
             cookie_dev=session_cookie_dev,
@@ -656,7 +632,7 @@ def build_me_tokens_router() -> APIRouter:
         ] = None,
     ) -> list[TokenAuditEntryResponse]:
         """Return lifecycle + per-request audit rows for a caller-owned PAT."""
-        user_id = _resolve_session_user(
+        user_id = resolve_bare_host_session_user(
             session,
             cookie_primary=session_cookie_primary,
             cookie_dev=session_cookie_dev,

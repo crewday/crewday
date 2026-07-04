@@ -48,7 +48,7 @@ from app.adapters.db.identity.models import Session as SessionRow
 from app.adapters.db.identity.models import User
 from app.adapters.db.workspace.models import UserWorkspace, Workspace
 from app.api.admin._owners import is_deployment_owner
-from app.api.deps import db_session
+from app.api.deps import client_headers, db_session
 from app.api.v1._problem_json import IDENTITY_PROBLEM_RESPONSES
 from app.api.v1.auth.errors import auth_conflict, auth_not_found, auth_unauthorized
 from app.auth import session as auth_session
@@ -269,19 +269,6 @@ def _http_for_workspace_create(exc: Exception) -> DomainError:
     return DomainValidation(extra={"error": "invalid_workspace_name"})
 
 
-def _client_headers(request: Request) -> tuple[str, str]:
-    """Return ``(ua, accept_language)`` for :func:`auth_session.validate`.
-
-    Kept together because the fingerprint gate reads both. Empty
-    strings are fine — :func:`validate` skips the fingerprint check
-    when the caller supplies neither header.
-    """
-    return (
-        request.headers.get("user-agent", ""),
-        request.headers.get("accept-language", ""),
-    )
-
-
 def _session_cookie_value(
     *,
     session_cookie_primary: str | None,
@@ -300,7 +287,7 @@ def _validated_session_user(
     cookie_value: str,
     touch_session: bool = True,
 ) -> tuple[User, SessionRow]:
-    ua, accept_language = _client_headers(request)
+    ua, accept_language = client_headers(request)
     try:
         user_id = auth_session.validate(
             session,
@@ -951,7 +938,7 @@ def build_me_workspaces_router(
         cookie_value = session_cookie_primary or session_cookie_dev
         if not cookie_value:
             raise auth_unauthorized("session_required")
-        ua, accept_language = _client_headers(request)
+        ua, accept_language = client_headers(request)
         try:
             user_id = auth_session.validate(
                 session,

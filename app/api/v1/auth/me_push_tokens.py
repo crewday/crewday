@@ -67,7 +67,8 @@ from app.adapters.db.identity.repositories import (
 )
 from app.api.deps import db_session
 from app.api.v1._problem_json import IDENTITY_PROBLEM_RESPONSES
-from app.api.v1.auth.errors import auth_conflict, auth_not_found, auth_unauthorized
+from app.api.v1.auth._session_user import resolve_bare_host_session_user
+from app.api.v1.auth.errors import auth_conflict, auth_not_found
 from app.auth import session as auth_session
 from app.auth.session_cookie import DEV_SESSION_COOKIE_NAME
 from app.config import get_settings
@@ -159,30 +160,6 @@ class PushTokenResponse(BaseModel):
 # ---------------------------------------------------------------------------
 
 
-def _resolve_session_user(
-    session: Session,
-    *,
-    cookie_primary: str | None,
-    cookie_dev: str | None,
-) -> str:
-    """Return the authenticated user's id or raise HTTP 401.
-
-    Matches :func:`app.api.v1.auth.me_tokens._resolve_session_user` —
-    both the prod ``__Host-crewday_session`` and the dev fallback
-    ``crewday_session`` are accepted. No fingerprint hints are
-    plumbed through on v1 because the route is reachable only from an
-    authenticated SPA / native shell whose session already passed the
-    fingerprint gate on its last :func:`auth_session.validate`.
-    """
-    cookie_value = cookie_primary or cookie_dev
-    if not cookie_value:
-        raise auth_unauthorized("session_required")
-    try:
-        return auth_session.validate(session, cookie_value=cookie_value)
-    except (auth_session.SessionInvalid, auth_session.SessionExpired) as exc:
-        raise auth_unauthorized("session_invalid") from exc
-
-
 def _view_to_response(view: UserPushTokenView) -> PushTokenResponse:
     """Translate the domain view into the wire shape."""
     # ``platform`` widened to ``str`` on the row but is constrained to
@@ -258,7 +235,7 @@ def build_me_push_tokens_router() -> APIRouter:
         ] = None,
     ) -> PushTokenResponse:
         """Register (or re-register) a native push token for the session user."""
-        user_id = _resolve_session_user(
+        user_id = resolve_bare_host_session_user(
             session,
             cookie_primary=session_cookie_primary,
             cookie_dev=session_cookie_dev,
@@ -331,7 +308,7 @@ def build_me_push_tokens_router() -> APIRouter:
         ] = None,
     ) -> list[PushTokenResponse]:
         """Return every native push-token row for the session user."""
-        user_id = _resolve_session_user(
+        user_id = resolve_bare_host_session_user(
             session,
             cookie_primary=session_cookie_primary,
             cookie_dev=session_cookie_dev,
@@ -369,7 +346,7 @@ def build_me_push_tokens_router() -> APIRouter:
         ] = None,
     ) -> PushTokenResponse:
         """Bump ``last_seen_at`` (and optionally swap ``token``) on the row."""
-        user_id = _resolve_session_user(
+        user_id = resolve_bare_host_session_user(
             session,
             cookie_primary=session_cookie_primary,
             cookie_dev=session_cookie_dev,
@@ -416,7 +393,7 @@ def build_me_push_tokens_router() -> APIRouter:
         ] = None,
     ) -> Response:
         """Unregister a native push token. Idempotent on miss."""
-        user_id = _resolve_session_user(
+        user_id = resolve_bare_host_session_user(
             session,
             cookie_primary=session_cookie_primary,
             cookie_dev=session_cookie_dev,

@@ -26,12 +26,28 @@ from app.tenancy import WorkspaceContext
 from app.tenancy.current import get_current
 
 __all__ = [
+    "client_headers",
     "current_workspace_context",
     "db_session",
     "get_llm",
     "get_mime_sniffer",
     "get_storage",
 ]
+
+
+def client_headers(request: Request) -> tuple[str, str]:
+    """Return ``(ua, accept_language)`` for :func:`app.auth.session.validate`.
+
+    The session fingerprint gate reads both headers; empty strings skip
+    the gate (:func:`validate` treats a missing pair as "no fingerprint
+    to check"), so the HTTP edge passes through whatever the browser
+    sent and the gate fires when both are present. Shared by every
+    bare-host session router that forwards the fingerprint signal.
+    """
+    return (
+        request.headers.get("user-agent", ""),
+        request.headers.get("accept-language", ""),
+    )
 
 
 def current_workspace_context() -> WorkspaceContext:

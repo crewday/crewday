@@ -45,8 +45,8 @@ from app.adapters.mail.ports import Mailer
 from app.adapters.storage.ports import Storage
 from app.api.deps import db_session, get_storage
 from app.api.v1._problem_json import IDENTITY_PROBLEM_RESPONSES
+from app.api.v1.auth._session_user import resolve_bare_host_session_user
 from app.api.v1.auth.errors import auth_conflict, auth_not_found, auth_rate_limited
-from app.api.v1.auth.me_tokens import _resolve_session_user
 from app.domain.messaging.notifications import NotificationKind, NotificationService
 from app.domain.privacy import (
     ExportReadyNotifier,
@@ -250,7 +250,7 @@ def build_me_export_router(
             str | None, Cookie(alias="__Host-crewday_session")
         ] = None,
     ) -> PrivacyExportResponse:
-        user_id = _resolve_session_user(
+        user_id = resolve_bare_host_session_user(
             session,
             cookie_primary=host_session,
             cookie_dev=crewday_session,
@@ -311,7 +311,7 @@ def build_me_export_router(
             str | None, Cookie(alias="__Host-crewday_session")
         ] = None,
     ) -> PrivacyExportResponse:
-        user_id = _resolve_session_user(
+        user_id = resolve_bare_host_session_user(
             session,
             cookie_primary=host_session,
             cookie_dev=crewday_session,

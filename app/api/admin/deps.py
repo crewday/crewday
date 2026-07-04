@@ -48,7 +48,7 @@ from fastapi import Cookie, Depends, HTTPException, Request, status
 from sqlalchemy.orm import Session
 
 from app.adapters.db.session import make_uow
-from app.api.deps import db_session
+from app.api.deps import client_headers, db_session
 from app.auth import session as auth_session
 from app.auth import tokens as auth_tokens
 from app.auth.session_cookie import DEV_SESSION_COOKIE_NAME
@@ -123,21 +123,6 @@ def _scope_conflict() -> Validation:
     )
 
 
-def _client_headers(request: Request) -> tuple[str, str]:
-    """Return ``(ua, accept_language)`` for :func:`auth_session.validate`.
-
-    Mirrors :func:`app.api.v1.auth.me._client_headers`. Empty strings
-    are tolerated by :func:`validate` (the fingerprint gate is
-    skipped on a missing header pair); the HTTP edge passes through
-    whatever the browser sent so the gate fires when both headers
-    are present.
-    """
-    return (
-        request.headers.get("user-agent", ""),
-        request.headers.get("accept-language", ""),
-    )
-
-
 def _resolve_session_principal(
     session: Session,
     *,
@@ -160,7 +145,7 @@ def _resolve_session_principal(
     fine-grained deployment groups would narrow this here without
     changing the dep's caller contract.
     """
-    ua, accept_language = _client_headers(request)
+    ua, accept_language = client_headers(request)
     try:
         user_id = auth_session.validate(
             session,

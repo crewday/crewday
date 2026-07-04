@@ -53,6 +53,7 @@ from app.adapters.db.session import make_uow
 from app.adapters.mail.ports import Mailer
 from app.api.deps import db_session
 from app.api.v1._problem_json import IDENTITY_PROBLEM_RESPONSES
+from app.api.v1.auth._session_user import resolve_bare_host_session_user
 from app.api.v1.auth.errors import (
     auth_bad_request,
     auth_conflict,
@@ -231,44 +232,6 @@ def _refuse_bearer_token(request: Request) -> None:
         raise auth_forbidden("forbidden")
 
 
-def _resolve_session_user(
-    session: Session,
-    *,
-    request: Request,
-    cookie_primary: str | None,
-    cookie_dev: str | None,
-) -> str:
-    """Return the session user's id or raise HTTP 401 / 403.
-
-    Forwards UA + Accept-Language so the §15 fingerprint gate fires.
-    Bearer-header callers were already refused upstream by
-    :func:`_refuse_bearer_token` — by the time we reach here, the
-    caller is a session-cookie holder or anonymous.
-    """
-    cookie_value = cookie_primary or cookie_dev
-    if not cookie_value:
-        raise auth_unauthorized("session_required")
-    ua = request.headers.get("user-agent", "")
-    accept_language = request.headers.get("accept-language", "")
-    try:
-        return auth_session.validate(
-            session,
-            cookie_value=cookie_value,
-            ua=ua,
-            accept_language=accept_language,
-        )
-    except auth_session.UserArchived as exc:
-        # Archive gate (cd-uceg, §03 "Sessions"). Bare-host email-
-        # change routes don't go through the tenancy middleware
-        # archive 401 branch — surface the typed wire code locally
-        # so the SPA branches uniformly with /me on
-        # ``subject_user_archived`` instead of the generic
-        # ``session_invalid``.
-        raise auth_unauthorized(auth_session.USER_ARCHIVED_WIRE_CODE) from exc
-    except (auth_session.SessionInvalid, auth_session.SessionExpired) as exc:
-        raise auth_unauthorized("session_invalid") from exc
-
-
 # ---------------------------------------------------------------------------
 # Router factory
 # ---------------------------------------------------------------------------
@@ -353,7 +316,7 @@ def build_email_change_router(
         try:
             with make_uow() as session:
                 assert isinstance(session, Session)
-                user_id = _resolve_session_user(
+                user_id = resolve_bare_host_session_user(
                     session,
                     request=request,
                     cookie_primary=session_cookie_primary,
@@ -452,7 +415,7 @@ def build_email_change_router(
         try:
             with make_uow() as session:
                 assert isinstance(session, Session)
-                user_id = _resolve_session_user(
+                user_id = resolve_bare_host_session_user(
                     session,
                     request=request,
                     cookie_primary=session_cookie_primary,
