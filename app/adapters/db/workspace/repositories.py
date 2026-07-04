@@ -6,7 +6,7 @@ Protocol surfaces declared on the identity context's port file:
 * :class:`SqlAlchemyMembershipRepository` — wraps the ``user_workspace``
   derived junction, the ``work_engagement`` employment row, and the
   ``user_work_role`` link rows. Consumed by
-  :mod:`app.services.employees.service` (profile + archive + reinstate
+  :mod:`app.domain.employees.service` (profile + archive + reinstate
   + accept-time engagement seed) and by
   :mod:`app.domain.identity.work_engagements.seed_pending_work_engagement`
   (called from :func:`app.domain.identity.membership._activate_invite`).

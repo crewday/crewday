@@ -36,7 +36,7 @@ safety notes) per ``docs/specs/07-instructions-kb.md`` §"Data model"
   archiving an already-archived row is a no-op for the DB column but
   still writes one ``instruction.archived`` audit row so the
   forensic trail stays linear (matches the
-  :func:`app.services.employees.service.archive_employee` shape). This
+  :func:`app.domain.employees.service.archive_employee` shape). This
   is archive-state management only; version-history restore lives in
   :func:`restore_to_revision` below and still refuses archived rows.
 
@@ -582,7 +582,7 @@ def _require_edit(repo: InstructionsRepository, ctx: WorkspaceContext) -> None:
     misconfigured action catalog (unknown key, invalid scope) is a
     server-side bug — surfaces as :class:`RuntimeError` so the
     router answers 500, not 403. Same wrapper shape as
-    :func:`app.services.employees.service._require_edit_other`.
+    :func:`app.domain.employees.service._require_edit_other`.
     """
     try:
         require(
@@ -1075,7 +1075,7 @@ def archive(
     instant is preserved). Either path writes one
     ``instruction.archived`` audit row with a flag indicating
     whether the row was already archived — the trail stays linear
-    (matches :func:`app.services.employees.service.archive_employee`).
+    (matches :func:`app.domain.employees.service.archive_employee`).
 
     Raises :class:`InstructionNotFound` when the instruction is
     unknown to this workspace.

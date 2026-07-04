@@ -54,11 +54,11 @@ from app.auth.passkey import (
 )
 from app.auth.webauthn import base64url_to_bytes
 from app.authz.owners import is_owner_member
-from app.services.workspace.export_service import (
+from app.domain.workspace.export_service import (
     WORKSPACE_EXPORT_MEDIA_TYPE,
     build_workspace_export,
 )
-from app.services.workspace.settings_service import OwnersOnlyError
+from app.domain.workspace.settings_service import OwnersOnlyError
 from app.tenancy import WorkspaceContext, tenant_agnostic
 
 _Ctx = Annotated[WorkspaceContext, Depends(current_workspace_context)]

@@ -38,7 +38,7 @@ from app.adapters.db.base import Base
 from app.adapters.db.workspace.models import Workspace
 from app.adapters.storage.ports import BlobNotFound, Storage
 from app.authz.owners import is_owner_member
-from app.services.workspace.settings_service import OwnersOnlyError
+from app.domain.workspace.settings_service import OwnersOnlyError
 from app.tenancy import WorkspaceContext, tenant_agnostic
 from app.util.clock import Clock, SystemClock
 

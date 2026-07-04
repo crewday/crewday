@@ -13,10 +13,10 @@ from sqlalchemy.orm import Session
 
 from app.adapters.db.session import make_uow
 from app.adapters.db.workspace.models import Workspace
+from app.domain.inventory.reorder_service import check_reorder_points
 from app.events.bus import EventBus
 from app.events.bus import bus as default_event_bus
 from app.events.types import InventoryItemChanged
-from app.services.inventory.reorder_service import check_reorder_points
 from app.tenancy import reset_current, set_current, tenant_agnostic
 from app.tenancy.context import WorkspaceContext
 from app.util.clock import Clock, SystemClock

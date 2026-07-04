@@ -1,4 +1,4 @@
-"""Integration test for :mod:`app.services.instructions.service`.
+"""Integration test for :mod:`app.domain.instructions.service`.
 
 The cd-oyq slice ships the SERVICE layer only — the HTTP routes
 land with cd-xkfe. This file drives the service against a real,
@@ -31,7 +31,7 @@ from app.adapters.db.instructions.repositories import (
 )
 from app.adapters.db.places.models import Area, Property, PropertyWorkspace
 from app.adapters.db.workspace.models import Workspace
-from app.services.instructions.service import (
+from app.domain.instructions.service import (
     archive,
     create,
     update_body,

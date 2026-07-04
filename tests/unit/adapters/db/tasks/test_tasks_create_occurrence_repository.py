@@ -1,7 +1,7 @@
 """Unit tests for :class:`SqlAlchemyTasksCreateOccurrencePort` (cd-ncbdb).
 
 Covers the SA-backed concretion of
-:class:`~app.ports.tasks_create_occurrence.TasksCreateOccurrencePort`:
+:class:`~app.domain.tasks.tasks_create_occurrence.TasksCreateOccurrencePort`:
 
 * happy-path INSERT — first call for a
   ``(reservation_id, lifecycle_rule_id, occurrence_key)`` triple
@@ -28,7 +28,7 @@ unique index lives in the cd-ncbdb migration smoke under
 
 See ``docs/specs/04-properties-and-stays.md`` §"Stay task bundles"
 §"Edit semantics" + the "Idempotency contract" docstring on
-:mod:`app.ports.tasks_create_occurrence`.
+:mod:`app.domain.tasks.tasks_create_occurrence`.
 """
 
 from __future__ import annotations
@@ -46,7 +46,7 @@ from app.adapters.db.places.models import Property
 from app.adapters.db.tasks.models import Occurrence
 from app.adapters.db.tasks.repositories import SqlAlchemyTasksCreateOccurrencePort
 from app.adapters.db.workspace.models import Workspace
-from app.ports.tasks_create_occurrence import (
+from app.domain.tasks.tasks_create_occurrence import (
     DEFAULT_PATCH_IN_PLACE_THRESHOLD,
     TurnoverOccurrenceRequest,
 )

@@ -16,9 +16,9 @@ from app.adapters.db.inventory.models import Item
 from app.adapters.db.places.models import Property, PropertyWorkspace
 from app.adapters.db.session import make_engine
 from app.adapters.db.tasks.models import Occurrence, TaskTemplate
+from app.domain.inventory.reorder_service import check_reorder_points
 from app.events.bus import EventBus
 from app.events.types import InventoryLowStock
-from app.services.inventory.reorder_service import check_reorder_points
 from app.tenancy import WorkspaceContext, tenant_agnostic
 from app.util.clock import FrozenClock
 from app.util.ulid import new_ulid

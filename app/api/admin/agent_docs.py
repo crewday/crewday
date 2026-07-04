@@ -16,14 +16,14 @@ from sqlalchemy.orm import Session
 from app.adapters.db.llm.models import AgentDoc, AgentDocRevision
 from app.api.admin.deps import current_deployment_admin_principal
 from app.api.deps import db_session
-from app.domain.errors import Conflict, NotFound
-from app.services.agent.system_docs import (
+from app.domain.agent.system_docs import (
     agent_doc_metadata_hash,
     get_agent_doc,
     get_agent_doc_default,
     list_agent_docs,
     normalize_agent_doc_roles,
 )
+from app.domain.errors import Conflict, NotFound
 from app.tenancy import DeploymentContext
 from app.util.ulid import new_ulid
 

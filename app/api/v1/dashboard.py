@@ -34,7 +34,7 @@ from app.api.v1.places import (
 )
 from app.authz.dep import Permission
 from app.domain.errors import Conflict, NotFound
-from app.services.leave import (
+from app.domain.leave import (
     LeaveDecision,
     LeaveDecisionRequest,
     LeaveNotFound,

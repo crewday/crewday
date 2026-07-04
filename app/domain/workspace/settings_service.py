@@ -37,7 +37,7 @@ for a write that changed nothing.
 
 **Audit.** One audit row per call when at least one field changed,
 carrying the old / new value per changed field. Diff shape mirrors
-the convention used by :func:`app.services.employees.service.update_profile`:
+the convention used by :func:`app.domain.employees.service.update_profile`:
 ``{"before": {...}, "after": {...}}`` with only the changed keys.
 
 **Tenancy.** The service trusts ``ctx.workspace_id``; it never
@@ -263,7 +263,7 @@ def update_basics(
     least one field actually changed, carrying
     ``{"before": {...}, "after": {...}}`` with only the changed
     keys. Mirrors the diff shape used by
-    :func:`app.services.employees.service.update_profile`.
+    :func:`app.domain.employees.service.update_profile`.
 
     Returns the persisted projection so the caller can echo it to
     the client without a second SELECT.

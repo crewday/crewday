@@ -1,4 +1,4 @@
-"""Unit tests for :mod:`app.services.leave.service`.
+"""Unit tests for :mod:`app.domain.leave.service`.
 
 Exercises the service surface against an in-memory SQLite engine
 built via ``Base.metadata.create_all()`` — no alembic, no tenant
@@ -45,7 +45,7 @@ from app.adapters.db.identity.models import User, canonicalise_email
 from app.adapters.db.session import make_engine
 from app.adapters.db.time.models import Leave
 from app.adapters.db.workspace.models import Workspace
-from app.services.leave import (
+from app.domain.leave import (
     LeaveBoundaryInvalid,
     LeaveCreate,
     LeaveKindInvalid,

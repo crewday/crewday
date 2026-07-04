@@ -231,7 +231,7 @@ _ATTACHMENT_KIND_VALUES_LOCAL: tuple[str, ...] = ("receipt", "invoice", "other")
 
 # Caps kept modest to bound audit + DB payload without being
 # restrictive in practice. Mirrors the shape of sibling
-# :mod:`app.services.leave.service` constants.
+# :mod:`app.domain.leave.service` constants.
 _MAX_VENDOR_LEN = 200
 _MAX_NOTE_LEN = 20_000
 _MAX_ID_LEN = 40
@@ -533,7 +533,7 @@ class ExpenseClaimView:
     sensitive fields (``decided_by``, ``decided_at``,
     ``submitted_at``) that are managed by the service, not the
     caller's payload — matches the convention on
-    :class:`~app.services.leave.service.LeaveView`.
+    :class:`~app.domain.leave.service.LeaveView`.
 
     ``attachments`` is a tuple (not a list) so the view is
     transitively immutable; callers that need a mutable list build
@@ -572,7 +572,7 @@ def _ensure_utc(value: datetime) -> datetime:
     SQLite's ``DateTime(timezone=True)`` strips tzinfo on read; the
     cross-backend invariant ("time is UTC at rest") lets us tag a
     naive value as UTC without guessing. Mirrors
-    :func:`app.services.leave.service._ensure_utc`.
+    :func:`app.domain.leave.service._ensure_utc`.
     """
     if value.tzinfo is None:
         return value.replace(tzinfo=UTC)
@@ -685,7 +685,7 @@ def _view_to_diff_dict(view: ExpenseClaimView) -> dict[str, Any]:
     Stringifies datetime columns and renders the attachment tuple as
     a list of dicts so the audit row's ``diff`` JSON payload stays
     portable across SQLite + Postgres. Mirrors
-    :func:`app.services.leave.service._view_to_diff_dict`.
+    :func:`app.domain.leave.service._view_to_diff_dict`.
     """
     return {
         "id": view.id,

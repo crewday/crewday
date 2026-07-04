@@ -43,6 +43,7 @@ from app.adapters.db.base import Base
 from app.adapters.db.places.models import Property, PropertyWorkspace
 from app.adapters.db.session import make_engine
 from app.adapters.db.workspace.models import Workspace
+from app.domain.places import create_property as public_create
 from app.domain.places.property_service import (
     AddressCountryMismatch,
     AddressPayload,
@@ -56,7 +57,6 @@ from app.domain.places.property_service import (
     soft_delete_property,
     update_property,
 )
-from app.services.places import create_property as public_create
 from app.tenancy.context import WorkspaceContext
 from app.util.clock import FrozenClock
 from app.util.ulid import new_ulid
@@ -461,7 +461,7 @@ class TestCreate:
     def test_create_public_surface_matches_domain(
         self, session_places: Session, frozen_clock: FrozenClock
     ) -> None:
-        """The ``app.services.places`` re-export is a drop-in for the domain fn."""
+        """The ``app.domain.places`` re-export is a drop-in for the domain fn."""
         ws = _bootstrap_workspace(session_places, slug="public-surface")
         ctx = _ctx(ws, slug="public-surface")
 

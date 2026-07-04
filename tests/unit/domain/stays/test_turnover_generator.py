@@ -1,7 +1,7 @@
 """Unit tests for :mod:`app.domain.stays.turnover_generator`.
 
 Pure-Python coverage with an in-memory SQLite engine + a recording
-:class:`~app.ports.tasks_create_occurrence.TasksCreateOccurrencePort`.
+:class:`~app.domain.tasks.tasks_create_occurrence.TasksCreateOccurrencePort`.
 The real tasks-side adapter doesn't exist yet (cd-4qr Phase 5); the
 recorder asserts request shape + simulates the create / patch /
 regenerate state machine so we can exercise every branch the
@@ -65,15 +65,15 @@ from app.domain.stays.turnover_generator import (
     handle_reservation_upserted,
     register_subscriptions,
 )
-from app.events.bus import EventBus
-from app.events.types import ReservationChangeKind, ReservationUpserted
-from app.ports.tasks_create_occurrence import (
+from app.domain.tasks.tasks_create_occurrence import (
     DEFAULT_PATCH_IN_PLACE_THRESHOLD,
     NoopTasksCreateOccurrencePort,
     RecordingTasksCreateOccurrencePort,
     TurnoverOccurrenceRequest,
     TurnoverOccurrenceResult,
 )
+from app.events.bus import EventBus
+from app.events.types import ReservationChangeKind, ReservationUpserted
 from app.tenancy import set_current
 from app.tenancy.context import WorkspaceContext
 from app.util.ulid import new_ulid

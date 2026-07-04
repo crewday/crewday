@@ -100,7 +100,7 @@ def _load_app_backup() -> Any:
 
 def _load_workspace_import() -> Any:
     try:
-        from app.services.workspace import import_service as workspace_import_mod
+        from app.domain.workspace import import_service as workspace_import_mod
     except Exception as exc:
         raise ConfigError(
             "admin workspace import must run on the server host with app "

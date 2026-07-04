@@ -14,6 +14,7 @@ from app.adapters.db.llm.models import AgentPreference
 from app.adapters.db.messaging.models import ChatChannel, ChatMessage
 from app.adapters.llm.ports import ChatMessage as LlmChatMessage
 from app.adapters.llm.ports import LLMClient, LLMResponse
+from app.domain.llm import get_active_prompt
 from app.domain.llm.budget import (
     PricingTable,
     check_budget,
@@ -24,7 +25,6 @@ from app.domain.llm.budget import (
 from app.domain.llm.consent import load_consent_set
 from app.domain.llm.router import ModelPick, resolve_primary
 from app.domain.llm.usage_recorder import AgentAttribution, record
-from app.services.llm import get_active_prompt
 from app.tenancy import WorkspaceContext
 from app.util.clock import Clock, SystemClock
 from app.util.ulid import new_ulid

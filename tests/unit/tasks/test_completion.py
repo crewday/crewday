@@ -1537,7 +1537,7 @@ class TestComplete:
         assert task is not None
         task.template_id = template_id
         session.flush()
-        from app.services.inventory import movement_service
+        from app.domain.inventory import movement_service
 
         original_consume = movement_service.consume
 

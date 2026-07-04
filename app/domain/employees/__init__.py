@@ -3,7 +3,7 @@
 Re-exports the employees service so callers in other bounded
 contexts (API handlers, membership acceptance, worker invites)
 import from here rather than reaching directly into
-:mod:`app.services.employees.service`. Keeps the concrete module
+:mod:`app.domain.employees.service`. Keeps the concrete module
 free to restructure its internals.
 
 The employees service owns the lifecycle of a *worker* within a
@@ -22,7 +22,7 @@ See ``docs/specs/05-employees-and-roles.md`` §"User (as worker)",
 
 from __future__ import annotations
 
-from app.services.employees.service import (
+from app.domain.employees.service import (
     EmployeeNotFound,
     EmployeeProfileUpdate,
     EmployeeView,

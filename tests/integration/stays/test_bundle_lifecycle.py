@@ -15,7 +15,7 @@ from app.domain.stays.bundle_service import (
     generate_bundles_for_stay,
     reapply_bundles_for_stay,
 )
-from app.ports.tasks_create_occurrence import RecordingTasksCreateOccurrencePort
+from app.domain.tasks.tasks_create_occurrence import RecordingTasksCreateOccurrencePort
 from app.tenancy import reset_current, set_current, tenant_agnostic
 from app.tenancy.context import WorkspaceContext
 from app.util.ulid import new_ulid

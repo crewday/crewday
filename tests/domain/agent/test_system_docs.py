@@ -8,7 +8,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.adapters.db.llm.models import AgentDoc, AgentDocRevision
-from app.services.agent.system_docs import agent_doc_metadata_hash, seed_agent_docs
+from app.domain.agent.system_docs import agent_doc_metadata_hash, seed_agent_docs
 from tests.unit.api.admin._helpers import engine_fixture
 
 

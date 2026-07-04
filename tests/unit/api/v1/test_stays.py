@@ -41,7 +41,7 @@ from app.api.v1.stays import (
 from app.config import Settings
 from app.domain.errors import DomainError
 from app.domain.stays.guest_link_service import mint_link
-from app.ports.tasks_create_occurrence import RecordingTasksCreateOccurrencePort
+from app.domain.tasks.tasks_create_occurrence import RecordingTasksCreateOccurrencePort
 from app.tenancy import WorkspaceContext
 from app.tenancy.context import ActorGrantRole
 from app.tenancy.current import reset_current, set_current

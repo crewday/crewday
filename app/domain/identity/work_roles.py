@@ -33,7 +33,7 @@ remains re-usable from tests and seeders that bypass HTTP.
 on the registered ``work_role`` table. Each function re-asserts
 ``workspace_id = ctx.workspace_id`` explicitly as defence-in-depth,
 matching the convention used in :mod:`app.domain.places.property_service`
-and :mod:`app.services.employees.service`.
+and :mod:`app.domain.employees.service`.
 
 **Transaction boundary.** The service never calls
 ``session.commit()``; the caller's Unit-of-Work owns transaction
@@ -233,7 +233,7 @@ def _load_row(
 
     Re-asserts the ``workspace_id`` predicate explicitly even though
     the ORM tenant filter already narrows the query. Mirrors the
-    pattern in :mod:`app.services.employees.service`.
+    pattern in :mod:`app.domain.employees.service`.
     """
     stmt = select(WorkRole).where(
         WorkRole.id == work_role_id,
@@ -401,7 +401,7 @@ def update_work_role(
     if not sent:
         # No-op update — return the current view. No audit row because
         # a zero-change write is not a forensic event (consistent with
-        # :func:`app.services.employees.service.update_profile`).
+        # :func:`app.domain.employees.service.update_profile`).
         return _row_to_view(row)
 
     before: dict[str, Any] = {}

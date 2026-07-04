@@ -1,6 +1,6 @@
 """Instructions context — repository seam (cd-oyq).
 
-Defines the seam :mod:`app.services.instructions.service` uses to
+Defines the seam :mod:`app.domain.instructions.service` uses to
 read and write :mod:`app.adapters.db.instructions.models` (Instruction,
 InstructionVersion) plus the cross-package consistency reads it
 needs against :mod:`app.adapters.db.places.models` (Area — property
@@ -154,7 +154,7 @@ class InstructionsRepository(Protocol):
     """Read + write seam for every row the instructions service touches.
 
     Hides every direct ORM read from the import surface of
-    :mod:`app.services.instructions.service`. The SA-backed concretion
+    :mod:`app.domain.instructions.service`. The SA-backed concretion
     in :mod:`app.adapters.db.instructions.repositories` walks three
     ORM classes:
 

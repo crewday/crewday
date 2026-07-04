@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from app.adapters.db.instructions.repositories import SqlAlchemyInstructionsRepository
 from app.adapters.db.workspace.models import Workspace
 from app.api.v1.instructions import router as instructions_router
+from app.domain.instructions import service
 from app.events import (
     InstructionArchived,
     InstructionCreated,
@@ -19,7 +20,6 @@ from app.events import (
 from app.events import (
     bus as default_event_bus,
 )
-from app.services.instructions import service
 from app.tenancy import WorkspaceContext
 from app.util.ulid import new_ulid
 from tests.unit.api.v1.identity.conftest import build_client

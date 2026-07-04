@@ -1,4 +1,4 @@
-"""Unit tests for :mod:`app.services.employees.service`.
+"""Unit tests for :mod:`app.domain.employees.service`.
 
 Mirrors the in-memory SQLite bootstrap in
 ``tests/unit/places/test_property_service.py``: a fresh engine per
@@ -65,7 +65,7 @@ from app.adapters.db.workspace.models import (
 from app.adapters.db.workspace.repositories import SqlAlchemyMembershipRepository
 from app.authz import PermissionDenied
 from app.authz.deployment_owners import add_deployment_owner
-from app.services.employees.service import (
+from app.domain.employees.service import (
     EmployeeNotFound,
     EmployeeProfileUpdate,
     ProfileFieldForbidden,
@@ -1239,7 +1239,7 @@ class TestInviteDoesNotSeedAtCreateTime:
     def test_services_employees_does_not_expose_invite_time_helpers(
         self,
     ) -> None:
-        import app.services.employees as pkg
+        import app.domain.employees as pkg
 
         for name in pkg.__all__:
             # Only ``seed_pending_work_engagement`` writes an engagement

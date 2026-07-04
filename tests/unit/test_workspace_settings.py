@@ -1,4 +1,4 @@
-"""Unit tests for :mod:`app.services.workspace.settings_service` (cd-n6p).
+"""Unit tests for :mod:`app.domain.workspace.settings_service` (cd-n6p).
 
 In-memory SQLite bootstrap mirrors
 :file:`tests/unit/services/test_service_employees.py`: pull every
@@ -49,7 +49,7 @@ from app.adapters.db.base import Base
 from app.adapters.db.identity.models import User
 from app.adapters.db.session import make_engine
 from app.adapters.db.workspace.models import Workspace
-from app.services.workspace import (
+from app.domain.workspace import (
     OwnersOnlyError,
     WorkspaceFieldInvalid,
     update_basics,

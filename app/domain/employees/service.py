@@ -126,7 +126,7 @@ from app.domain.identity.ports import (
 )
 
 # Re-exported for back-compat: the seeder used to live here, and
-# tests + ``app.services.employees`` external surface still import
+# tests + ``app.domain.employees`` external surface still import
 # it from this module. The canonical home is now
 # :mod:`app.domain.identity.work_engagements` so the identity-side
 # call site (``membership._activate_invite``) does not have to cross

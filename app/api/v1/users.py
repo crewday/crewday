@@ -94,6 +94,17 @@ from app.auth.magic_link_port import MagicLinkAdapter
 from app.authz import PermissionDenied, require
 from app.authz.dep import Permission
 from app.config import Settings, get_settings
+from app.domain.employees import (
+    EmployeeNotFound,
+    EmployeeProfileUpdate,
+    EmployeeView,
+    ProfileFieldForbidden,
+    archive_employee,
+    get_employee,
+    reinstate_employee,
+    reinstate_user_deployment,
+    update_profile,
+)
 from app.domain.errors import (
     DomainError,
     Forbidden,
@@ -110,17 +121,6 @@ from app.domain.identity.permission_groups import (
     write_member_remove_rejected_audit,
 )
 from app.mail.auth_templates import render_auth_email
-from app.services.employees import (
-    EmployeeNotFound,
-    EmployeeProfileUpdate,
-    EmployeeView,
-    ProfileFieldForbidden,
-    archive_employee,
-    get_employee,
-    reinstate_employee,
-    reinstate_user_deployment,
-    update_profile,
-)
 from app.tenancy import WorkspaceContext, tenant_agnostic
 from app.util.clock import SystemClock
 
@@ -304,7 +304,7 @@ class RemoveMemberResponse(BaseModel):
 class EmployeeUpdateRequest(BaseModel):
     """Request body for ``PATCH /users/{user_id}``.
 
-    Mirrors :class:`~app.services.employees.EmployeeProfileUpdate` —
+    Mirrors :class:`~app.domain.employees.EmployeeProfileUpdate` —
     every field is optional and Pydantic's ``model_fields_set``
     distinguishes "omitted" from "explicitly set to None".
     ``extra='forbid'`` so unknown fields fail loud at 422 rather
@@ -331,7 +331,7 @@ class EmployeeUpdateRequest(BaseModel):
 class EmployeeProfileResponse(BaseModel):
     """Response body for ``PATCH /users/{user_id}`` / ``GET /users/{user_id}``.
 
-    Projection of :class:`~app.services.employees.EmployeeView` —
+    Projection of :class:`~app.domain.employees.EmployeeView` —
     carries the minimal identity-level fields the SPA needs plus the
     workspace-scoped engagement archival marker (derived from the
     active :class:`~app.adapters.db.workspace.models.WorkEngagement`
@@ -527,7 +527,7 @@ def _assert_workspace_membership(
 ) -> UserWorkspace:
     """Return the (user, workspace) :class:`UserWorkspace` row or raise 404.
 
-    Mirrors :func:`app.services.employees._assert_membership` — the
+    Mirrors :func:`app.domain.employees._assert_membership` — the
     ``magic_link`` and ``reset_passkey`` routes both target a user
     inside the caller's workspace, and a cross-workspace probe must
     collapse to 404 ``employee_not_found`` rather than leaking the

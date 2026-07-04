@@ -47,8 +47,8 @@ from app.adapters.db.session import make_uow
 from app.adapters.db.workspace.models import Workspace
 from app.auth.tokens import mint as mint_token
 from app.config import get_settings
+from app.domain.agent.system_docs import seed_agent_docs
 from app.domain.messaging.push_tokens import SETTINGS_KEY_VAPID_PUBLIC
-from app.services.agent.system_docs import seed_agent_docs
 from app.tenancy import WorkspaceContext, tenant_agnostic
 from app.util.clock import SystemClock
 from app.util.ulid import new_ulid

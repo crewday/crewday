@@ -84,7 +84,7 @@ from app.api.v1._problem_json import IDENTITY_PROBLEM_RESPONSES
 from app.api.v1.settings import EntitySettingsPayload, build_entity_settings_payload
 from app.authz.dep import Permission
 from app.authz.places_visibility import visible_property_ids_by_user
-from app.services.leave import LeavePermissionDenied, LeaveView, list_for_user
+from app.domain.leave import LeavePermissionDenied, LeaveView, list_for_user
 from app.tenancy import WorkspaceContext, tenant_agnostic
 
 __all__ = [

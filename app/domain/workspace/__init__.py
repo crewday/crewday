@@ -3,7 +3,7 @@
 Re-exports the workspace service so callers in other bounded contexts
 (API handlers, the SSE invalidation seam, the workspace-picker route)
 import from here rather than reaching directly into
-:mod:`app.services.workspace.settings_service`. Keeps the concrete
+:mod:`app.domain.workspace.settings_service`. Keeps the concrete
 module free to restructure its internals.
 
 The workspace service today owns one operation: owner-only edits to
@@ -25,7 +25,7 @@ glance", ``docs/specs/14-web-frontend.md`` §"Workspace settings", and
 
 from __future__ import annotations
 
-from app.services.workspace.settings_service import (
+from app.domain.workspace.settings_service import (
     OwnersOnlyError,
     WorkspaceBasics,
     WorkspaceFieldInvalid,

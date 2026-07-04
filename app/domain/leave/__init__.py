@@ -2,14 +2,14 @@
 
 Public re-exports for the service's write DTOs, read view, error
 classes, and service functions. Import sites should use this
-package, not the underlying :mod:`app.services.leave.service`
+package, not the underlying :mod:`app.domain.leave.service`
 module, so the implementation file is free to split without
 rippling through every caller.
 """
 
 from __future__ import annotations
 
-from app.services.leave.service import (
+from app.domain.leave.service import (
     LeaveBoundaryInvalid,
     LeaveConflictsView,
     LeaveCreate,

@@ -98,12 +98,16 @@ HTTP_PATH_OPTOUTS: frozenset[str] = frozenset(
 # here. The gate only asks "every ctx-taking function is covered OR
 # explicitly opted out"; non-ctx functions are out of scope.
 REPOSITORY_METHOD_OPTOUTS: frozenset[str] = frozenset(
-    # justification: (reserved — today every ctx-taking domain
-    # function is covered by the ORM-filter seam proven by
-    # TestScopedRowIsolation. Entries land here when a new
-    # ctx-taking function genuinely crosses workspaces by design,
-    # e.g. cross-workspace property-share read paths.)
-    set[str]()
+    {
+        # justification: deployment-owner reinstate (cd-pb8p) reverses a
+        # deployment-wide user suspension by writing engagement +
+        # user_work_role rows in EVERY workspace the user belongs to. It
+        # is gated on the deployment-owner check and runs under
+        # ``tenant_agnostic()`` by design — crossing workspaces is the
+        # whole point, so a single-workspace isolation case does not
+        # apply (relocated from ``app.services.employees`` by cd-4mae6).
+        "app.domain.employees.service.reinstate_user_deployment",
+    }
 )
 
 

@@ -33,7 +33,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from app.adapters.db.base import Base
 from app.adapters.db.session import make_engine
 from app.adapters.db.workspace.models import Workspace
-from app.services.workspace.deletion_service import WorkspacePurgeReport
+from app.domain.workspace.deletion_service import WorkspacePurgeReport
 from app.tenancy import tenant_agnostic
 from app.util.clock import FrozenClock
 from app.worker.tasks import workspace_purge as worker_purge

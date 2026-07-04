@@ -4,7 +4,7 @@ The concrete class here adapts SQLAlchemy ``Session`` work to the
 :class:`~app.domain.instructions.ports.InstructionsRepository` surface:
 
 * :class:`SqlAlchemyInstructionsRepository` — wraps every read/write the
-  :mod:`app.services.instructions.service` module needs against
+  :mod:`app.domain.instructions.service` module needs against
   :mod:`app.adapters.db.instructions.models` plus the cross-package
   read for area-scope mirror checks
   (:mod:`app.adapters.db.places.models`).

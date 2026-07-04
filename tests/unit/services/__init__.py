@@ -1,1 +1,1 @@
-"""Unit tests for the :mod:`app.services` context shims."""
+"""Unit tests for domain-context service surfaces (formerly ``app.services``)."""

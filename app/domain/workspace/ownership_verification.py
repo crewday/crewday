@@ -14,7 +14,7 @@ from app.auth import magic_link
 from app.auth._throttle import Throttle
 from app.authz.owners import is_owner_member
 from app.config import Settings
-from app.services.workspace.settings_service import OwnersOnlyError
+from app.domain.workspace.settings_service import OwnersOnlyError
 from app.tenancy import WorkspaceContext, tenant_agnostic
 from app.util.clock import Clock, SystemClock
 

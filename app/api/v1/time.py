@@ -66,6 +66,28 @@ from app.domain.errors import (
     ServiceUnavailable,
     Validation,
 )
+from app.domain.leave import (
+    LeaveBoundaryInvalid,
+    LeaveCreate,
+    LeaveDecision,
+    LeaveDecisionRequest,
+    LeaveKind,
+    LeaveKindInvalid,
+    LeaveNotFound,
+    LeavePermissionDenied,
+    LeaveStatus,
+    LeaveTransitionForbidden,
+    LeaveUpdateDates,
+    LeaveView,
+    cancel_own,
+    create_leave,
+    decide_leave,
+    get_conflicts,
+    get_leave,
+    list_for_user,
+    list_for_workspace,
+    update_dates,
+)
 from app.domain.time.geofence_settings import (
     GeofenceMode,
     GeofenceSettingNotFound,
@@ -92,28 +114,6 @@ from app.domain.time.shifts import (
     list_open_shifts,
     list_shifts,
     open_shift,
-)
-from app.services.leave import (
-    LeaveBoundaryInvalid,
-    LeaveCreate,
-    LeaveDecision,
-    LeaveDecisionRequest,
-    LeaveKind,
-    LeaveKindInvalid,
-    LeaveNotFound,
-    LeavePermissionDenied,
-    LeaveStatus,
-    LeaveTransitionForbidden,
-    LeaveUpdateDates,
-    LeaveView,
-    cancel_own,
-    create_leave,
-    decide_leave,
-    get_conflicts,
-    get_leave,
-    list_for_user,
-    list_for_workspace,
-    update_dates,
 )
 from app.tenancy import WorkspaceContext
 
@@ -186,7 +186,7 @@ class ShiftListResponse(BaseModel):
 
 
 class LeavePayload(BaseModel):
-    """HTTP projection of :class:`~app.services.leave.LeaveView`.
+    """HTTP projection of :class:`~app.domain.leave.LeaveView`.
 
     A Pydantic model rather than re-exporting the frozen dataclass so
     FastAPI's OpenAPI generator emits a named component schema the
@@ -607,7 +607,7 @@ def delete_one_geofence_setting(
 class MeLeaveCreate(BaseModel):
     """Request body for ``POST /me/leaves``.
 
-    A narrower shape than :class:`~app.services.leave.LeaveCreate`
+    A narrower shape than :class:`~app.domain.leave.LeaveCreate`
     (no ``user_id`` — the caller is always the target) so the SPA
     can't accidentally author a leave for someone else through the
     self-service surface. Managers use ``POST /leaves`` (not shipped

@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from app.adapters.db.llm.models import AgentDoc, AgentDocRevision
 from app.auth.session import SESSION_COOKIE_NAME
 from app.config import Settings
-from app.services.agent.system_docs import agent_doc_metadata_hash
+from app.domain.agent.system_docs import agent_doc_metadata_hash
 from app.tenancy import tenant_agnostic
 from app.util.ulid import new_ulid
 from tests.unit.api.admin._helpers import (

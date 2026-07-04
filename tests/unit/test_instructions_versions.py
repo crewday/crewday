@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 
 from app.adapters.db.authz.models import PermissionGroup, PermissionGroupMember
 from app.adapters.db.instructions.repositories import SqlAlchemyInstructionsRepository
-from app.services.instructions.service import (
+from app.domain.instructions.service import (
     ArchivedInstructionError,
     CurrentRevisionRestoreRejected,
     InstructionNotFound,

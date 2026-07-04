@@ -454,7 +454,7 @@ class TestAcceptSeedsEngagement:
         from app.adapters.db.workspace.repositories import (
             SqlAlchemyMembershipRepository,
         )
-        from app.services.employees.service import (
+        from app.domain.employees.service import (
             seed_pending_work_engagement,
         )
 

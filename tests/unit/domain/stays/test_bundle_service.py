@@ -25,9 +25,9 @@ from app.domain.stays.bundle_service import (
     register_subscriptions,
 )
 from app.domain.stays.turnover_generator import StaticReservationContextResolver
+from app.domain.tasks.tasks_create_occurrence import RecordingTasksCreateOccurrencePort
 from app.events.bus import EventBus
 from app.events.types import ReservationChangeKind, ReservationUpserted
-from app.ports.tasks_create_occurrence import RecordingTasksCreateOccurrencePort
 from app.tenancy import reset_current, set_current
 from app.tenancy.context import WorkspaceContext
 from app.util.ulid import new_ulid

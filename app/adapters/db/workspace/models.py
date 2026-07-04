@@ -163,7 +163,7 @@ class Workspace(Base):
     # Owner-mutable identity-level base columns (cd-n6p). §02
     # "workspaces" lists them as first-class workspace columns rather
     # than dotted keys on ``settings_json``; the owner-only update path
-    # in :mod:`app.services.workspace.settings_service` writes them
+    # in :mod:`app.domain.workspace.settings_service` writes them
     # under capability gating + audit trail. Server defaults match the
     # cd-n6p migration so an existing row materialises a coherent
     # value on read; the service always writes explicit values on

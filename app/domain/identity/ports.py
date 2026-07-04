@@ -24,7 +24,7 @@ Three repositories live here:
   the domain never sees an ORM row.
 * :class:`MembershipRepository` — workspace-scoped membership +
   engagement + user-work-role reads/writes consumed by
-  :mod:`app.services.employees.service` (profile / archive /
+  :mod:`app.domain.employees.service` (profile / archive /
   reinstate / accept-time engagement seed) and
   :mod:`app.domain.identity.work_engagements` (the seed helper
   called from :func:`app.domain.identity.membership._activate_invite`).
@@ -571,7 +571,7 @@ class MembershipRepository(Protocol):
     Wraps ``user_workspace``, ``work_engagement`` and
     ``user_work_role`` so the service layer never touches the SA
     classes directly. Consumed by
-    :mod:`app.services.employees.service` (profile read,
+    :mod:`app.domain.employees.service` (profile read,
     profile update membership probe, archive + reinstate sweep,
     accept-time engagement seed) and by
     :mod:`app.domain.identity.work_engagements.seed_pending_work_engagement`

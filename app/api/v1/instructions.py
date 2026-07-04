@@ -26,9 +26,9 @@ from app.api.pagination import (
     decode_cursor,
     encode_cursor,
 )
+from app.domain.instructions import service
 from app.events import InstructionArchived, InstructionCreated, InstructionUpdated
 from app.events.bus import bus as default_event_bus
-from app.services.instructions import service
 from app.tenancy import WorkspaceContext
 from app.util.clock import SystemClock
 

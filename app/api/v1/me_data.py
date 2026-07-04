@@ -37,7 +37,7 @@ rather than re-implement the queries:
 * expenses → :func:`app.api.v1.expenses.list_expense_claims_route`
   (``mine=True``) and :func:`app.api.v1.expenses.create_expense_claim_route`
   (create binds the claim to the caller's own engagement);
-* profile → :func:`app.services.employees.update_profile` (its self-edit
+* profile → :func:`app.domain.employees.update_profile` (its self-edit
   branch is un-gated when ``ctx.actor_id == user_id``).
 
 See ``docs/specs/03-auth-and-tokens.md`` §"Personal access tokens" /
@@ -66,15 +66,15 @@ from app.api.v1.expenses import (
 from app.api.v1.tasks.occurrences import _OccurrenceState, list_tasks_route
 from app.api.v1.tasks.payloads import TaskListResponse
 from app.authz.dep import MeScope
-from app.domain.errors import Forbidden, NotFound
-from app.domain.expenses.claims import ExpenseClaimCreate
-from app.services.employees import (
+from app.domain.employees import (
     EmployeeNotFound,
     EmployeeProfileUpdate,
     EmployeeView,
     ProfileFieldForbidden,
     update_profile,
 )
+from app.domain.errors import Forbidden, NotFound
+from app.domain.expenses.claims import ExpenseClaimCreate
 from app.tenancy import WorkspaceContext
 
 __all__ = [
@@ -295,7 +295,7 @@ def build_me_data_router() -> APIRouter:
     ) -> MeSelfProfileResponse:
         """Self-update display name / language / timezone.
 
-        Delegates to :func:`app.services.employees.update_profile` with
+        Delegates to :func:`app.domain.employees.update_profile` with
         ``user_id = ctx.actor_id``; its self-edit branch is un-gated
         (no ``users.edit_profile_other``) precisely because the target
         is the caller. Only fields the client sent are forwarded so an

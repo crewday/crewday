@@ -13,9 +13,9 @@ from app.adapters.db.inventory.models import Item, Stocktake, StocktakeLine
 from app.adapters.db.places.models import PropertyWorkspace
 from app.audit import write_audit
 from app.authz import InvalidScope, PermissionDenied, UnknownActionKey, require
+from app.domain.inventory import movement_service
+from app.domain.inventory.movement_service import InventoryMovementView
 from app.events.bus import EventBus
-from app.services.inventory import movement_service
-from app.services.inventory.movement_service import InventoryMovementView
 from app.tenancy import WorkspaceContext
 from app.util.clock import Clock, SystemClock
 from app.util.ulid import new_ulid

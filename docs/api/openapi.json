@@ -8780,7 +8780,7 @@
       },
       "EmployeeUpdateRequest": {
         "additionalProperties": false,
-        "description": "Request body for ``PATCH /users/{user_id}``.\n\nMirrors :class:`~app.services.employees.EmployeeProfileUpdate` \u2014\nevery field is optional and Pydantic's ``model_fields_set``\ndistinguishes \"omitted\" from \"explicitly set to None\".\n``extra='forbid'`` so unknown fields fail loud at 422 rather\nthan being silently ignored. ``display_name=None`` is rejected\nat the DTO boundary via :meth:`_reject_display_name_null` so\nthe NOT NULL contract on :class:`User` surfaces as a 422\nvalidation error rather than a 500.",
+        "description": "Request body for ``PATCH /users/{user_id}``.\n\nMirrors :class:`~app.domain.employees.EmployeeProfileUpdate` \u2014\nevery field is optional and Pydantic's ``model_fields_set``\ndistinguishes \"omitted\" from \"explicitly set to None\".\n``extra='forbid'`` so unknown fields fail loud at 422 rather\nthan being silently ignored. ``display_name=None`` is rejected\nat the DTO boundary via :meth:`_reject_display_name_null` so\nthe NOT NULL contract on :class:`User` surfaces as a 422\nvalidation error rather than a 500.",
         "properties": {
           "display_name": {
             "anyOf": [
@@ -13262,7 +13262,7 @@
         "type": "object"
       },
       "LeavePayload": {
-        "description": "HTTP projection of :class:`~app.services.leave.LeaveView`.\n\nA Pydantic model rather than re-exporting the frozen dataclass so\nFastAPI's OpenAPI generator emits a named component schema the\nSPA can pattern-match on. Mirrors the read shape of the domain\nview one-to-one \u2014 no filtering, no derived fields.",
+        "description": "HTTP projection of :class:`~app.domain.leave.LeaveView`.\n\nA Pydantic model rather than re-exporting the frozen dataclass so\nFastAPI's OpenAPI generator emits a named component schema the\nSPA can pattern-match on. Mirrors the read shape of the domain\nview one-to-one \u2014 no filtering, no derived fields.",
         "properties": {
           "created_at": {
             "format": "date-time",
@@ -15723,7 +15723,7 @@
       },
       "MeLeaveCreate": {
         "additionalProperties": false,
-        "description": "Request body for ``POST /me/leaves``.\n\nA narrower shape than :class:`~app.services.leave.LeaveCreate`\n(no ``user_id`` \u2014 the caller is always the target) so the SPA\ncan't accidentally author a leave for someone else through the\nself-service surface. Managers use ``POST /leaves`` (not shipped\nin this slice \u2014 cd-8pi) or go through the domain service for\ncross-user creation today.\n\n``kind`` narrows to the :data:`LeaveKind` literal so the HTTP\nboundary rejects out-of-set values with FastAPI's standard\n``detail[].loc/msg`` 422 envelope. The service-layer DTO\nreasserts the same check via :class:`LeaveKindInvalid` for\nPython callers that bypass this model.",
+        "description": "Request body for ``POST /me/leaves``.\n\nA narrower shape than :class:`~app.domain.leave.LeaveCreate`\n(no ``user_id`` \u2014 the caller is always the target) so the SPA\ncan't accidentally author a leave for someone else through the\nself-service surface. Managers use ``POST /leaves`` (not shipped\nin this slice \u2014 cd-8pi) or go through the domain service for\ncross-user creation today.\n\n``kind`` narrows to the :data:`LeaveKind` literal so the HTTP\nboundary rejects out-of-set values with FastAPI's standard\n``detail[].loc/msg`` 422 envelope. The service-layer DTO\nreasserts the same check via :class:`LeaveKindInvalid` for\nPython callers that bypass this model.",
         "properties": {
           "ends_at": {
             "format": "date-time",
@@ -29740,7 +29740,7 @@
         "type": "object"
       },
       "app__api__v1__users__EmployeeProfileResponse": {
-        "description": "Response body for ``PATCH /users/{user_id}`` / ``GET /users/{user_id}``.\n\nProjection of :class:`~app.services.employees.EmployeeView` \u2014\ncarries the minimal identity-level fields the SPA needs plus the\nworkspace-scoped engagement archival marker (derived from the\nactive :class:`~app.adapters.db.workspace.models.WorkEngagement`\nrow, if any).",
+        "description": "Response body for ``PATCH /users/{user_id}`` / ``GET /users/{user_id}``.\n\nProjection of :class:`~app.domain.employees.EmployeeView` \u2014\ncarries the minimal identity-level fields the SPA needs plus the\nworkspace-scoped engagement archival marker (derived from the\nactive :class:`~app.adapters.db.workspace.models.WorkEngagement`\nrow, if any).",
         "properties": {
           "avatar_blob_hash": {
             "anyOf": [
@@ -164802,7 +164802,7 @@
         }
       ],
       "patch": {
-        "description": "Self-update display name / language / timezone.\n\nDelegates to :func:`app.services.employees.update_profile` with\n``user_id = ctx.actor_id``; its self-edit branch is un-gated\n(no ``users.edit_profile_other``) precisely because the target\nis the caller. Only fields the client sent are forwarded so an\nomitted field is left untouched.",
+        "description": "Self-update display name / language / timezone.\n\nDelegates to :func:`app.domain.employees.update_profile` with\n``user_id = ctx.actor_id``; its self-edit branch is un-gated\n(no ``users.edit_profile_other``) precisely because the target\nis the caller. Only fields the client sent are forwarded so an\nomitted field is left untouched.",
         "operationId": "me.profile.self.update",
         "requestBody": {
           "content": {

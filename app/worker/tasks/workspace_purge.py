@@ -10,7 +10,7 @@ from app.adapters.db.session import make_uow
 from app.adapters.storage.ports import Storage
 from app.api.factory import _build_storage
 from app.config import get_settings
-from app.services.workspace.deletion_service import (
+from app.domain.workspace.deletion_service import (
     WorkspacePurgeReport,
     purge_due_workspaces,
 )

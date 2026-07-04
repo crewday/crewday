@@ -34,13 +34,13 @@ from app.domain.stays.turnover_generator import (
     _load_reservation,
     _next_stay_check_in,
 )
-from app.events.bus import EventBus
-from app.events.types import ReservationUpserted
-from app.ports.tasks_create_occurrence import (
+from app.domain.tasks.tasks_create_occurrence import (
     DEFAULT_PATCH_IN_PLACE_THRESHOLD,
     TasksCreateOccurrencePort,
     TurnoverOccurrenceRequest,
 )
+from app.events.bus import EventBus
+from app.events.types import ReservationUpserted
 from app.tenancy import WorkspaceContext
 from app.util.ulid import new_ulid
 

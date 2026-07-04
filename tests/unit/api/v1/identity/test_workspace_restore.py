@@ -19,8 +19,8 @@ from app.adapters.db.assets.models import AssetDocument
 from app.adapters.db.authz.models import RoleGrant
 from app.adapters.db.places.models import Property, PropertyWorkspace
 from app.adapters.db.workspace.models import Workspace
-from app.services.workspace.export_service import build_workspace_export
-from app.services.workspace.import_service import (
+from app.domain.workspace.export_service import build_workspace_export
+from app.domain.workspace.import_service import (
     WorkspaceImportError,
     restore_workspace_export,
 )

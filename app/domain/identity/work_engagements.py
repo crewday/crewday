@@ -3,7 +3,7 @@
 The :class:`~app.adapters.db.workspace.models.WorkEngagement` row is
 the per-(user, workspace) employment relationship that carries the
 pay pipeline. A sibling module,
-:mod:`app.services.employees.service`, already owns the
+:mod:`app.domain.employees.service`, already owns the
 *user-centric* archive + reinstate flow exposed via ``POST
 /users/{id}/archive`` and ``POST /users/{id}/reinstate`` — that path
 archives the active engagement **plus** every active user_work_role
@@ -17,13 +17,13 @@ archive / reinstate paths here target a specific engagement by id
 leaving the user's other engagements and user_work_role rows alone).
 The engagement-centric path is a narrower tool than the user-centric
 one; callers who want the sweep still go through
-:mod:`app.services.employees.service`.
+:mod:`app.domain.employees.service`.
 
 Public surface:
 
 * **DTOs** — :class:`WorkEngagementUpdate`, :class:`WorkEngagementView`.
   No ``Create`` DTO: engagements are seeded on invite-accept
-  (:func:`app.services.employees.service.seed_pending_work_engagement`)
+  (:func:`app.domain.employees.service.seed_pending_work_engagement`)
   and upgraded over time; spec §12 does not expose a
   ``POST /work_engagements`` endpoint.
 * **Service functions** — :func:`list_work_engagements` (cursor-
@@ -393,7 +393,7 @@ def archive_work_engagement(
 ) -> WorkEngagementView:
     """Stamp ``archived_on`` on a single engagement — idempotent.
 
-    Differs from :func:`app.services.employees.service.archive_employee`
+    Differs from :func:`app.domain.employees.service.archive_employee`
     in scope: this path targets one engagement row by id and does
     NOT sweep the user's user_work_role rows. The user-centric
     archive in the employees service is the right tool for full
@@ -563,7 +563,7 @@ def seed_pending_work_engagement(
     writes the junction row in the same transaction just upstream of
     this call.
 
-    Lives here, not under :mod:`app.services.employees.service`, so
+    Lives here, not under :mod:`app.domain.employees.service`, so
     :mod:`app.domain.identity.membership` can call it without crossing
     the domain → services boundary (cd-hso7). The services-layer
     module re-exports this name for backward-compat callers.

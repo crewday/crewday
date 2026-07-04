@@ -147,6 +147,7 @@ from app.domain.agent.preferences import (
     is_action_blocked,
     resolve_preferences,
 )
+from app.domain.llm import get_active_prompt
 from app.domain.llm.budget import (
     BudgetExceeded,
     PricingTable,
@@ -176,7 +177,6 @@ from app.events.types import (
     AgentTurnScope,
     AgentTurnStarted,
 )
-from app.services.llm import get_active_prompt
 from app.tenancy import WorkspaceContext, tenant_agnostic
 from app.util.clock import Clock, SystemClock
 from app.util.ulid import new_ulid

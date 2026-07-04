@@ -6,7 +6,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.adapters.db.llm.models import LlmPromptTemplate, LlmPromptTemplateRevision
-from app.services.llm import get_active_prompt
+from app.domain.llm import get_active_prompt
 from app.util.clock import FrozenClock
 
 

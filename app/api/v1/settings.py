@@ -10,7 +10,7 @@ GET   /settings/catalog
 
 The four workspace identity fields (`name`, `default_timezone`,
 `default_locale`, `default_currency`) already live on first-class
-columns and are edited through `app.services.workspace.settings_service`.
+columns and are edited through `app.domain.workspace.settings_service`.
 This router exposes the broader structured settings cascade held in
 `workspace.settings_json`, merged with the catalog defaults so the SPA
 can render one concrete workspace-default map.
@@ -58,19 +58,19 @@ from app.domain.errors import (
     RateLimited,
     Validation,
 )
-from app.events.bus import bus as default_event_bus
-from app.events.types import WorkspaceChanged
-from app.services.workspace.ownership_verification import (
+from app.domain.workspace.ownership_verification import (
     WorkspaceVerificationMismatch,
     WorkspaceVerificationNotFound,
     consume_ownership_verification,
     request_ownership_verification,
 )
-from app.services.workspace.settings_service import (
+from app.domain.workspace.settings_service import (
     OwnersOnlyError,
     WorkspaceFieldInvalid,
     update_basics,
 )
+from app.events.bus import bus as default_event_bus
+from app.events.types import WorkspaceChanged
 from app.tenancy import WorkspaceContext, tenant_agnostic
 from app.util.clock import SystemClock
 

@@ -508,7 +508,7 @@ def _gate_or_self(
     """Require ``cross_user_action`` when targeting someone else; else pass.
 
     Centralises the "requester-or-manager" rule that every
-    :mod:`app.services.leave.service` write shares. Raising
+    :mod:`app.domain.leave.service` write shares. Raising
     :class:`LeavePermissionDenied` (not the bare
     :class:`~app.authz.PermissionDenied`) lets the router's error
     map stay narrow — one domain exception type per 403 shape.

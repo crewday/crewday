@@ -14,7 +14,7 @@ from app.adapters.db.audit.models import AuditLog
 from app.adapters.db.places.models import Property, PropertyWorkspace
 from app.adapters.db.workspace.models import Workspace
 from app.api.v1.admin import router as admin_router
-from app.services.workspace.deletion_service import purge_due_workspaces
+from app.domain.workspace.deletion_service import purge_due_workspaces
 from app.tenancy import tenant_agnostic
 from app.tenancy.context import WorkspaceContext
 from app.util.clock import FrozenClock

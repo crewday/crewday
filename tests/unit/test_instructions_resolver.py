@@ -13,7 +13,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from app.adapters.db.base import Base
 from app.adapters.db.instructions.repositories import SqlAlchemyInstructionsRepository
 from app.adapters.db.session import make_engine
-from app.services.instructions.service import resolve_instructions
+from app.domain.instructions.service import resolve_instructions
 from app.tenancy.context import WorkspaceContext
 from app.util.clock import FrozenClock
 from app.util.ulid import new_ulid

@@ -1981,7 +1981,7 @@ def _install_custom_openapi(app: FastAPI) -> None:
 
 def _seed_agent_docs_for_lifespan(settings: Settings) -> None:
     """Seed deployment-scoped agent docs during application startup."""
-    from app.services.agent.system_docs import seed_agent_docs
+    from app.domain.agent.system_docs import seed_agent_docs
 
     with make_uow(settings.database_url) as session:
         if not isinstance(session, Session):

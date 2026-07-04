@@ -13,7 +13,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from app.adapters.db.base import Base
 from app.adapters.db.inventory.models import Movement, Stocktake, StocktakeLine
 from app.adapters.db.session import make_engine
-from app.services.inventory import movement_service, stocktake_service
+from app.domain.inventory import movement_service, stocktake_service
 from app.util.clock import FrozenClock
 from tests.unit.test_stocktake_service import _seed_item, _seed_scope
 

@@ -12,9 +12,9 @@ from sqlalchemy.orm import Session
 from app.adapters.db.inventory.models import Item, Movement
 from app.adapters.db.places.models import Property, PropertyWorkspace
 from app.adapters.db.workspace.models import Workspace
+from app.domain.inventory import movement_service
 from app.events.bus import EventBus
 from app.events.types import InventoryItemChanged
-from app.services.inventory import movement_service
 from app.tenancy import WorkspaceContext, tenant_agnostic
 from app.util.clock import FrozenClock
 from app.util.ulid import new_ulid

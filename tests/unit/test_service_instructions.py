@@ -1,4 +1,4 @@
-"""Unit tests for :mod:`app.services.instructions.service`.
+"""Unit tests for :mod:`app.domain.instructions.service`.
 
 Mirrors the in-memory SQLite bootstrap in
 ``tests/unit/services/test_service_employees.py``: a fresh engine
@@ -66,7 +66,7 @@ from app.adapters.db.instructions.repositories import (
 from app.adapters.db.places.models import Area, Property, PropertyWorkspace
 from app.adapters.db.session import make_engine
 from app.adapters.db.workspace.models import Workspace
-from app.services.instructions.service import (
+from app.domain.instructions.service import (
     ArchivedInstructionError,
     InstructionNotFound,
     ScopeValidationError,

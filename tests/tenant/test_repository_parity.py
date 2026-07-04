@@ -1116,6 +1116,72 @@ COVERED_METHODS: frozenset[str] = frozenset(
         "app.domain.time.occurrence_shifts.handle_occurrence_completed",
         "app.domain.time.occurrence_shifts.handle_occurrence_started",
         "app.domain.time.shifts.find_shift_by_source_occurrence",
+        # cd-4mae6: services relocated from ``app.services`` into their
+        # domain contexts, bringing them under this parity gate for the
+        # first time. All are workspace-scoped and tenant-isolated: the
+        # standard CRUD surfaces filter by ``ctx.workspace_id`` through
+        # the ORM-filter seam; the ``workspace.*`` root surfaces key
+        # their reads/writes on the tenancy-root ``workspaces`` row by
+        # explicit ``ctx.workspace_id`` (the workspaces table is the
+        # tenancy root and does not self-filter), so a peer context can
+        # only ever touch its own workspace row.
+        # employees context
+        "app.domain.employees.service.archive_employee",
+        "app.domain.employees.service.get_employee",
+        "app.domain.employees.service.iter_active_engagements",
+        "app.domain.employees.service.reinstate_employee",
+        "app.domain.employees.service.update_profile",
+        # instructions context
+        "app.domain.instructions.service.archive",
+        "app.domain.instructions.service.create",
+        "app.domain.instructions.service.list_revisions",
+        "app.domain.instructions.service.resolve_instructions",
+        "app.domain.instructions.service.restore_to_revision",
+        "app.domain.instructions.service.update_body",
+        "app.domain.instructions.service.update_metadata",
+        # inventory context
+        "app.domain.inventory.item_service.archive",
+        "app.domain.inventory.item_service.create",
+        "app.domain.inventory.item_service.get_by_barcode",
+        "app.domain.inventory.item_service.get_by_sku",
+        "app.domain.inventory.item_service.list",
+        "app.domain.inventory.item_service.list_low_stock",
+        "app.domain.inventory.item_service.restore",
+        "app.domain.inventory.item_service.update",
+        "app.domain.inventory.movement_service.adjust_to_observed",
+        "app.domain.inventory.movement_service.consume",
+        "app.domain.inventory.movement_service.ensure_active_item",
+        "app.domain.inventory.movement_service.list_movements",
+        "app.domain.inventory.movement_service.produce",
+        "app.domain.inventory.movement_service.reconcile",
+        "app.domain.inventory.movement_service.record",
+        "app.domain.inventory.movement_service.require_adjust_for_item",
+        "app.domain.inventory.movement_service.restock",
+        "app.domain.inventory.movement_service.transfer",
+        "app.domain.inventory.reorder_service.check_reorder_points",
+        "app.domain.inventory.report_service.production_rate",
+        "app.domain.inventory.report_service.shrinkage",
+        "app.domain.inventory.report_service.stocktake_activity",
+        "app.domain.inventory.stocktake_service.abandon_stale",
+        "app.domain.inventory.stocktake_service.commit",
+        "app.domain.inventory.stocktake_service.get",
+        "app.domain.inventory.stocktake_service.list_for_property",
+        "app.domain.inventory.stocktake_service.open",
+        "app.domain.inventory.stocktake_service.save_line",
+        # leave context
+        "app.domain.leave.service.cancel_own",
+        "app.domain.leave.service.create_leave",
+        "app.domain.leave.service.decide_leave",
+        "app.domain.leave.service.get_conflicts",
+        "app.domain.leave.service.get_leave",
+        "app.domain.leave.service.list_for_user",
+        "app.domain.leave.service.list_for_workspace",
+        "app.domain.leave.service.update_dates",
+        # workspace context — root-scoped, keyed by ctx.workspace_id
+        "app.domain.workspace.export_service.build_workspace_export",
+        "app.domain.workspace.ownership_verification.consume_ownership_verification",
+        "app.domain.workspace.ownership_verification.request_ownership_verification",
+        "app.domain.workspace.settings_service.update_basics",
     }
 )
 

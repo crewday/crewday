@@ -14,9 +14,9 @@ from app.adapters.db.inventory.models import Item, Movement
 from app.adapters.db.places.models import Property, PropertyWorkspace
 from app.adapters.db.session import make_engine
 from app.adapters.db.tasks.models import Occurrence
+from app.domain.inventory import movement_service
 from app.events.bus import EventBus
 from app.events.types import InventoryLowStock
-from app.services.inventory import movement_service
 from app.tenancy import WorkspaceContext, tenant_agnostic
 from app.util.clock import FrozenClock
 from app.util.ulid import new_ulid

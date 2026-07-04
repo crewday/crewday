@@ -15,7 +15,7 @@ Two surfaces live here:
 The cd-ncbdb adapter persists a turnover :class:`Occurrence` row
 when the stays-side bundle service / turnover generator decides one
 should exist. Until cd-ncbdb landed the
-:class:`~app.ports.tasks_create_occurrence.NoopTasksCreateOccurrencePort`
+:class:`~app.domain.tasks.tasks_create_occurrence.NoopTasksCreateOccurrencePort`
 stub kept the call surface honest while the actual write surface was
 absent; this module flips that wiring to a live concretion that
 implements the full create-or-patch state machine the port
@@ -84,7 +84,7 @@ from app.domain.tasks.ports import (
     ModerationDenied,
     OccurrenceCommentScopeRow,
 )
-from app.ports.tasks_create_occurrence import (
+from app.domain.tasks.tasks_create_occurrence import (
     TasksCreateOccurrenceOutcome,
     TurnoverOccurrenceRequest,
     TurnoverOccurrenceResult,

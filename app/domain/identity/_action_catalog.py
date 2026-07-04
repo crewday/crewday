@@ -482,7 +482,7 @@ _RULE_DRIVEN: tuple[ActionSpec, ...] = (
         # Workers self-request leave; managers + owners also hold the
         # capability so a manager creating a leave on their own account
         # takes the same code path. Cross-user creation is gated on
-        # ``leaves.edit_others`` — see :mod:`app.services.leave.service`
+        # ``leaves.edit_others`` — see :mod:`app.domain.leave.service`
         # (cd-31c). Listed in ``docs/specs/05-employees-and-roles.md``
         # §"Rule-driven actions".
         valid_scope_kinds=("workspace",),

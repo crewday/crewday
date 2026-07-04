@@ -20,7 +20,7 @@ from app.adapters.db.base import Base
 from app.adapters.db.identity.models import User
 from app.adapters.db.workspace.models import Workspace
 from app.adapters.storage.ports import Storage
-from app.services.workspace.export_service import (
+from app.domain.workspace.export_service import (
     WORKSPACE_EXPORT_SCHEMA_VERSION,
     WORKSPACE_EXPORT_TABLES,
 )

@@ -17,15 +17,15 @@ from app.adapters.db.session import make_engine
 from app.adapters.db.tasks.models import Occurrence
 from app.adapters.db.time.models import Leave, Shift
 from app.adapters.db.workspace.models import Workspace
-from app.events.bus import EventBus
-from app.events.types import LeaveDecided
-from app.services.leave import (
+from app.domain.leave import (
     LeaveDecisionRequest,
     LeavePermissionDenied,
     LeaveTransitionForbidden,
     decide_leave,
     get_conflicts,
 )
+from app.events.bus import EventBus
+from app.events.types import LeaveDecided
 from app.tenancy.context import ActorGrantRole, WorkspaceContext
 from app.util.clock import FrozenClock
 from app.util.ulid import new_ulid

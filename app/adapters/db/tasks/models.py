@@ -780,7 +780,7 @@ class Occurrence(Base):
     # single-shot rules persist an empty string so the partial
     # unique index keys the same pair the same way every time.
     # Populated only by the
-    # :class:`~app.ports.tasks_create_occurrence.TasksCreateOccurrencePort`
+    # :class:`~app.domain.tasks.tasks_create_occurrence.TasksCreateOccurrencePort`
     # SQLAlchemy concretion; schedule-driven (cd-22e) and one-off
     # (cd-0rf) occurrences leave the triple ``NULL``.
     reservation_id: Mapped[str | None] = mapped_column(String, nullable=True)

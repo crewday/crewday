@@ -123,6 +123,7 @@ from app.adapters.storage.ports import (
     Storage,
 )
 from app.audit import write_audit
+from app.domain.inventory import movement_service
 from app.domain.settings.cascade import (
     EvidencePolicy,
     EvidencePolicyResolver,
@@ -147,7 +148,6 @@ from app.events.types import (
     TaskOccurrenceStarted,
     TaskSkipped,
 )
-from app.services.inventory import movement_service
 from app.tenancy import WorkspaceContext, tenant_agnostic
 from app.util.clock import Clock, SystemClock
 from app.util.ulid import new_ulid

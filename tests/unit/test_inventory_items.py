@@ -15,8 +15,8 @@ from app.adapters.db.base import Base
 from app.adapters.db.inventory.models import Item
 from app.adapters.db.places.models import Property, PropertyWorkspace
 from app.adapters.db.session import make_engine
-from app.services.inventory import item_service
-from app.services.inventory.item_service import InventoryItemCreate, InventoryItemUpdate
+from app.domain.inventory import item_service
+from app.domain.inventory.item_service import InventoryItemCreate, InventoryItemUpdate
 from app.tenancy import WorkspaceContext, tenant_agnostic
 from app.util.clock import FrozenClock
 from app.util.ulid import new_ulid

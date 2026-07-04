@@ -97,9 +97,9 @@ from app.domain.stays.ical_service import (
     resolve_allow_self_signed,
     update_feed,
 )
+from app.domain.tasks.tasks_create_occurrence import TasksCreateOccurrencePort
 from app.events.bus import bus as default_event_bus
 from app.events.types import ReservationUpserted
-from app.ports.tasks_create_occurrence import TasksCreateOccurrencePort
 from app.tenancy import WorkspaceContext, tenant_agnostic
 from app.tenancy.current import reset_current, set_current
 from app.util.clock import Clock, SystemClock

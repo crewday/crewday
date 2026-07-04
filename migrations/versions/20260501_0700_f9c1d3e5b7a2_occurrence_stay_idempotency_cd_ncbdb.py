@@ -5,7 +5,7 @@ Revises: e8b0c2d4f6a9
 Create Date: 2026-05-01 07:00:00.000000
 
 Extends ``occurrence`` with the natural-key columns the
-:class:`~app.ports.tasks_create_occurrence.TasksCreateOccurrencePort`
+:class:`~app.domain.tasks.tasks_create_occurrence.TasksCreateOccurrencePort`
 SQLAlchemy concretion (cd-ncbdb) keys idempotency on:
 
 * ``reservation_id`` — soft pointer to ``reservation.id``. No FK so
@@ -32,7 +32,7 @@ already in the database.
         WHERE reservation_id IS NOT NULL AND state != 'cancelled'
 
 matching the
-:mod:`app.ports.tasks_create_occurrence` "Idempotency contract":
+:mod:`app.domain.tasks.tasks_create_occurrence` "Idempotency contract":
 ``(reservation_id, rule_id, occurrence_key)`` is the dedup key for
 the **live** row. ``workspace_id`` leads the index for tenant
 locality and to satisfy the ORM tenant filter's predicate. Scoped
@@ -53,7 +53,7 @@ must be reasserted before the next upgrade.
 See ``docs/specs/04-properties-and-stays.md`` §"Stay task bundles",
 ``docs/specs/06-tasks-and-scheduling.md`` §"Task row", and the
 "Idempotency contract" docstring on
-:mod:`app.ports.tasks_create_occurrence`.
+:mod:`app.domain.tasks.tasks_create_occurrence`.
 """
 
 from __future__ import annotations

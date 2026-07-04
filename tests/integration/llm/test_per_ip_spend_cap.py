@@ -26,7 +26,7 @@ from app.domain.llm.budget import (
     normalize_signup_ip_key,
 )
 from app.domain.plans import FREE_TIER_DEFAULTS
-from app.services.workspace.ownership_verification import (
+from app.domain.workspace.ownership_verification import (
     WorkspaceVerificationMismatch,
     consume_ownership_verification,
     request_ownership_verification,

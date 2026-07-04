@@ -8,7 +8,7 @@ reservation's check-in on the **same unit** (or property when no
 unit-mapping exists yet — the v1 ``reservation`` slice carries no
 ``unit_id`` column; that lands with cd-1ai). The actual write is
 delegated through the
-:class:`~app.ports.tasks_create_occurrence.TasksCreateOccurrencePort`
+:class:`~app.domain.tasks.tasks_create_occurrence.TasksCreateOccurrencePort`
 inter-context seam: the tasks-side service that owns occurrence
 persistence lands in Phase 5 (``p5.tasks.*``); until then the port's
 no-op double satisfies the contract and lets this generator ship.
@@ -82,14 +82,14 @@ from sqlalchemy.orm import Session
 
 from app.adapters.db.places.models import PropertyClosure
 from app.adapters.db.stays.models import Reservation
-from app.events.bus import EventBus
-from app.events.types import ReservationUpserted
-from app.ports.tasks_create_occurrence import (
+from app.domain.tasks.tasks_create_occurrence import (
     DEFAULT_PATCH_IN_PLACE_THRESHOLD,
     TasksCreateOccurrencePort,
     TurnoverOccurrenceRequest,
     TurnoverOccurrenceResult,
 )
+from app.events.bus import EventBus
+from app.events.types import ReservationUpserted
 from app.tenancy import WorkspaceContext
 
 __all__ = [
@@ -302,7 +302,7 @@ class RuleOutcome:
       ``"skipped_no_next_stay"``, ``"skipped_zero_gap"``,
       ``"skipped_closure"``.
     * ``port_outcome`` — the
-      :data:`~app.ports.tasks_create_occurrence.TasksCreateOccurrenceOutcome`
+      :data:`~app.domain.tasks.tasks_create_occurrence.TasksCreateOccurrenceOutcome`
       the port returned. ``None`` when the rule was skipped before
       reaching the port.
     * ``occurrence_id`` — the port's identifier when an occurrence
@@ -367,7 +367,7 @@ def handle_reservation_upserted(
 
     The function is **side-effect light by design**: every write
     travels through the
-    :class:`~app.ports.tasks_create_occurrence.TasksCreateOccurrencePort`
+    :class:`~app.domain.tasks.tasks_create_occurrence.TasksCreateOccurrencePort`
     so this module never touches ``occurrence`` rows directly.
     Reads (``Reservation``, ``PropertyClosure``) are workspace-
     scoped by the ORM tenant filter (the
@@ -492,9 +492,9 @@ def register_subscriptions(
     a test re-run that flips the bus back to "empty" can re-call
     this without double-firing the handler. The production caller
     holds the
-    :class:`~app.ports.tasks_create_occurrence.TasksCreateOccurrencePort`
+    :class:`~app.domain.tasks.tasks_create_occurrence.TasksCreateOccurrencePort`
     concretion the tasks-side service exposes; tests pass
-    :class:`~app.ports.tasks_create_occurrence.NoopTasksCreateOccurrencePort`
+    :class:`~app.domain.tasks.tasks_create_occurrence.NoopTasksCreateOccurrencePort`
     or a recorder.
 
     ``session_provider`` returns the open

@@ -39,13 +39,13 @@ from app.adapters.db.tasks.repositories import SqlAlchemyTasksCreateOccurrencePo
 from app.adapters.db.workspace.models import Workspace
 from app.config import Settings
 from app.domain.stays import bundle_service, turnover_generator
-from app.events.bus import bus as singleton_bus
-from app.events.types import ReservationUpserted
-from app.main import create_app
-from app.ports.tasks_create_occurrence import (
+from app.domain.tasks.tasks_create_occurrence import (
     TurnoverOccurrenceRequest,
     TurnoverOccurrenceResult,
 )
+from app.events.bus import bus as singleton_bus
+from app.events.types import ReservationUpserted
+from app.main import create_app
 from app.tenancy import reset_current, set_current, tenant_agnostic
 from app.tenancy.context import WorkspaceContext
 from app.tenancy.orm_filter import install_tenant_filter

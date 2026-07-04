@@ -17,18 +17,18 @@ from app.api.v1._problem_json import PROBLEM_JSON_CONTENT
 from app.authz.dep import Permission
 from app.domain.errors import Conflict, Forbidden, InvalidCursor, NotFound
 from app.domain.errors import Validation as DomainValidation
-from app.services.inventory import (
+from app.domain.inventory import (
     item_service,
     movement_service,
     report_service,
     stocktake_service,
 )
-from app.services.inventory.item_service import (
+from app.domain.inventory.item_service import (
     InventoryItemCreate,
     InventoryItemUpdate,
     InventoryItemView,
 )
-from app.services.inventory.movement_service import InventoryMovementView
+from app.domain.inventory.movement_service import InventoryMovementView
 from app.tenancy import WorkspaceContext
 
 __all__ = [

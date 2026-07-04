@@ -28,7 +28,7 @@ Specifically:
 
 We deliberately do NOT exercise the real tasks-side adapter here —
 it lands with cd-4qr Phase 5. The
-:class:`~app.ports.tasks_create_occurrence.RecordingTasksCreateOccurrencePort`
+:class:`~app.domain.tasks.tasks_create_occurrence.RecordingTasksCreateOccurrencePort`
 double simulates the deterministic state machine the production
 adapter promises so the integration covers the full event →
 generator → port surface.
@@ -53,11 +53,11 @@ from app.domain.stays.turnover_generator import (
     handle_reservation_upserted,
     register_subscriptions,
 )
-from app.events.bus import EventBus
-from app.events.types import ReservationChangeKind, ReservationUpserted
-from app.ports.tasks_create_occurrence import (
+from app.domain.tasks.tasks_create_occurrence import (
     RecordingTasksCreateOccurrencePort,
 )
+from app.events.bus import EventBus
+from app.events.types import ReservationChangeKind, ReservationUpserted
 from app.tenancy import reset_current, set_current, tenant_agnostic
 from app.tenancy.context import WorkspaceContext
 from app.util.ulid import new_ulid
