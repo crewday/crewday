@@ -132,6 +132,9 @@ from app.domain.identity.ports import (
 # call site (``membership._activate_invite``) does not have to cross
 # the domain → services boundary (cd-hso7).
 from app.domain.identity.work_engagements import seed_pending_work_engagement
+from app.events.bus import EventBus
+from app.events.bus import bus as default_event_bus
+from app.events.types import UserProfileUpdated
 from app.tenancy import WorkspaceContext, tenant_agnostic
 from app.util.clock import Clock, SystemClock
 
@@ -386,6 +389,7 @@ def update_profile(
     user_id: str,
     body: EmployeeProfileUpdate,
     clock: Clock | None = None,
+    event_bus: EventBus | None = None,
 ) -> EmployeeView:
     """Partial update of an employee's profile fields.
 
@@ -401,7 +405,10 @@ def update_profile(
     capability check so a cross-tenant probe still collapses to 404.
 
     One ``employee.profile_updated`` audit row per call, carrying a
-    redacted before / after diff of the changed fields.
+    redacted before / after diff of the changed fields. When at least
+    one field actually changes, also publishes a workspace-scoped
+    ``user.profile.updated`` event (§14 SSE) so same-workspace tabs
+    invalidate the edited user's cached profile row.
     """
     # code-health: ignore[nloc] Policy txn keeps auth, validation, state, and events together.  # noqa: E501
     resolved_clock = clock if clock is not None else SystemClock()
@@ -475,6 +482,25 @@ def update_profile(
         action="employee.profile_updated",
         diff={"before": before, "after": after},
         clock=resolved_clock,
+    )
+
+    # §14 SSE — a same-workspace tab may render the edited user's
+    # ``display_name`` (the ClientLayout sidebar footer reads
+    # ``qk.user(<id>)``). Publish a workspace-scoped ``user.profile.updated``
+    # so those tabs invalidate that key and re-fetch the name without a
+    # remount (cd-xse4d). Only reached in the ``after`` (real-change)
+    # branch, so a no-op patch never fans a zero-delta event. Payload
+    # carries the FK ``user_id`` only — the rendered name is re-fetched
+    # via REST under the normal per-row authz path.
+    resolved_bus = event_bus if event_bus is not None else default_event_bus
+    resolved_bus.publish(
+        UserProfileUpdated(
+            workspace_id=ctx.workspace_id,
+            actor_id=ctx.actor_id,
+            correlation_id=ctx.audit_correlation_id,
+            occurred_at=resolved_clock.now(),
+            user_id=user_id,
+        )
     )
 
     engagement = repo.get_active_engagement(

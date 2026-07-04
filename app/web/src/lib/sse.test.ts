@@ -109,6 +109,7 @@ describe("INVALIDATIONS — coverage", () => {
     "leave.decided",
     "user_leave.upserted",
     "user_availability_override.upserted",
+    "user.profile.updated",
     "expense.created",
     "expense.submitted",
     "expense.cancelled",
@@ -547,6 +548,21 @@ describe("INVALIDATIONS — per-kind behaviour", () => {
     expect(called).toEqual(
       expect.arrayContaining([qk.mySchedulePrefix(), qk.meOverrides()]),
     );
+  });
+
+  it("user.profile.updated invalidates the edited user's profile row (cd-xse4d)", () => {
+    // §14 — a same-workspace profile edit publishes `user.profile.updated`
+    // with the edited `user_id`. The dispatcher drops `qk.user(<id>)` so
+    // the ClientLayout sidebar footer re-fetches the fresh display_name
+    // without a remount.
+    const qc = makeClient();
+    const spy = vi.spyOn(qc, "invalidateQueries");
+    INVALIDATIONS["user.profile.updated"](
+      makeEvent("user.profile.updated", { user_id: "u1" }),
+      qc,
+    );
+    const called = spy.mock.calls.map((c) => c[0]?.queryKey);
+    expect(called).toEqual(expect.arrayContaining([qk.user("u1")]));
   });
 
   it("task.updated invalidates the per-row detail key by task_id", () => {

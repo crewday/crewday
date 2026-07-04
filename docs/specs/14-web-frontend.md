@@ -852,6 +852,16 @@ define what the platform must guarantee.
   (`{leave_id|override_id, user_id, state}` where `state` is one of
   `pending` / `approved` / `rejected` / `cancelled`); subscribers
   re-fetch via REST under the per-row authz path. No polling.
+  The `user.profile.updated` event (cd-xse4d) rides the `ALL_ROLES`
+  default and covers a member's identity-profile edit via
+  `PATCH /users/{id}` or `PATCH /me/profile` (`display_name` / `locale`
+  / `timezone`). Published once from the shared
+  `app.domain.employees.service.update_profile` point when a field
+  actually moves, so both edit paths fan the same signal; it
+  invalidates `qk.user(<id>)` so a same-workspace tab rendering the
+  edited user's `display_name` (e.g. the sidebar footer) refreshes
+  without a remount. Payload is FK-only (`{user_id}`); subscribers
+  re-fetch via REST under the per-row authz path.
 - **Route-split bundles.** Worker and owner/manager entry points are
   separate. Shared routes (see route contract above) land in both
   bundles. Only manager-only operational surfaces (`dashboard`,

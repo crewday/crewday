@@ -108,6 +108,10 @@ export type EventKind =
   // `approval.decided` event misses.
   | "user_leave.upserted"
   | "user_availability_override.upserted"
+  // User profile edit (§14, cd-xse4d) — display_name/locale/timezone
+  // change via PATCH /users/{id} or PATCH /me/profile. Invalidates the
+  // edited user's cached profile row so the sidebar name refreshes.
+  | "user.profile.updated"
   // Expenses (§09).
   | "expense.created"
   | "expense.submitted"
@@ -455,6 +459,10 @@ interface RoleGrantPayload {
 
 interface ApiTokenPayload {
   id?: string;
+}
+
+interface UserProfilePayload {
+  user_id: string;
 }
 
 function invalidate(qc: QueryClient, queryKey: readonly unknown[]): void {
@@ -873,6 +881,16 @@ export const INVALIDATIONS: Record<EventKind, InvalidationHandler> = {
     // override list lives under `qk.meOverrides()` (cd-93wp).
     invalidate(qc, qk.mySchedulePrefix());
     invalidate(qc, qk.meOverrides());
+  },
+
+  "user.profile.updated": (event, qc) => {
+    // §14 — a same-workspace member's profile changed (cd-xse4d). Drop
+    // the edited user's cached `/users/{id}` row so the ClientLayout
+    // sidebar footer re-fetches the fresh `display_name` without a
+    // remount. Keyed by the edited `user_id`, so only tabs that
+    // actually cached that row refetch.
+    const payload = event.data as unknown as UserProfilePayload;
+    invalidate(qc, qk.user(payload.user_id));
   },
 
   "expense.created": (_event, qc) => {

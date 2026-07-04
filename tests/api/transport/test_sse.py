@@ -1336,6 +1336,13 @@ DEFAULT_ROLE_EVENTS_ALLOWLIST: frozenset[str] = frozenset(
         "property.closure.updated",
         "shift.ended",
         "time.shift.changed",
+        # ``user.profile.updated`` rides the ``ALL_ROLES`` default: a
+        # display-name change is workspace-wide context any grant role
+        # may render (the ClientLayout sidebar footer shows it for
+        # whichever role the edited user holds). The payload carries the
+        # FK ``user_id`` only — no name value on the wire; the SPA
+        # re-fetches via ``GET /users/{id}`` under per-row authz. cd-xse4d.
+        "user.profile.updated",
         # ``notification.created`` keeps every role on ``allowed_roles``
         # because a notification can legitimately land for any grant
         # (an owner / manager / worker / client). The real narrowing

@@ -130,6 +130,7 @@ __all__ = [
     "UserAgentSettingsChanged",
     "UserAvailabilityOverrideUpserted",
     "UserLeaveUpserted",
+    "UserProfileUpdated",
     "VendorInvoiceChanged",
     "VendorInvoicePaid",
     "WorkOrderCompleted",
@@ -479,6 +480,46 @@ class UserAgentSettingsChanged(Event):
 
     actor_user_id: str
     changed_keys: tuple[str, ...]
+
+
+@register
+class UserProfileUpdated(Event):
+    """A workspace member's identity profile fields changed (cd-xse4d).
+
+    Fired by :func:`app.domain.employees.service.update_profile` after
+    the audit row lands and at least one of ``display_name`` / ``locale``
+    / ``timezone`` actually moved (no-op patches skip the publish, same
+    as :class:`TaskUpdated`). Both edit paths — the manager-facing
+    ``PATCH /users/{id}`` and the self-service ``PATCH /me/profile`` —
+    route through that one service point, so a single publish covers
+    both.
+
+    **Why workspace-scoped, not user-scoped.** The signal must reach
+    *every* same-workspace tab that has the edited user's profile row
+    cached — the ClientLayout sidebar footer renders ``display_name``
+    from ``qk.user(<id>)`` (§14), and a manager who renamed a worker
+    must see that worker's own sidebar refresh, not just their own
+    tabs. A ``user_scoped=True`` narrowing would pin delivery to the
+    *editor's* tabs and miss the renamed user entirely, so the event
+    stays workspace-wide and the SPA invalidates by the edited
+    ``user_id`` in the payload.
+
+    **Role scope.** Defaults to :data:`ALL_ROLES`. A display-name
+    change is workspace-wide context any grant role may legitimately
+    observe (the sidebar footer renders for whichever role the edited
+    user holds), and the payload carries only the foreign-key
+    ``user_id`` — no ``display_name`` value on the wire. Subscribers
+    re-fetch the rendered name via ``GET /users/{id}`` under the normal
+    per-row authorisation path. The ``DEFAULT_ROLE_EVENTS_ALLOWLIST``
+    review gate confirms this posture is conscious.
+    """
+
+    name: ClassVar[str] = "user.profile.updated"
+
+    # The edited user (the subject). Distinct from the base
+    # ``actor_id``, which carries the editor — the two differ whenever a
+    # manager edits someone else's profile via ``users.edit_profile_other``.
+    user_id: str
 
 
 @register

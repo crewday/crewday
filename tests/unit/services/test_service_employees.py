@@ -76,6 +76,8 @@ from app.domain.employees.service import (
     seed_pending_work_engagement,
     update_profile,
 )
+from app.events.bus import EventBus
+from app.events.types import UserProfileUpdated
 from app.tenancy.context import WorkspaceContext
 from app.util.clock import FrozenClock
 from app.util.ulid import new_ulid
@@ -381,6 +383,105 @@ class TestUpdateProfile:
         )
         assert view.display_name == "Carol"
         assert _audit_rows(session, entity_id=user.id) == []
+
+    def test_change_publishes_user_profile_updated(
+        self, session_employees: Session, clock: FrozenClock
+    ) -> None:
+        """A real change fans a workspace-scoped ``user.profile.updated``."""
+        session = session_employees
+        ws = _bootstrap_workspace(session, slug="ws-evt")
+        user = _bootstrap_user(session, email="dave@example.com", display_name="Dave")
+        _attach(session, user_id=user.id, workspace_id=ws.id)
+        ctx = _ctx(ws.id, actor_id=user.id, slug=ws.slug)
+
+        bus = EventBus()
+        captured: list[UserProfileUpdated] = []
+        bus.subscribe(UserProfileUpdated)(captured.append)
+
+        update_profile(
+            _repo(session),
+            ctx,
+            user_id=user.id,
+            body=EmployeeProfileUpdate(display_name="Dave Example"),
+            clock=clock,
+            event_bus=bus,
+        )
+
+        assert captured == [
+            UserProfileUpdated(
+                workspace_id=ctx.workspace_id,
+                actor_id=ctx.actor_id,
+                correlation_id=ctx.audit_correlation_id,
+                occurred_at=clock.now(),
+                user_id=user.id,
+            )
+        ]
+
+    def test_cross_user_edit_publishes_subject_not_actor(
+        self, session_employees: Session, clock: FrozenClock
+    ) -> None:
+        """A manager renaming another user fans the SUBJECT's id, not the editor's.
+
+        Guards the wire-key contract (cd-xse4d): the payload ``user_id``
+        is the edited user so the SPA invalidates ``qk.user(<subject>)``
+        — the edited user's own sidebar footer, not the manager's. When
+        editor and subject coincide (self-edit) this distinction is
+        invisible, so the case is exercised explicitly here.
+        """
+        session = session_employees
+        ws = _bootstrap_workspace(session, slug="ws-evt-cross")
+        owner = _bootstrap_user(
+            session, email="owner@example.com", display_name="Owner"
+        )
+        target = _bootstrap_user(
+            session, email="frank@example.com", display_name="Frank Old"
+        )
+        ctx = _owner_ctx(session, user=owner, ws=ws, clock=clock)
+        _attach(session, user_id=target.id, workspace_id=ws.id)
+
+        bus = EventBus()
+        captured: list[UserProfileUpdated] = []
+        bus.subscribe(UserProfileUpdated)(captured.append)
+
+        update_profile(
+            _repo(session),
+            ctx,
+            user_id=target.id,
+            body=EmployeeProfileUpdate(display_name="Frank New"),
+            clock=clock,
+            event_bus=bus,
+        )
+
+        assert len(captured) == 1
+        event = captured[0]
+        assert event.user_id == target.id
+        assert event.actor_id == owner.id
+        assert event.user_id != event.actor_id
+
+    def test_noop_does_not_publish_user_profile_updated(
+        self, session_employees: Session, clock: FrozenClock
+    ) -> None:
+        """A zero-delta patch writes no audit row and fans no event."""
+        session = session_employees
+        ws = _bootstrap_workspace(session, slug="ws-evt-noop")
+        user = _bootstrap_user(session, email="erin@example.com", display_name="Erin")
+        _attach(session, user_id=user.id, workspace_id=ws.id)
+        ctx = _ctx(ws.id, actor_id=user.id, slug=ws.slug)
+
+        bus = EventBus()
+        captured: list[UserProfileUpdated] = []
+        bus.subscribe(UserProfileUpdated)(captured.append)
+
+        update_profile(
+            _repo(session),
+            ctx,
+            user_id=user.id,
+            body=EmployeeProfileUpdate(display_name="Erin"),
+            clock=clock,
+            event_bus=bus,
+        )
+
+        assert captured == []
 
     def test_cross_user_without_capability_forbidden(
         self, session_employees: Session, clock: FrozenClock
