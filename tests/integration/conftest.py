@@ -32,7 +32,9 @@ See ``docs/specs/17-testing-quality.md`` §"Integration".
 
 from __future__ import annotations
 
+import importlib
 import os
+import pkgutil
 import shutil
 import sqlite3
 import time
@@ -46,10 +48,84 @@ from alembic.config import Config as AlembicConfig
 from sqlalchemy import Engine
 from sqlalchemy.orm import Session, sessionmaker
 
+import app.adapters.db as _adapters_db_pkg
+from app.adapters.db.base import metadata as _app_metadata
 from app.adapters.db.session import make_engine, normalise_sync_url
 from app.config import get_settings
 
 _PREMIGRATED_URL_ENV = "CREWDAY_TEST_DB_PREMIGRATED_URL"
+
+_models_loaded = False
+
+
+def _ensure_models_loaded() -> None:
+    """Import every ``app.adapters.db.<context>.models`` once.
+
+    Mirrors ``migrations/env.py::_load_context_models`` so
+    :data:`app.adapters.db.base.metadata` carries every mapped table
+    before :func:`reset_shared_engine` walks it. The migration path
+    that copies a pre-migrated SQLite template (see :func:`db_url`)
+    skips Alembic's ``env.py``, so we cannot rely on that import having
+    happened in the worker process.
+    """
+    global _models_loaded
+    if _models_loaded:
+        return
+    for modinfo in pkgutil.iter_modules(
+        _adapters_db_pkg.__path__, prefix=f"{_adapters_db_pkg.__name__}."
+    ):
+        if not modinfo.ispkg:
+            continue
+        models_name = f"{modinfo.name}.models"
+        try:
+            importlib.import_module(models_name)
+        except ModuleNotFoundError as exc:
+            # Only swallow the "context has no models module yet" case;
+            # a genuinely broken import must surface.
+            if exc.name == models_name:
+                continue
+            raise
+    _models_loaded = True
+
+
+def reset_shared_engine(engine: Engine) -> None:
+    """Delete every committed row from the shared integration engine.
+
+    The ``tests/integration/api`` and ``tests/integration/admin`` suites
+    drive the app end-to-end and therefore *commit* seed + mutation rows
+    through ``session_factory`` / ``client`` fixtures so the app's own
+    UoW sessions (which open independent connections) can read them.
+    Those commits land on the session-scoped shared ``engine`` and — unlike
+    the rollback-wrapped :func:`db_session` — survive the test. Under the
+    default randomized xdist ordering they accumulate and leak across
+    tests, poisoning global assumptions (a sibling test's ad-hoc "delete
+    a subset of tables" sweep then trips FK constraints on the un-swept
+    children, ``bootstrap_user`` hits ``UNIQUE`` on a leftover email, and
+    ``.scalar()`` reads pick up a stranger's audit row).
+
+    Wiping every mapped table before each of those tests gives each one a
+    clean slate regardless of what ran before it. Tables are deleted in
+    reverse dependency order so foreign keys stay satisfied without
+    disabling enforcement; ``alembic_version`` is not in the ORM metadata
+    and is intentionally left untouched.
+
+    This is a *full* wipe: it also removes the reference rows a few
+    migrations seed (the default ``llm_provider`` / ``llm_model`` /
+    ``llm_provider_model`` / ``llm_assignment`` trio). That is deliberate —
+    a partial "only wipe what this test wrote" sweep is exactly the
+    fragile approach that caused the leak. Consequence: once any
+    ``api``/``admin`` test runs on an xdist worker, the migration seed is
+    gone for the rest of that worker's session, so a test that depends on
+    the seeded LLM defaults must create its own rows rather than assume the
+    migration seed is present. No current test relies on the seed (the full
+    ``tests/integration`` tree is green under randomized ordering); flagged
+    here so a future seed-dependent test does not chase a phantom
+    ordering flake.
+    """
+    _ensure_models_loaded()
+    with engine.begin() as conn:
+        for table in reversed(_app_metadata.sorted_tables):
+            conn.execute(table.delete())
 
 
 def _alembic_ini() -> Path:
