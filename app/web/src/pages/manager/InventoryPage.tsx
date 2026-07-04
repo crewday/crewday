@@ -544,7 +544,18 @@ export default function InventoryPage() {
                     <tr
                       key={item.id}
                       className={rowCls}
+                      role="button"
+                      tabIndex={0}
+                      aria-haspopup="dialog"
+                      aria-expanded={active}
+                      aria-label={`Open ${item.name} inventory ledger`}
                       onClick={() => setOpenItemId(item.id)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter" || e.key === " ") {
+                          e.preventDefault();
+                          setOpenItemId(item.id);
+                        }
+                      }}
                     >
                       <td><strong>{item.name}</strong></td>
                       <td className="mono muted">{item.sku}</td>

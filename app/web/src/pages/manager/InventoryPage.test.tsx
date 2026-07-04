@@ -385,6 +385,39 @@ describe("<InventoryPage>", () => {
     }
   });
 
+  it("opens the drawer from the keyboard-focusable row and restores focus on close", async () => {
+    const fake = installFetch();
+    try {
+      render(<Harness />);
+      await screen.findByText("Paper towels");
+
+      const row = screen.getByRole("button", { name: "Open Paper towels inventory ledger" });
+      expect(row.tagName).toBe("TR");
+      row.focus();
+      expect(row).toHaveFocus();
+
+      fireEvent.keyDown(row, { key: "Enter" });
+      const drawer = await screen.findByRole("dialog", { name: /Inventory ledger/ });
+      expect(drawer).toBeInTheDocument();
+      expect(row).toHaveAttribute("aria-expanded", "true");
+
+      fireEvent(drawer, new Event("cancel", { bubbles: false, cancelable: true }));
+      await waitFor(() => {
+        expect(
+          screen.queryByRole("dialog", { name: /Inventory ledger/ }),
+        ).not.toBeInTheDocument();
+      });
+      // useModalDialog restores focus to the captured trigger row on close.
+      await waitFor(() => {
+        expect(
+          screen.getByRole("button", { name: "Open Paper towels inventory ledger" }),
+        ).toHaveFocus();
+      });
+    } finally {
+      fake.restore();
+    }
+  });
+
   it("keeps export inventory action unavailable", async () => {
     const fake = installFetch();
     try {

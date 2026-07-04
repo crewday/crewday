@@ -19,6 +19,11 @@
 
 .inv-row { cursor: pointer; transition: background-color 120ms ease; }
 .inv-row:hover { background: var(--moss-softer); }
+.inv-row:focus-visible {
+  outline: 2px solid var(--moss);
+  outline-offset: -2px;
+  background: var(--moss-softer);
+}
 .inv-row--active { background: var(--moss-soft); }
 .inv-row--active strong { color: var(--moss-2); }
 
