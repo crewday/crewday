@@ -89,6 +89,7 @@ from app.worker.jobs.maintenance import (
     _make_idempotency_sweep_body,
     _make_inventory_reorder_body,
     _make_invite_ttl_body,
+    _make_rate_limit_gc_body,
     _make_retention_rotation_body,
     _make_signup_gc_body,
     _make_webhook_dispatch_body,
@@ -139,6 +140,8 @@ __all__ = [
     "POLL_ICAL_INTERVAL_SECONDS",
     "POLL_ICAL_JOB_ID",
     "POLL_ICAL_MISFIRE_GRACE_SECONDS",
+    "RATE_LIMIT_GC_INTERVAL_SECONDS",
+    "RATE_LIMIT_GC_JOB_ID",
     "RETENTION_ROTATION_JOB_ID",
     "SIGNUP_GC_INTERVAL_SECONDS",
     "SIGNUP_GC_JOB_ID",
@@ -345,6 +348,23 @@ SIGNUP_GC_INTERVAL_SECONDS: int = 3600
 
 WORKSPACE_PURGE_JOB_ID: str = "workspace_purge"
 WORKSPACE_PURGE_INTERVAL_SECONDS: int = 3600
+
+
+# Stable job id for the DB-backed rate-limit table GC (cd-txrlz). The
+# callable in
+# :mod:`app.worker.tasks.rate_limit_gc.sweep_stale_rate_limit_rows`
+# deletes rows from ``throttle_window`` + ``rate_limit_bucket`` whose
+# ``updated_at_epoch`` predates the longest window either table uses
+# (with a safety margin), so cold-key rows on the multi-worker Postgres
+# backend can't grow unbounded. Cross-tenant by design — both tables are
+# deployment-wide and the sweep enters ``tenant_agnostic`` internally.
+RATE_LIMIT_GC_JOB_ID: str = "rate_limit_gc"
+
+# Interval for the rate-limit GC. The retention threshold is two hours
+# (twice the 1 h §15 signup/recovery window); an hourly tick bounds the
+# cleanup lag without waking an idle deployment often for a low-urgency
+# hygiene sweep. Matches the sibling :data:`SIGNUP_GC_INTERVAL_SECONDS`.
+RATE_LIMIT_GC_INTERVAL_SECONDS: int = 3600
 
 
 # Stable job id for the outbound webhook dispatcher tick (cd-q885).
@@ -858,6 +878,12 @@ def _job_specs() -> tuple[
             _clock_body(_make_workspace_purge_body),
             _interval(WORKSPACE_PURGE_INTERVAL_SECONDS),
             WORKSPACE_PURGE_INTERVAL_SECONDS,
+        ),
+        JobSpec(
+            RATE_LIMIT_GC_JOB_ID,
+            _clock_body(_make_rate_limit_gc_body),
+            _interval(RATE_LIMIT_GC_INTERVAL_SECONDS),
+            RATE_LIMIT_GC_INTERVAL_SECONDS,
         ),
         JobSpec(
             WEBHOOK_DISPATCH_JOB_ID,

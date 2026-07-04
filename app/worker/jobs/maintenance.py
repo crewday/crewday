@@ -153,6 +153,32 @@ def _make_workspace_purge_body(clock: Clock) -> Callable[[], None]:
     return _body
 
 
+def _make_rate_limit_gc_body(clock: Clock) -> Callable[[], None]:
+    """Build the hourly rate-limit table GC body (cd-txrlz).
+
+    Factory rather than a bare module-level function so the body closes
+    over the scheduler's injected :class:`Clock` — the staleness cutoff
+    (``clock.now() - retention``) MUST be driven by the same clock the
+    heartbeat uses; otherwise a :class:`~app.util.clock.FrozenClock`
+    under test would have a deterministic heartbeat and a
+    non-deterministic sweep cutoff.
+
+    The returned body is a thin adapter around
+    :func:`app.worker.tasks.rate_limit_gc.sweep_stale_rate_limit_rows`,
+    which opens its own UoW (the worker has no ambient session) and
+    deletes stale rows from ``throttle_window`` + ``rate_limit_bucket``.
+    The task logs its own per-tick summary at INFO with
+    ``event=rate_limit.gc.sweep``; the wrapper discards the report.
+    """
+
+    def _body() -> None:
+        from app.worker.tasks.rate_limit_gc import sweep_stale_rate_limit_rows
+
+        sweep_stale_rate_limit_rows(clock=clock)
+
+    return _body
+
+
 def _make_webhook_dispatch_body(clock: Clock) -> Callable[[], None]:
     """Build the 30 s outbound webhook dispatcher body (cd-q885).
 
