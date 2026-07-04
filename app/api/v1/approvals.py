@@ -68,7 +68,9 @@ from app.adapters.db.messaging.repositories import SqlAlchemyEmailDeliveryReposi
 from app.adapters.mail.null import NullMailer
 from app.api.deps import current_workspace_context, db_session
 from app.audit import write_audit
-from app.authz.dep import Permission
+from app.authz import require
+from app.authz.dep import enforce_workspace_permission
+from app.authz.enforce import InsufficientScope, PermissionDenied
 from app.domain.agent.approval import (
     DEFAULT_PAGE_LIMIT,
     MAX_PAGE_LIMIT,
@@ -507,14 +509,70 @@ _Ctx = Annotated[WorkspaceContext, Depends(current_workspace_context)]
 _Db = Annotated[Session, Depends(db_session)]
 _DeciderCtx = Annotated[WorkspaceContext, Depends(_require_decider_principal)]
 _Dispatcher = Annotated[ToolDispatcher, Depends(get_tool_dispatcher)]
-_ApprovalReadGate = Depends(Permission("approvals.read", scope_kind="workspace"))
+
+
+# §05 catalog key gating the manager approvals desk — desk-only
+# (direct-human ``409 approval_required``) rows. Agent-conversation
+# rows are gated by own-conversation ownership in the domain layer,
+# not this capability (§11 "Approval decisions").
+_APPROVALS_READ_ACTION: str = "approvals.read"
+
+
+def _caller_holds_approvals_read(ctx: WorkspaceContext, session: Session) -> bool:
+    """Return whether the caller holds ``approvals.read`` (workspace).
+
+    Drives the desk-only slice of the ``GET /approvals`` list: owners /
+    managers additionally see the direct-human manager queue, everyone
+    sees their own agent conversations. Non-raising — a denied check is
+    a normal "no desk access" answer, not an error.
+    """
+    try:
+        require(
+            session,
+            ctx,
+            action_key=_APPROVALS_READ_ACTION,
+            scope_kind="workspace",
+            scope_id=ctx.workspace_id,
+        )
+    except PermissionDenied, InsufficientScope:
+        return False
+    return True
+
+
+def _authorize_row_access(
+    ctx: WorkspaceContext,
+    session: Session,
+    approval_request_id: str,
+) -> ApprovalView:
+    """Load + authorize a single approval for a read or decide caller.
+
+    The single §11 authorization seam shared by ``GET /{id}`` and the
+    three decision routes so read and decide never diverge:
+
+    * Cross-tenant / missing → 404 (:class:`ApprovalNotFound`).
+    * Agent-conversation row (``for_user_id`` set) → owner-only; a
+      non-owner gets 404 from :func:`get_service`, keeping another
+      user's queue non-enumerable.
+    * Desk-only row (``for_user_id IS NULL``) → gated on
+      ``approvals.read`` (403 ``permission_denied`` for a non-manager).
+
+    The capability half of the decide rule — the deciding user must
+    also hold the *underlying* action's capability — is enforced when
+    :func:`approve_service` replays the recorded call under the
+    deciding user's identity (a 401/403 there becomes
+    :class:`ApprovalDecisionForbidden`). This seam covers ownership +
+    desk access; the replay covers the underlying capability.
+    """
+    view = get_service(ctx, session=session, approval_request_id=approval_request_id)
+    if view.for_user_id is None:
+        enforce_workspace_permission(session, ctx, action_key=_APPROVALS_READ_ACTION)
+    return view
 
 
 @router.get(
     "",
     response_model=ApprovalsListResponse,
     summary="List pending approvals",
-    dependencies=[_ApprovalReadGate],
 )
 def list_approvals(
     ctx: _Ctx,
@@ -550,7 +608,13 @@ def list_approvals(
     domain service handles the boundary detection via ``LIMIT N+1``
     and surfaces ``has_more`` on the envelope.
     """
-    page = list_pending_service(ctx, session=db, cursor=cursor, limit=limit)
+    page = list_pending_service(
+        ctx,
+        session=db,
+        cursor=cursor,
+        limit=limit,
+        include_desk=_caller_holds_approvals_read(ctx, db),
+    )
     return ApprovalsListResponse.from_page(page)
 
 
@@ -558,21 +622,27 @@ def list_approvals(
     "/{approval_request_id}",
     response_model=ApprovalPayload,
     summary="Get one approval by id",
-    dependencies=[_ApprovalReadGate],
 )
 def get_approval(
     ctx: _Ctx,
     db: _Db,
     approval_request_id: str,
 ) -> ApprovalPayload:
-    """Return one approval row, scoped to ``ctx``'s workspace.
+    """Return one approval row the caller may act on.
 
-    A cross-tenant or missing row surfaces as 404 ``approval_not_found``
-    via the domain :class:`ApprovalNotFound` mapping (§01 "Workspace
-    addressing" — cross-tenant must not be enumerable, so 404 wins
-    over 403).
+    Authorization mirrors the §11 decide rule (§05 catalog):
+
+    * A cross-tenant / missing row → 404 ``approval_not_found`` (§01
+      "Workspace addressing"; cross-tenant must not be enumerable).
+    * An **agent-conversation** row (``for_user_id`` set) is visible
+      only to its owning user — a non-owner also gets 404
+      (:class:`ApprovalNotFound`, enforced in :func:`get_service`), so
+      another user's queue is not enumerable.
+    * A **desk-only** row (``for_user_id IS NULL``) is the manager
+      approvals queue; it requires the ``approvals.read`` capability,
+      surfaced here as the standard 403 ``permission_denied`` envelope.
     """
-    view = get_service(ctx, session=db, approval_request_id=approval_request_id)
+    view = _authorize_row_access(ctx, db, approval_request_id)
     return ApprovalPayload.from_view(view)
 
 
@@ -581,7 +651,6 @@ def get_approval(
     response_model=ApprovalPayload,
     status_code=status.HTTP_200_OK,
     summary="Approve a pending action and replay it",
-    dependencies=[_ApprovalReadGate],
     openapi_extra={"x-agent-forbidden": True},
 )
 def approve_approval(
@@ -611,6 +680,7 @@ def approve_approval(
     side effect itself is single-fire because the replayed tool
     call carries the recorded idempotency key.
     """
+    _authorize_row_access(ctx, db, approval_request_id)
     note: str | None = body.decision_note_md if body is not None else None
     replay = _build_replay(ctx=ctx, dispatcher=dispatcher)
     view = approve_service(
@@ -638,6 +708,7 @@ def _deny_handler(
     docs+tests can use whichever they grew up with without a
     second-class redirect.
     """
+    _authorize_row_access(ctx, db, approval_request_id)
     note: str | None = body.decision_note_md if body is not None else None
     view = deny_service(
         ctx,
@@ -656,7 +727,6 @@ def _deny_handler(
     response_model=ApprovalPayload,
     status_code=status.HTTP_200_OK,
     summary="Reject a pending action",
-    dependencies=[_ApprovalReadGate],
     openapi_extra={"x-agent-forbidden": True},
 )
 def reject_approval(
@@ -681,7 +751,6 @@ def reject_approval(
     status_code=status.HTTP_200_OK,
     summary="Deny a pending action (alias of /reject)",
     include_in_schema=False,
-    dependencies=[_ApprovalReadGate],
 )
 def deny_approval(
     ctx: _DeciderCtx,

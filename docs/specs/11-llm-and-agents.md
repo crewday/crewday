@@ -1872,6 +1872,36 @@ actions** — they originated the intent and they carry the permission.
 What the spec pins is which credential carries the decision, so a
 compromised delegated token cannot close its own loop.
 
+**Who may decide — the agent is an alternate UI, not a wider
+permission.** A user can approve or deny (decide) an agent HITL action
+*iff they could perform that same underlying action themselves through
+the normal UI, with their own account — no more, no less*, scoped to
+their own agent conversation. Concretely, approve/deny is available on
+an agent's proposed action iff the deciding user **(a)** holds the
+capability for the underlying action against its target resource, and
+**(b)** owns the conversation that proposed it (its `for_user_id`).
+This is the authorization rule; it replaces any blanket
+"owners/managers may decide anything" gate:
+
+- A worker whose own agent proposes "add a vacation on date X" sees and
+  can decide that card exactly when they could add that vacation
+  through the normal UI — no separate `approvals.read` grant is needed
+  for a user to decide their own agent's proposals.
+- A user must never decide an action they could not perform themselves,
+  nor decide another user's conversation's actions. The underlying
+  capability is enforced by replaying the recorded call through the
+  same endpoint / capability seam the normal UI uses, under the
+  deciding user's identity; a `401`/`403` from that replay is
+  `403 approval_decision_forbidden` and leaves the row `pending` for a
+  capable decider. Own-conversation ownership is enforced as a `404`
+  (non-enumerable), so a mismatch never reveals another user's queue.
+- Cross-user oversight of agent activity is a **read** concern served
+  by the Agent Activity audit view (§ "Agent audit trail"), not the
+  decision desk. The `/approvals` desk and `GET /approvals` return only
+  rows the caller can act on — own-conversation agent rows plus, for
+  holders of `approvals.read`, the direct-human desk queue — so clients
+  render only actionable cards.
+
 - Approval decisions
   (`POST /api/v1/agent/action/{id}/{approve,deny}` and its admin
   sibling) MUST be submitted under a **passkey-authenticated user
@@ -2255,8 +2285,19 @@ command writes directly, and deployment-level controls on who can
     - **Desk** — owners and managers receive the existing email +
       `approval.pending` webhook; the row is visible on
       `/approvals`.
-6. Any authorised decider (the delegating user in their own inline
-   chat, or any owner/manager in `/approvals`) approves or rejects.
+6. The decider approves or rejects. **An agent is an alternate UI for
+   the delegating user**, so a card is decidable *iff the deciding user
+   could perform the same underlying action through the normal UI*:
+   they must (a) hold the capability for the underlying action against
+   its target resource, and (b) own the conversation that proposed it
+   (`for_user_id`). Own-conversation ownership is enforced first (a
+   non-owner gets `404`, so another user's queue is not enumerable);
+   the underlying-action capability is enforced by replaying the
+   recorded call through the same endpoint / capability seam the normal
+   UI uses, under the deciding user's identity — a `401`/`403` there is
+   `403 approval_decision_forbidden` and the row stays `pending`.
+   Direct-human desk rows (`for_user_id` null) have no conversation
+   owner and are instead gated by the `approvals.read` capability (§05).
 7. On approval, the original handler is invoked with the recorded
    payload; result is stored. Agent polls `GET /api/v1/approvals/
    {id}` (or receives `approval.decided` webhook) and proceeds.
@@ -2338,8 +2379,14 @@ delegating user's open tabs over SSE via
 `agent.action.pending` (scoped to `for_user_id`), and the chat
 surface renders an approval card with **Approve** / **Reject**
 buttons wired to the same `/approvals/{id}/{decision}` endpoints
-that the desk uses. The same row remains visible on `/approvals`
-so owners and managers can oversee agent activity across users.
+that the desk uses. Because decide is scoped to the deciding user's
+own conversation (see "Approval decisions travel through the human
+session"), an agent-conversation row is **not** surfaced as a
+decidable card to other users — including owners and managers.
+Cross-user oversight is a read concern served by the Agent Activity
+audit view (§ "Agent audit trail"), which shows every agent action
+regardless of who proposed it; it does not expose the decision
+buttons.
 
 `offapp_whatsapp` remains **deferred**. Its value stays in the
 schema so the approval pipeline does not need a later re-design,

@@ -44,7 +44,12 @@ from app.authz.enforce import (
 )
 from app.tenancy import WorkspaceContext
 
-__all__ = ["MeScope", "Permission", "PermissionDependencyMetadata"]
+__all__ = [
+    "MeScope",
+    "Permission",
+    "PermissionDependencyMetadata",
+    "enforce_workspace_permission",
+]
 
 
 @dataclass(frozen=True, slots=True)
@@ -122,6 +127,51 @@ def _attach_permission_metadata(
     metadata: PermissionDependencyMetadata,
 ) -> None:
     vars(dep)["__crewday_permission__"] = metadata
+
+
+def enforce_workspace_permission(
+    session: Session,
+    ctx: WorkspaceContext,
+    *,
+    action_key: str,
+    required_scope: str | None = None,
+    rule_repo: PermissionRuleRepository | None = None,
+) -> None:
+    """Imperatively enforce a workspace-scoped capability, mapping to HTTP.
+
+    The :func:`Permission` dependency gates a route *before* its body
+    runs, which cannot express "load the resource, then gate on a
+    property of the row". Handlers that must decide after loading a row
+    (the approvals desk gates ``approvals.read`` only for desk-only
+    rows — see :mod:`app.api.v1.approvals`) call this instead. It raises
+    the exact same :class:`HTTPException` envelopes as
+    :func:`Permission` for the workspace-scope case, reusing the shared
+    mappers so the error body stays single-sourced.
+
+    ``ApprovalRequired`` is intentionally not handled — this seam is for
+    read-family capabilities that never carry ``requires_approval``; a
+    caller passing a gated ``action_key`` would let it propagate to the
+    generic 500 handler, which is the correct "wired the wrong action"
+    signal.
+    """
+    try:
+        require(
+            session,
+            ctx,
+            action_key=action_key,
+            scope_kind="workspace",
+            scope_id=ctx.workspace_id,
+            required_scope=required_scope,
+            rule_repo=rule_repo,
+        )
+    except UnknownActionKey as exc:
+        raise _misuse_to_http("unknown_action_key", action_key, str(exc)) from exc
+    except InvalidScope as exc:
+        raise _misuse_to_http("invalid_scope_kind", action_key, str(exc)) from exc
+    except InsufficientScope as exc:
+        raise _insufficient_scope_to_http(exc) from exc
+    except PermissionDenied as exc:
+        raise _deny_to_http(action_key) from exc
 
 
 def MeScope(required_scope: str) -> Callable[..., None]:

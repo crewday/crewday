@@ -66,7 +66,7 @@ from app.domain.agent.runtime import (
     ToolDispatcher,
     ToolResult,
 )
-from app.domain.errors import Conflict, NotFound, Validation
+from app.domain.errors import Conflict, Forbidden, NotFound, Validation
 from app.events.bus import EventBus
 from app.events.bus import bus as default_event_bus
 from app.events.types import ApprovalDecided
@@ -78,6 +78,7 @@ __all__ = [
     "DEFAULT_PAGE_LIMIT",
     "EXPIRED_DECISION_NOTE",
     "MAX_PAGE_LIMIT",
+    "ApprovalDecisionForbidden",
     "ApprovalDecisionOptions",
     "ApprovalNotFound",
     "ApprovalNotPending",
@@ -171,6 +172,29 @@ class ApprovalNotPending(Conflict):
         )
         self.approval_request_id = approval_request_id
         self.status = status
+
+
+class ApprovalDecisionForbidden(Forbidden):
+    """The deciding user may not act on this agent action. HTTP 403.
+
+    §11 "Approval decisions": an agent is just an alternate UI for the
+    delegating user, so a HITL card is decidable **iff the deciding
+    user could perform the same underlying action through the normal
+    UI**. This is raised on :func:`approve` when replaying the recorded
+    tool call under the deciding user's identity comes back
+    ``401``/``403`` — the deciding user lacks the underlying action's
+    capability against its target resource. The row stays ``pending``
+    (no side effect fired, no state flip) so the correct decider can
+    still act.
+
+    Own-conversation ownership is enforced separately, as
+    :class:`ApprovalNotFound` (a 404, so another user's queue is not
+    enumerable). This 403 is the *capability* half of the rule and only
+    fires for a caller who already owns the conversation.
+    """
+
+    title = "Approval decision forbidden"
+    type_name = "approval_decision_forbidden"
 
 
 # ---------------------------------------------------------------------------
@@ -332,6 +356,7 @@ def get(
     row = session.get(ApprovalRequest, approval_request_id)
     if row is None or row.workspace_id != ctx.workspace_id:
         raise ApprovalNotFound(f"approval {approval_request_id!r} not found")
+    _assert_conversation_owner(ctx, row)
     return ApprovalView.from_row(row)
 
 
@@ -341,15 +366,32 @@ def list_pending(
     session: Session,
     cursor: str | None = None,
     limit: int = DEFAULT_PAGE_LIMIT,
+    include_desk: bool = False,
 ) -> ApprovalsPage:
-    """Return the ``pending`` approval queue for ``ctx``'s workspace.
+    """Return the ``pending`` approval queue the caller can act on.
 
-    The /approvals desk reads through this; the inline-chat surface
-    does not (it consumes :class:`ApprovalView` rows directly via
-    :func:`get`). Ordering is oldest-pending first so the queue
-    drains in arrival order; the
-    ``ix_approval_request_workspace_status_created`` composite
-    index backs the scan.
+    §11 "Approval decisions": an agent is an alternate UI for the
+    delegating user, so the queue returns only the rows ``ctx``'s
+    caller may actually decide — no dead/403 cards:
+
+    * **Own-conversation rows** — agent (and per-user ``strict``)
+      approvals whose ``for_user_id`` is the caller. These are always
+      included; the caller owns the conversation that proposed them.
+    * **Desk-only rows** — direct-human ``409 approval_required``
+      rows (``for_user_id IS NULL``), the manager approvals desk
+      queue. Included only when ``include_desk`` is true, which the
+      API seam sets from the caller's ``approvals.read`` capability.
+
+    Another user's conversation rows are never returned — the
+    capability to oversee agent activity across users lives on the
+    Agent Activity audit view (§ "Agent audit trail"), not the
+    decision desk.
+
+    The inline-chat surface does not read through this (it consumes
+    :class:`ApprovalView` rows directly via :func:`get`). Ordering is
+    oldest-pending first so the queue drains in arrival order; the
+    ``ix_approval_request_workspace_status_created`` composite index
+    backs the scan.
 
     ``cursor`` is the **id** of the last row from the previous
     page. Pagination rides the composite ``(created_at, id)`` key so
@@ -372,9 +414,20 @@ def list_pending(
         )
     effective_limit = min(limit, MAX_PAGE_LIMIT)
 
+    # Actionable-audience filter (§11 "Approval decisions"): own-
+    # conversation rows always; desk-only rows (``for_user_id IS
+    # NULL``) only for a caller the API seam vetted as capable.
+    if include_desk:
+        audience = or_(
+            ApprovalRequest.for_user_id == ctx.actor_id,
+            ApprovalRequest.for_user_id.is_(None),
+        )
+    else:
+        audience = ApprovalRequest.for_user_id == ctx.actor_id
+
     stmt = (
         select(ApprovalRequest)
-        .where(ApprovalRequest.status == "pending")
+        .where(ApprovalRequest.status == "pending", audience)
         .order_by(ApprovalRequest.created_at, ApprovalRequest.id)
         # Fetch one extra so we can determine ``has_more`` without a
         # second COUNT — the desk surface only needs to know whether
@@ -585,6 +638,25 @@ def approve(
         token=replay.token,
         headers=replay.headers,
     )
+
+    # Capability half of the §11 rule: the replay runs the recorded
+    # call through the same endpoint / domain seam the normal UI uses,
+    # under the deciding user's identity. A 401/403 means the deciding
+    # user lacks the underlying action's capability against its target
+    # resource — they may not decide this card. Fail closed: raise 403
+    # and leave the row ``pending`` (no state flip, no ``result_json``)
+    # so a capable decider can still act. Other surface failures
+    # (404 gone, 422 invalid, 409 conflict) are genuine "the action
+    # itself failed" outcomes and are persisted for the desk to show.
+    if result.status_code in (401, 403):
+        raise ApprovalDecisionForbidden(
+            "the deciding user is not permitted to perform the underlying "
+            "action for this agent approval",
+            extra={
+                "approval_request_id": row.id,
+                "result_status_code": result.status_code,
+            },
+        )
 
     outcome = _ApprovalGrantOutcome(
         tool_call=tool_call,
@@ -827,12 +899,34 @@ def _load_pending(
     row = session.get(ApprovalRequest, approval_request_id)
     if row is None or row.workspace_id != ctx.workspace_id:
         raise ApprovalNotFound(f"approval {approval_request_id!r} not found")
+    # Own-conversation ownership is checked BEFORE the pending guard so
+    # another user's queue is not enumerable via a 409-vs-404 oracle.
+    _assert_conversation_owner(ctx, row)
     if row.status != "pending":
         raise ApprovalNotPending(
             approval_request_id=row.id,
             status=row.status,
         )
     return row
+
+
+def _assert_conversation_owner(ctx: WorkspaceContext, row: ApprovalRequest) -> None:
+    """Enforce §11 own-conversation ownership on a decide/read path.
+
+    An agent (or per-user ``strict``) approval carries ``for_user_id``
+    — the delegating user who owns the proposing conversation. Only
+    that user may see or decide the card: the agent is their alternate
+    UI, not a shared queue. A mismatch raises :class:`ApprovalNotFound`
+    (404, not 403) so another user's pending actions are not
+    enumerable (§01 "Workspace addressing").
+
+    Desk-only rows (``for_user_id IS NULL``) — the direct-human
+    ``409 approval_required`` queue — have no conversation owner; this
+    check is a no-op for them and the API seam gates them on the
+    ``approvals.read`` capability instead.
+    """
+    if row.for_user_id is not None and row.for_user_id != ctx.actor_id:
+        raise ApprovalNotFound(f"approval {row.id!r} not found")
 
 
 def _validate_decision_note(decision_note_md: str | None) -> str | None:

@@ -253,10 +253,12 @@ def test_approve_happy_path_replays_persists_result_audits_emits(
     captured_decided: _CapturedDecided,
 ) -> None:
     workspace = seed_workspace(db_session)
-    actor_id = seed_user(db_session)
+    # §11: an agent is the delegating user's alternate UI, so the
+    # decider owns the conversation — decider == for_user_id.
+    delegating_user = seed_user(db_session)
+    actor_id = delegating_user
     ctx = build_context(workspace.id, slug=workspace.slug, actor_id=actor_id)
     set_current(ctx)
-    delegating_user = seed_user(db_session)
     pending = _seed_pending(
         db_session,
         workspace_id=workspace.id,
@@ -513,10 +515,11 @@ def test_deny_flips_to_rejected_audits_emits_no_dispatch(
     captured_decided: _CapturedDecided,
 ) -> None:
     workspace = seed_workspace(db_session)
-    actor_id = seed_user(db_session)
+    # §11: the decider owns the conversation — decider == for_user_id.
+    delegating_user = seed_user(db_session)
+    actor_id = delegating_user
     ctx = build_context(workspace.id, slug=workspace.slug, actor_id=actor_id)
     set_current(ctx)
-    delegating_user = seed_user(db_session)
     pending = _seed_pending(
         db_session,
         workspace_id=workspace.id,

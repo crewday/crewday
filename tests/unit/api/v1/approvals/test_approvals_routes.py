@@ -206,18 +206,63 @@ class TestListPending:
         resp = client.get("/approvals/", params={"limit": 0})
         assert resp.status_code == 422
 
-    def test_worker_without_read_permission_gets_403(self, owner_ctx: _Persona) -> None:
+    def test_worker_without_read_permission_sees_no_desk_rows(
+        self, owner_ctx: _Persona
+    ) -> None:
+        """A worker without ``approvals.read`` gets an empty desk, not 403.
+
+        The desk-only row (``for_user_id`` null) belongs to the manager
+        approvals queue; a worker who lacks ``approvals.read`` simply
+        does not see it — no dead/403 cards (§11 "Approval decisions").
+        """
         seed_pending(
             owner_ctx.factory,
             workspace_id=owner_ctx.workspace_id,
             requester_actor_id=owner_ctx.owner_id,
+            # desk-only row: no conversation owner
+            for_user_id=None,
         )
         client = build_client(_worker_persona(owner_ctx))
         resp = client.get("/approvals/")
-        assert resp.status_code == 403
+        assert resp.status_code == 200
+        assert resp.json() == {"data": [], "next_cursor": None, "has_more": False}
+
+    def test_worker_sees_only_own_conversation_rows(self, owner_ctx: _Persona) -> None:
+        """The list returns own-conversation rows, excluding others'.
+
+        A worker sees their own agent's pending cards (rows whose
+        ``for_user_id`` is the worker) but neither another user's
+        conversation rows nor the manager desk queue.
+        """
+        worker = _worker_persona(owner_ctx)
+        own = seed_pending(
+            owner_ctx.factory,
+            workspace_id=owner_ctx.workspace_id,
+            requester_actor_id=worker.owner_id,
+            for_user_id=worker.owner_id,
+            tool_name="tasks.own",
+        )
+        # Another user's conversation row — must not appear.
+        seed_pending(
+            owner_ctx.factory,
+            workspace_id=owner_ctx.workspace_id,
+            requester_actor_id=owner_ctx.owner_id,
+            for_user_id=owner_ctx.owner_id,
+            tool_name="tasks.other",
+        )
+        # Desk-only row — must not appear for a non-manager.
+        seed_pending(
+            owner_ctx.factory,
+            workspace_id=owner_ctx.workspace_id,
+            requester_actor_id=owner_ctx.owner_id,
+            for_user_id=None,
+            tool_name="tasks.desk",
+        )
+        client = build_client(worker)
+        resp = client.get("/approvals/")
+        assert resp.status_code == 200
         body = resp.json()
-        assert body["error"] == "permission_denied"
-        assert body["action_key"] == "approvals.read"
+        assert [r["id"] for r in body["data"]] == [own]
 
 
 # ---------------------------------------------------------------------------
@@ -300,6 +345,131 @@ class TestGetOne:
         body = resp.json()
         assert body["error"] == "permission_denied"
         assert body["action_key"] == "approvals.read"
+
+    def test_worker_reads_own_conversation_row(self, owner_ctx: _Persona) -> None:
+        """A worker may read their own agent's pending card without
+        the ``approvals.read`` capability."""
+        worker = _worker_persona(owner_ctx)
+        row_id = seed_pending(
+            owner_ctx.factory,
+            workspace_id=owner_ctx.workspace_id,
+            requester_actor_id=worker.owner_id,
+            for_user_id=worker.owner_id,
+        )
+        resp = build_client(worker).get(f"/approvals/{row_id}")
+        assert resp.status_code == 200
+        assert resp.json()["id"] == row_id
+
+    def test_other_users_conversation_row_404(self, owner_ctx: _Persona) -> None:
+        """Another user's conversation row is not enumerable → 404."""
+        worker = _worker_persona(owner_ctx)
+        row_id = seed_pending(
+            owner_ctx.factory,
+            workspace_id=owner_ctx.workspace_id,
+            requester_actor_id=owner_ctx.owner_id,
+            for_user_id=owner_ctx.owner_id,  # owner's conversation, not worker's
+        )
+        resp = build_client(worker).get(f"/approvals/{row_id}")
+        assert resp.status_code == 404
+        assert resp.json()["type"].endswith("/approval_not_found")
+
+
+# ---------------------------------------------------------------------------
+# Decide authorization (§11 own-conversation + underlying capability)
+# ---------------------------------------------------------------------------
+
+
+class TestDecideAuthz:
+    """`POST /{id}/{approve,reject}` — own-conversation + capability rule.
+
+    An agent is an alternate UI for the delegating user, so a card is
+    decidable iff the deciding user could perform the same underlying
+    action themselves and owns the conversation that proposed it.
+    """
+
+    def test_worker_approves_own_capable_action_executes(
+        self, owner_ctx: _Persona
+    ) -> None:
+        worker = _worker_persona(owner_ctx)
+        row_id = seed_pending(
+            owner_ctx.factory,
+            workspace_id=owner_ctx.workspace_id,
+            requester_actor_id=worker.owner_id,
+            for_user_id=worker.owner_id,
+        )
+        dispatcher = FakeToolDispatcher()  # default replay → 200
+        resp = build_client(worker, dispatcher=dispatcher).post(
+            f"/approvals/{row_id}/approve", json={}
+        )
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        assert body["status"] == "approved"
+        assert body["decided_by"] == worker.owner_id
+        # The underlying action actually replayed.
+        assert len(dispatcher.captured) == 1
+
+    def test_worker_cannot_approve_own_incapable_action(
+        self, owner_ctx: _Persona
+    ) -> None:
+        """The underlying capability is enforced via the replay: a
+        403 from the replayed endpoint → 403 + row stays pending."""
+        from app.domain.agent.runtime import ToolResult
+
+        worker = _worker_persona(owner_ctx)
+        row_id = seed_pending(
+            owner_ctx.factory,
+            workspace_id=owner_ctx.workspace_id,
+            requester_actor_id=worker.owner_id,
+            for_user_id=worker.owner_id,
+            tool_name="payroll.issue",
+        )
+        dispatcher = FakeToolDispatcher(
+            responses={
+                "payroll.issue": [
+                    ToolResult(
+                        call_id="c",
+                        status_code=403,
+                        body={"error": "permission_denied"},
+                        mutated=False,
+                    )
+                ]
+            }
+        )
+        resp = build_client(worker, dispatcher=dispatcher).post(
+            f"/approvals/{row_id}/approve", json={}
+        )
+        assert resp.status_code == 403, resp.text
+        assert resp.json()["type"].endswith("/approval_decision_forbidden")
+        # Row stays pending — a capable decider can still act.
+        assert _refresh_row(owner_ctx, row_id).status == "pending"
+
+    def test_worker_cannot_decide_other_users_conversation(
+        self, owner_ctx: _Persona
+    ) -> None:
+        worker = _worker_persona(owner_ctx)
+        row_id = seed_pending(
+            owner_ctx.factory,
+            workspace_id=owner_ctx.workspace_id,
+            requester_actor_id=owner_ctx.owner_id,
+            for_user_id=owner_ctx.owner_id,  # owner's conversation
+        )
+        for verb in ("approve", "reject"):
+            resp = build_client(worker).post(f"/approvals/{row_id}/{verb}", json={})
+            assert resp.status_code == 404, resp.text
+            assert resp.json()["type"].endswith("/approval_not_found")
+        # Never decided.
+        assert _refresh_row(owner_ctx, row_id).status == "pending"
+
+    def test_owner_decides_own_conversation(self, owner_ctx: _Persona) -> None:
+        row_id = seed_pending(
+            owner_ctx.factory,
+            workspace_id=owner_ctx.workspace_id,
+            requester_actor_id=owner_ctx.owner_id,
+            for_user_id=owner_ctx.owner_id,
+        )
+        resp = build_client(owner_ctx).post(f"/approvals/{row_id}/approve", json={})
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["status"] == "approved"
 
 
 # ---------------------------------------------------------------------------

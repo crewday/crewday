@@ -107233,7 +107233,7 @@
     },
     "/w/{slug}/api/v1/approvals/{approval_request_id}": {
       "get": {
-        "description": "Return one approval row, scoped to ``ctx``'s workspace.\n\nA cross-tenant or missing row surfaces as 404 ``approval_not_found``\nvia the domain :class:`ApprovalNotFound` mapping (\u00a701 \"Workspace\naddressing\" \u2014 cross-tenant must not be enumerable, so 404 wins\nover 403).",
+        "description": "Return one approval row the caller may act on.\n\nAuthorization mirrors the \u00a711 decide rule (\u00a705 catalog):\n\n* A cross-tenant / missing row \u2192 404 ``approval_not_found`` (\u00a701\n  \"Workspace addressing\"; cross-tenant must not be enumerable).\n* An **agent-conversation** row (``for_user_id`` set) is visible\n  only to its owning user \u2014 a non-owner also gets 404\n  (:class:`ApprovalNotFound`, enforced in :func:`get_service`), so\n  another user's queue is not enumerable.\n* A **desk-only** row (``for_user_id IS NULL``) is the manager\n  approvals queue; it requires the ``approvals.read`` capability,\n  surfaced here as the standard 403 ``permission_denied`` envelope.",
         "operationId": "get_approval_w__slug__api_v1_approvals__approval_request_id__get",
         "parameters": [
           {

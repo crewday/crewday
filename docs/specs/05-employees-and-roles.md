@@ -580,7 +580,7 @@ configuration.
 | `payroll.issue_payslip`                 | `workspace`                    | `owners, managers`            | ✅ | §09 |
 | `payroll.view_other`                    | `workspace`, `property`        | `owners, managers`            | —  | §09 |
 | `pay_rules.edit`                        | `workspace`, `property`        | `owners, managers`            | —  | §09 |
-| `approvals.read`                        | `workspace`                    | `owners, managers`            | —  | §11 — gates the manager approvals desk (`GET /approvals` and `GET /approvals/{id}`). Decision endpoints keep the stricter human-session / `approvals:act` credential rule from §11. |
+| `approvals.read`                        | `workspace`                    | `owners, managers`            | —  | §11 — gates the **direct-human** manager approvals desk (the `for_user_id`-null `409 approval_required` queue) on `GET /approvals` and `GET /approvals/{id}`. It does **not** govern agent-conversation HITL cards: those are visible + decidable only by the owning user (`for_user_id`), who needs no `approvals.read` grant — the agent is their alternate UI. Decision endpoints additionally enforce the underlying action's own capability for the deciding user (replayed through the normal seam → `403 approval_decision_forbidden` on a miss) and keep the stricter human-session / `approvals:act` credential rule from §11. |
 | `expenses.submit`                       | `workspace`, `property`        | `owners, managers, all_workers` | — | §09 |
 | `expenses.approve`                      | `workspace`, `property`        | `owners, managers`            | —  | §09 |
 | `expenses.reimburse`                    | `workspace`                    | `owners, managers`            | ✅ | §09 |
