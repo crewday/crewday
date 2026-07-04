@@ -15,6 +15,7 @@ import {
 } from "@/lib/offlineQueue";
 import {
   __resetQueryKeyGetterForTests,
+  qk,
   registerQueryKeyWorkspaceGetter,
 } from "@/lib/queryKeys";
 import { installFakeIndexedDb } from "@/test/fakeIndexedDb";
@@ -352,6 +353,53 @@ describe("TodayPage", () => {
       });
       await waitFor(() => expect(screen.getByText("Completed today")).toBeInTheDocument());
       expect(screen.getByText("Reset towels")).toBeInTheDocument();
+    } finally {
+      env.restore();
+    }
+  });
+
+  it("invalidates the my-schedule prefix when an online completion succeeds", async () => {
+    const spy = vi.spyOn(QueryClient.prototype, "invalidateQueries");
+    const env = installFetch({
+      "/api/v1/me": [{ body: me() }],
+      "/api/v1/properties": [{ body: [property()] }],
+      "/api/v1/tasks": [
+        {
+          body: taskPage([
+            task("t1", { title: "Reset towels", scheduled_for_utc: "2026-04-28T09:00:00Z" }),
+          ]),
+        },
+        {
+          body: taskPage([
+            task("t1", { title: "Reset towels", state: "completed", scheduled_for_utc: "2026-04-28T09:00:00Z" }),
+          ]),
+        },
+      ],
+      "/api/v1/tasks/t1/complete": [
+        {
+          body: {
+            task_id: "t1",
+            state: "completed",
+            completed_at: "2026-04-28T10:05:00Z",
+            completed_by_user_id: "u1",
+            reason: null,
+          },
+        },
+      ],
+    });
+
+    try {
+      render(<Harness />);
+
+      fireEvent.click(await screen.findByRole("button", { name: "Start" }));
+
+      // §14 "Optimistic mutations" — a completion drops the worker's
+      // schedule cache so the schedule views refresh, matching the SSE
+      // dispatcher's `mySchedulePrefix()` invalidation contract.
+      await waitFor(() => {
+        const keys = spy.mock.calls.map((call) => call[0]?.queryKey);
+        expect(keys).toEqual(expect.arrayContaining([qk.mySchedulePrefix()]));
+      });
     } finally {
       env.restore();
     }

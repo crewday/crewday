@@ -134,7 +134,7 @@ export default function StyleguidePage() {
             <h3 className="task-card__title">Change linen, master bedroom</h3>
             <div className="task-card__meta">Master bedroom</div>
             <div className="task-card__progress">
-              <span className="progress-bar"><span style={{ width: "33%" }} /></span>
+              <span className="progress-bar"><span className="styleguide__progress-fill" /></span>
               <span className="progress-label">1/3 steps</span>
             </div>
             <div className="task-card__cta">Complete with photo →</div>

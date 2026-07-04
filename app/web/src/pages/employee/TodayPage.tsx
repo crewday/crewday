@@ -70,6 +70,7 @@ export default function TodayPage() {
         if (entry.kind !== "task.complete") return;
         qc.invalidateQueries({ queryKey: qk.today() });
         qc.invalidateQueries({ queryKey: qk.tasks() });
+        qc.invalidateQueries({ queryKey: qk.mySchedulePrefix() });
       }),
     [qc],
   );
@@ -106,6 +107,10 @@ export default function TodayPage() {
       qc.invalidateQueries({ queryKey: qk.today() });
       qc.invalidateQueries({ queryKey: qk.task(result.payload.task_id) });
       qc.invalidateQueries({ queryKey: qk.tasks() });
+      // §14 "Optimistic mutations" — a completion changes the worker's
+      // schedule, so drop every `my-schedule` page (the schedule views
+      // read this prefix) alongside the task caches.
+      qc.invalidateQueries({ queryKey: qk.mySchedulePrefix() });
     },
   });
 
