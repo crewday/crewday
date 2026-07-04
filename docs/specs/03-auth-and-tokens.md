@@ -861,7 +861,12 @@ Key properties:
   workspace route is refused **before the handler runs** with `403`
   `error = "insufficient_scope"` (plus the `WWW-Authenticate:
   error="insufficient_scope"` challenge of the "Usage" section) — the
-  subject's role grants never authorize a PAT off the `/me` subtree.
+  subject's role grants never authorize a PAT off the `/me` subtree. The
+  problem envelope's `type` is the §12-registered `forbidden` URI (the
+  type registry has no `insufficient_scope` type); `insufficient_scope`
+  is the machine `error` discriminator. This is the same `type` + `error`
+  shape a route-level `me.*` / scoped-token scope miss emits, so agents
+  switch on one discriminator regardless of where the refusal fired.
 - `scopes`: **must** be drawn from the `me:*` family. Mixing
   `me:*` with workspace scopes on the same token is a 422
   `error = "me_scope_conflict"`. An empty scope list is a 422
@@ -979,17 +984,18 @@ their only confinement is the same `ctx.actor_id` self-keying):
 | scope                | route(s)                                   |
 |----------------------|--------------------------------------------|
 | `me.tasks:read`      | `GET /me/tasks`                            |
+| `me.bookings:read`   | `GET /me/bookings`                         |
 | `me.expenses:read`   | `GET /me/expenses`                         |
 | `me.expenses:write`  | `POST /me/expenses` (draft create)         |
 | `me.profile:read`    | `GET /me/profile`                          |
 | `me.profile:write`   | `PATCH /me/profile`                        |
-| `me.bookings:read`   | *reserved — route lands in a follow-up*    |
 
-Two documented behaviours are partially realised and tracked as
-follow-ups: `GET /me/tasks` today returns the tasks **assigned to** the
-subject (the "plus unassigned tasks on properties in scope matching their
-`user_work_role`" arm is not yet built), and `me.bookings:read` (own
-bookings + payslips) has a reserved scope string but no mounted route.
+`GET /me/tasks` returns the subject's own **assigned** tasks plus
+**unassigned** tasks whose `expected_role_id` matches one of the subject's
+active `user_work_role` rows in the workspace (cd-isllv); the unassigned
+arm is scoped to the caller's own work roles, so it never leaks another
+user's assigned tasks. `GET /me/bookings` returns the subject's own
+bookings and payslips (cd-isllv), both self-keyed on `ctx.actor_id`.
 `me.profile:write` writes only the columns that exist on `users` —
 `display_name`, `locale` (language), `timezone`; avatar is the separate
 `/api/v1/me/avatar` upload surface, and there is no `emergency_contact`

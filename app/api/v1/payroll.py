@@ -153,7 +153,9 @@ __all__ = [
     "PayRuleResponse",
     "PayRuleUpdateRequest",
     "PayslipReimbursementResponse",
+    "PayslipResponse",
     "build_payroll_router",
+    "payslip_to_response",
     "router",
 ]
 
@@ -453,7 +455,7 @@ def _reimbursement_claim_ids(components: dict[str, object]) -> frozenset[str]:
     )
 
 
-def _payslip_to_response(row: PayslipReadRow) -> PayslipResponse:
+def payslip_to_response(row: PayslipReadRow) -> PayslipResponse:
     reimbursements = _reimbursements_from_components(
         row.components_json, currency=row.currency
     )
@@ -1150,7 +1152,7 @@ def build_payroll_router() -> APIRouter:
             user_id=visible_user_id,
             pay_period_id=pay_period_id,
         )
-        return PayslipListResponse(data=[_payslip_to_response(row) for row in rows])
+        return PayslipListResponse(data=[payslip_to_response(row) for row in rows])
 
     @api.get(
         "/payslips/{payslip_id}",
@@ -1177,7 +1179,7 @@ def build_payroll_router() -> APIRouter:
                 ctx,
                 action_key="payroll.view_other",
             )
-        return _payslip_to_response(row)
+        return payslip_to_response(row)
 
     @api.get(
         "/payslips/{payslip_id}/pdf",
@@ -1288,7 +1290,7 @@ def build_payroll_router() -> APIRouter:
         if row.status == "voided":
             raise _error_for_payslip_conflict("voided payslips cannot be issued")
         if row.status in {"issued", "paid"}:
-            return _payslip_to_response(row)
+            return payslip_to_response(row)
 
         clock = SystemClock()
         now = clock.now()
@@ -1313,7 +1315,7 @@ def build_payroll_router() -> APIRouter:
             payslip=updated,
             sink=_payroll_notification_sink(session, ctx),
         )
-        return _payslip_to_response(updated)
+        return payslip_to_response(updated)
 
     @api.post(
         "/payslips/{payslip_id}/mark_paid",
@@ -1336,7 +1338,7 @@ def build_payroll_router() -> APIRouter:
         if row is None:
             raise _error_for_payslip_not_found()
         if row.status == "paid":
-            return _payslip_to_response(row)
+            return payslip_to_response(row)
         if row.status == "voided":
             raise _error_for_payslip_conflict("voided payslips cannot be paid")
         if row.status != "issued":
@@ -1436,7 +1438,7 @@ def build_payroll_router() -> APIRouter:
                 period_id=row.pay_period_id,
                 clock=clock,
             )
-        return _payslip_to_response(updated)
+        return payslip_to_response(updated)
 
     @api.post(
         "/payslips/{payslip_id}/void",
@@ -1457,7 +1459,7 @@ def build_payroll_router() -> APIRouter:
         if row.status == "paid":
             raise _error_for_payslip_conflict("paid payslips cannot be voided")
         if row.status == "voided":
-            return _payslip_to_response(row)
+            return payslip_to_response(row)
 
         clock = SystemClock()
         updated = repo.set_payslip_state(
@@ -1476,7 +1478,7 @@ def build_payroll_router() -> APIRouter:
             diff={"before": {"status": row.status}, "after": {"status": "voided"}},
             clock=clock,
         )
-        return _payslip_to_response(updated)
+        return payslip_to_response(updated)
 
     @api.get(
         "/exports/{kind}.csv",

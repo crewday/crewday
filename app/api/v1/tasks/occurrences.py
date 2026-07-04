@@ -12,12 +12,14 @@ on the local ``router`` and is included via ``include_router`` from
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from datetime import UTC, datetime
 from typing import Annotated, Any, Final, Literal
 from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Query, Request, status
 from sqlalchemy import or_, select
+from sqlalchemy.orm import Session
 
 from app.adapters.db.tasks.models import ChecklistItem, Occurrence
 from app.adapters.notifications.service import SqlAlchemyNotificationSink
@@ -59,6 +61,7 @@ from app.domain.tasks.oneoff import (
 )
 from app.domain.tasks.oneoff import TaskNotFound as OneOffTaskNotFound
 from app.domain.tasks.templates import TaskTemplateNotFound
+from app.tenancy import WorkspaceContext
 from app.util.clock import SystemClock
 
 from .deps import _Ctx, _Db, _task_lifecycle_bus
@@ -133,24 +136,36 @@ def _require_task_action(
         )
 
 
-def list_tasks_route(
-    ctx: _Ctx,
-    session: _Db,
-    state: Annotated[_OccurrenceState | None, Query()] = None,
-    assignee_user_id: Annotated[str | None, Query(max_length=64)] = None,
-    property_id: Annotated[str | None, Query(max_length=64)] = None,
-    scheduled_for_utc_gte: Annotated[datetime | None, Query()] = None,
-    scheduled_for_utc_lt: Annotated[datetime | None, Query()] = None,
-    cursor: PageCursorQuery = None,
-    limit: LimitQuery = DEFAULT_LIMIT,
+def list_tasks_response(
+    ctx: WorkspaceContext,
+    session: Session,
+    *,
+    state: _OccurrenceState | None = None,
+    assignee_user_id: str | None = None,
+    property_id: str | None = None,
+    scheduled_for_utc_gte: datetime | None = None,
+    scheduled_for_utc_lt: datetime | None = None,
+    cursor: str | None = None,
+    limit: int = DEFAULT_LIMIT,
+    include_unassigned_role_ids: Sequence[str] | None = None,
 ) -> TaskListResponse:
-    # code-health: ignore[params] FastAPI params are OpenAPI contract.
-    """Cursor-paginated list with workspace-scoped filters.
+    """Core task-listing query + projection, shared by the wire route and ``/me``.
 
     Personal tasks (``is_personal=True``) are visible to their creator
     and to workspace owners only — the §15 read layer's personal-task
     gate is applied inline so the §12 listing surface honours the same
     rule.
+
+    ``include_unassigned_role_ids`` is the §03 ``me.tasks:read`` "plus
+    unassigned tasks matching the subject's ``user_work_role``" arm. When
+    ``None`` (the plain wire route) the who-clause is the classic
+    "filter by ``assignee_user_id`` when set". When a sequence is passed
+    (``GET /me/tasks``), ``assignee_user_id`` is the **caller's own** id and
+    the who-clause widens to "assigned to the caller OR unassigned with an
+    ``expected_role_id`` in the caller's active work-role set" — an empty
+    sequence collapses to own-assigned only. The self-key holds either way:
+    only the caller's own id is ever the assigned arm, so another user's
+    assigned rows never enter the union.
     """
     after_id = decode_cursor(cursor)
     now = datetime.now(tz=ZoneInfo("UTC"))
@@ -176,7 +191,23 @@ def list_tasks_route(
             )
         else:
             stmt = stmt.where(Occurrence.state == state)
-    if assignee_user_id is not None:
+    if include_unassigned_role_ids is not None:
+        # §03 me.tasks:read union arm. ``assignee_user_id`` is the caller's
+        # own id here, so ``own`` is the structural self-key; the second
+        # clause adds unassigned tasks whose expected role the caller holds.
+        own = Occurrence.assignee_user_id == assignee_user_id
+        role_ids = list(include_unassigned_role_ids)
+        if role_ids:
+            stmt = stmt.where(
+                or_(
+                    own,
+                    Occurrence.assignee_user_id.is_(None)
+                    & Occurrence.expected_role_id.in_(role_ids),
+                )
+            )
+        else:
+            stmt = stmt.where(own)
+    elif assignee_user_id is not None:
         stmt = stmt.where(Occurrence.assignee_user_id == assignee_user_id)
     if property_id is not None:
         stmt = stmt.where(Occurrence.property_id == property_id)
@@ -213,6 +244,37 @@ def list_tasks_route(
         ],
         next_cursor=page.next_cursor,
         has_more=page.has_more,
+    )
+
+
+def list_tasks_route(
+    ctx: _Ctx,
+    session: _Db,
+    state: Annotated[_OccurrenceState | None, Query()] = None,
+    assignee_user_id: Annotated[str | None, Query(max_length=64)] = None,
+    property_id: Annotated[str | None, Query(max_length=64)] = None,
+    scheduled_for_utc_gte: Annotated[datetime | None, Query()] = None,
+    scheduled_for_utc_lt: Annotated[datetime | None, Query()] = None,
+    cursor: PageCursorQuery = None,
+    limit: LimitQuery = DEFAULT_LIMIT,
+) -> TaskListResponse:
+    # code-health: ignore[params] FastAPI params are OpenAPI contract.
+    """Cursor-paginated list with workspace-scoped filters.
+
+    Thin wire wrapper over :func:`list_tasks_response`; the shared query
+    body single-sources the projection + personal-task gate + pagination
+    for both this route and the PAT-reachable ``GET /me/tasks``.
+    """
+    return list_tasks_response(
+        ctx,
+        session,
+        state=state,
+        assignee_user_id=assignee_user_id,
+        property_id=property_id,
+        scheduled_for_utc_gte=scheduled_for_utc_gte,
+        scheduled_for_utc_lt=scheduled_for_utc_lt,
+        cursor=cursor,
+        limit=limit,
     )
 
 

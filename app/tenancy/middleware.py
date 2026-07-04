@@ -387,12 +387,22 @@ def _personal_token_confined_403(request: Request) -> JSONResponse:
     workspace. Revealing "you are a member but your credential's scope cannot
     reach this route" leaks nothing an enumerator could not already infer,
     and it gives the agent the precise, actionable signal §03 intends.
+
+    **Canonical 403 envelope (cd-isllv).** The problem ``type`` is the §12
+    registered ``forbidden`` URI (the type registry names ``forbidden`` for
+    403, not ``insufficient_scope``); the ``insufficient_scope`` discriminator
+    rides the machine ``error`` code + the ``WWW-Authenticate`` challenge.
+    This matches the route-level ``me.*`` / scoped-token gate
+    (:func:`app.authz.dep._insufficient_scope_to_http`, which maps through
+    ``HTTPException`` → status-derived ``forbidden``), so both the middleware
+    off-subtree refusal and a route-level scope miss now emit an identical
+    ``type`` + ``error`` shape.
     """
     return problem_response(
         request,
         status=403,
-        type_name="insufficient_scope",
-        title="Insufficient scope",
+        type_name="forbidden",
+        title="Forbidden",
         extra={"error": "insufficient_scope"},
         extra_headers={"WWW-Authenticate": 'error="insufficient_scope"'},
     )

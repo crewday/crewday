@@ -379,7 +379,10 @@ class TestPersonalTokenConfinement:
         assert r.headers["content-type"].startswith("application/problem+json")
         assert 'error="insufficient_scope"' in r.headers["WWW-Authenticate"]
         body = r.json()
-        assert body["type"] == f"{_PROBLEM_TYPE_BASE}insufficient_scope"
+        # cd-isllv: canonical 403 envelope — the §12-registered ``forbidden``
+        # type with ``insufficient_scope`` as the machine ``error`` code, so
+        # the middleware off-subtree refusal matches the route-level scope gate.
+        assert body["type"] == f"{_PROBLEM_TYPE_BASE}forbidden"
         assert body["error"] == "insufficient_scope"
         # The handler never ran — no workspace payload leaked to the PAT.
         assert "leaked" not in body

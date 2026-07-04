@@ -43,7 +43,9 @@ __all__ = [
     "BookingAmendRequest",
     "BookingDeclineRequest",
     "BookingResponse",
+    "booking_to_response",
     "build_bookings_router",
+    "list_booking_rows",
     "router",
 ]
 
@@ -192,7 +194,7 @@ def _invalid_window() -> Validation:
     )
 
 
-def _booking_to_response(row: Booking) -> BookingResponse:
+def booking_to_response(row: Booking) -> BookingResponse:
     return BookingResponse(
         id=row.id,
         employee_id=row.user_id,
@@ -262,7 +264,7 @@ def _booking_not_declinable(current_status: str) -> Conflict:
     )
 
 
-def _list_booking_rows(
+def list_booking_rows(
     session: Session,
     ctx: WorkspaceContext,
     *,
@@ -339,7 +341,7 @@ def build_bookings_router() -> APIRouter:
         else:
             _require_view_other(session, ctx)
 
-        rows = _list_booking_rows(
+        rows = list_booking_rows(
             session,
             ctx,
             user_id=user_id,
@@ -349,7 +351,7 @@ def build_bookings_router() -> APIRouter:
             status=status,
             pending_amend=pending_amend,
         )
-        return [_booking_to_response(row) for row in rows]
+        return [booking_to_response(row) for row in rows]
 
     @api.post(
         "/{booking_id}/amend",

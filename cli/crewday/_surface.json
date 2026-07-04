@@ -8099,6 +8099,31 @@
     "group": "me",
     "http": {
       "method": "GET",
+      "path": "/w/{slug}/api/v1/me/bookings"
+    },
+    "idempotent": true,
+    "name": "bookings",
+    "operation_id": "me.bookings.list",
+    "path_params": [],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/MeBookingsResponse",
+    "summary": "List the caller's own bookings and payslips (self-only)",
+    "x_agent_confirm": null,
+    "x_agent_links": {
+      "policy": "none",
+      "reason": "No safe, specific web handoff is registered for me.bookings.list yet."
+    },
+    "x_cli": {
+      "group": "me",
+      "verb": "bookings"
+    }
+  },
+  {
+    "agent_link_routes": {},
+    "body_schema_ref": null,
+    "group": "me",
+    "http": {
+      "method": "GET",
       "path": "/w/{slug}/api/v1/me/expenses"
     },
     "idempotent": true,
@@ -8542,7 +8567,7 @@
       }
     ],
     "response_schema_ref": "#/components/schemas/TaskListResponse",
-    "summary": "List tasks assigned to the caller (self-only)",
+    "summary": "List the caller's own + unassigned role-matching tasks (self-only)",
     "x_agent_confirm": null,
     "x_agent_links": {
       "policy": "none",

@@ -4,11 +4,18 @@ Drives the real :class:`WorkspaceContextMiddleware` in front of the real
 :func:`app.api.v1.me_data.build_me_data_router` router, so the assertions
 prove the end-to-end PAT surface §03 "Personal access tokens" documents:
 
-* a PAT with ``me.tasks:read`` reads **only its own subject's** tasks
-  (``GET /me/tasks`` → 200; another member's task never appears);
+* a PAT with ``me.tasks:read`` reads its own assigned tasks **plus**
+  unassigned tasks matching its subject's ``user_work_role`` (cd-isllv,
+  §03) — another member's assigned task and an unassigned task for a role
+  the subject lacks never appear;
+* a PAT with ``me.bookings:read`` reads **only its own subject's**
+  bookings + payslips (``GET /me/bookings`` → 200; another member's rows
+  never appear);
 * a PAT cannot exceed its ``me.*`` scope — ``me.tasks:read`` 403s on
-  ``GET`` / ``POST /me/expenses`` with the ``insufficient_scope``
-  envelope + ``WWW-Authenticate`` challenge (§03 "Usage");
+  ``GET`` / ``POST /me/expenses`` and on ``GET /me/bookings``, and
+  ``me.bookings:read`` 403s on ``GET /me/tasks`` — each with the
+  ``insufficient_scope`` envelope + ``WWW-Authenticate`` challenge
+  (§03 "Usage");
 * the right scope admits the route — a ``me.expenses:read`` PAT reaches
   ``GET /me/expenses`` (200); a ``me.profile:read`` PAT reaches
   ``GET /me/profile`` (200, its own row).
@@ -25,6 +32,7 @@ from __future__ import annotations
 
 from collections.abc import Iterator
 from datetime import UTC, datetime, timedelta
+from decimal import Decimal
 from typing import Any
 
 import pytest
@@ -35,7 +43,9 @@ from sqlalchemy import Engine
 from sqlalchemy.orm import Session, sessionmaker
 
 import app.adapters.db.session as _session_mod
+from app.adapters.db.payroll.models import Booking, PayPeriod, Payslip
 from app.adapters.db.tasks.models import Occurrence
+from app.adapters.db.workspace.models import UserWorkRole, WorkEngagement, WorkRole
 from app.api.errors import add_exception_handlers
 from app.api.v1.me_data import build_me_data_router
 from app.auth.tokens import mint as mint_token
@@ -150,10 +160,16 @@ def _seed_task(
     session_factory: sessionmaker[Session],
     *,
     workspace_id: str,
-    assignee_user_id: str,
+    assignee_user_id: str | None,
     title: str,
+    expected_role_id: str | None = None,
 ) -> str:
-    """Insert one ad-hoc, non-personal occurrence assigned to ``assignee``."""
+    """Insert one ad-hoc, non-personal occurrence.
+
+    ``assignee_user_id=None`` seeds an **unassigned** task; pair it with
+    ``expected_role_id`` to exercise the §03 ``me.tasks:read`` "unassigned
+    tasks matching the subject's ``user_work_role``" arm.
+    """
     task_id = new_ulid()
     with session_factory() as s:
         s.add(
@@ -161,6 +177,7 @@ def _seed_task(
                 id=task_id,
                 workspace_id=workspace_id,
                 assignee_user_id=assignee_user_id,
+                expected_role_id=expected_role_id,
                 title=title,
                 state="pending",
                 is_personal=False,
@@ -171,6 +188,124 @@ def _seed_task(
         )
         s.commit()
     return task_id
+
+
+def _seed_work_role_for_user(
+    session_factory: sessionmaker[Session],
+    *,
+    workspace_id: str,
+    user_id: str,
+    key: str,
+) -> str:
+    """Create a workspace work role and an active user_work_role link.
+
+    Returns the ``work_role_id`` — an unassigned task with a matching
+    ``expected_role_id`` is the "eligible pool" the subject should see.
+    """
+    work_role_id = new_ulid()
+    with session_factory() as s:
+        s.add(
+            WorkRole(
+                id=work_role_id,
+                workspace_id=workspace_id,
+                key=key,
+                name=key.title(),
+                created_at=_PINNED,
+            )
+        )
+        s.flush()
+        s.add(
+            UserWorkRole(
+                id=new_ulid(),
+                user_id=user_id,
+                workspace_id=workspace_id,
+                work_role_id=work_role_id,
+                started_on=_PINNED.date(),
+                created_at=_PINNED,
+            )
+        )
+        s.commit()
+    return work_role_id
+
+
+def _seed_booking(
+    session_factory: sessionmaker[Session],
+    *,
+    workspace_id: str,
+    user_id: str,
+) -> str:
+    """Insert one live booking (+ its work engagement) for ``user_id``."""
+    booking_id = new_ulid()
+    engagement_id = new_ulid()
+    with session_factory() as s:
+        s.add(
+            WorkEngagement(
+                id=engagement_id,
+                user_id=user_id,
+                workspace_id=workspace_id,
+                engagement_kind="payroll",
+                started_on=_PINNED.date(),
+                created_at=_PINNED,
+                updated_at=_PINNED,
+            )
+        )
+        s.flush()
+        s.add(
+            Booking(
+                id=booking_id,
+                workspace_id=workspace_id,
+                work_engagement_id=engagement_id,
+                user_id=user_id,
+                status="scheduled",
+                scheduled_start=_PINNED,
+                scheduled_end=_PINNED + timedelta(hours=2),
+                actual_minutes_paid=0,
+                created_at=_PINNED,
+                updated_at=_PINNED,
+            )
+        )
+        s.commit()
+    return booking_id
+
+
+def _seed_payslip(
+    session_factory: sessionmaker[Session],
+    *,
+    workspace_id: str,
+    user_id: str,
+    period_index: int,
+) -> str:
+    """Insert one pay period + one payslip for ``user_id``; returns payslip id.
+
+    ``period_index`` offsets the period window so distinct callers do not
+    collide on the ``(workspace_id, starts_at, ends_at)`` UNIQUE.
+    """
+    payslip_id = new_ulid()
+    window_start = _PINNED + timedelta(days=30 * period_index)
+    with session_factory() as s:
+        period = PayPeriod(
+            id=new_ulid(),
+            workspace_id=workspace_id,
+            starts_at=window_start,
+            ends_at=window_start + timedelta(days=14),
+            created_at=_PINNED,
+        )
+        s.add(period)
+        s.flush()
+        s.add(
+            Payslip(
+                id=payslip_id,
+                workspace_id=workspace_id,
+                pay_period_id=period.id,
+                user_id=user_id,
+                shift_hours_decimal=Decimal("8"),
+                gross_cents=10_000,
+                net_cents=10_000,
+                created_at=_PINNED,
+            )
+        )
+        s.commit()
+    return payslip_id
 
 
 def _mint_pat(
@@ -218,10 +353,19 @@ def _sweep(
 
     with session_factory() as s, tenant_agnostic():
         delete_api_tokens_for_scope(s, workspace_ids=(workspace_id,), user_ids=user_ids)
-        for row in s.scalars(
-            select(Occurrence).where(Occurrence.workspace_id == workspace_id)
-        ).all():
-            s.delete(row)
+        for scoped_model in (
+            Occurrence,
+            Booking,
+            Payslip,
+            PayPeriod,
+            WorkEngagement,
+            UserWorkRole,
+            WorkRole,
+        ):
+            for row in s.scalars(
+                select(scoped_model).where(scoped_model.workspace_id == workspace_id)
+            ).all():
+                s.delete(row)
         for model in (RoleGrant, PermissionGroupMember, PermissionGroup, UserWorkspace):
             for row in s.scalars(
                 select(model).where(model.workspace_id == workspace_id)
@@ -267,12 +411,50 @@ class TestMeScopedRoutes:
             assignee_user_id=bob_id,
             title="Bob task",
         )
+        # Alice holds the "cook" work role; an unassigned cook task is in her
+        # eligible pool, an unassigned task for a role she lacks is not.
+        alice_role_id = _seed_work_role_for_user(
+            session_factory,
+            workspace_id=ws_id,
+            user_id=alice_id,
+            key="me-scoped-cook",
+        )
+        open_cook_task = _seed_task(
+            session_factory,
+            workspace_id=ws_id,
+            assignee_user_id=None,
+            title="Unassigned cook task",
+            expected_role_id=alice_role_id,
+        )
+        open_other_role_task = _seed_task(
+            session_factory,
+            workspace_id=ws_id,
+            assignee_user_id=None,
+            title="Unassigned driver task",
+            expected_role_id=new_ulid(),
+        )
+        alice_booking = _seed_booking(
+            session_factory, workspace_id=ws_id, user_id=alice_id
+        )
+        bob_booking = _seed_booking(session_factory, workspace_id=ws_id, user_id=bob_id)
+        alice_payslip = _seed_payslip(
+            session_factory, workspace_id=ws_id, user_id=alice_id, period_index=0
+        )
+        bob_payslip = _seed_payslip(
+            session_factory, workspace_id=ws_id, user_id=bob_id, period_index=1
+        )
         try:
             tasks_pat = _mint_pat(
                 session_factory,
                 subject_user_id=alice_id,
                 label="alice-tasks",
                 scopes={"me.tasks:read": True},
+            )
+            bookings_pat = _mint_pat(
+                session_factory,
+                subject_user_id=alice_id,
+                label="alice-bookings",
+                scopes={"me.bookings:read": True},
             )
             expenses_pat = _mint_pat(
                 session_factory,
@@ -289,8 +471,24 @@ class TestMeScopedRoutes:
 
             app = _build_app()
             with TestClient(app, raise_server_exceptions=False) as client:
-                self._assert_reads_only_own_tasks(
-                    client, tasks_pat, own=alice_task, other=bob_task
+                self._assert_reads_own_and_role_tasks(
+                    client,
+                    tasks_pat,
+                    own=alice_task,
+                    other=bob_task,
+                    open_matching=open_cook_task,
+                    open_other_role=open_other_role_task,
+                )
+                self._assert_bookings_scope_reads_own(
+                    client,
+                    bookings_pat,
+                    own_booking=alice_booking,
+                    other_booking=bob_booking,
+                    own_payslip=alice_payslip,
+                    other_payslip=bob_payslip,
+                )
+                self._assert_bookings_and_tasks_scopes_are_isolated(
+                    client, tasks_pat=tasks_pat, bookings_pat=bookings_pat
                 )
                 self._assert_scope_exceeded_on_expenses(client, tasks_pat)
                 self._assert_expenses_scope_admits_list(client, expenses_pat)
@@ -305,15 +503,67 @@ class TestMeScopedRoutes:
                 user_ids=(owner_id, alice_id, bob_id),
             )
 
-    def _assert_reads_only_own_tasks(
-        self, client: TestClient, pat: str, *, own: str, other: str
+    def _assert_reads_own_and_role_tasks(
+        self,
+        client: TestClient,
+        pat: str,
+        *,
+        own: str,
+        other: str,
+        open_matching: str,
+        open_other_role: str,
     ) -> None:
         r = client.get(f"/w/{_SLUG}/api/v1/me/tasks", headers=_bearer(pat))
         assert r.status_code == 200, r.text
         ids = {row["id"] for row in r.json()["data"]}
+        # Own assigned task + the unassigned task whose expected role Alice
+        # holds are both in the §03 me.tasks:read union.
         assert own in ids
-        # The structural self-key: another subject's task never surfaces.
+        assert open_matching in ids
+        # The structural self-key: another subject's assigned task never
+        # surfaces, and an unassigned task for a role Alice lacks does not
+        # leak in via the unassigned arm.
         assert other not in ids
+        assert open_other_role not in ids
+
+    def _assert_bookings_scope_reads_own(
+        self,
+        client: TestClient,
+        pat: str,
+        *,
+        own_booking: str,
+        other_booking: str,
+        own_payslip: str,
+        other_payslip: str,
+    ) -> None:
+        r = client.get(f"/w/{_SLUG}/api/v1/me/bookings", headers=_bearer(pat))
+        assert r.status_code == 200, r.text
+        body = r.json()
+        booking_ids = {row["id"] for row in body["bookings"]}
+        payslip_ids = {row["id"] for row in body["payslips"]}
+        # Self-keyed on ctx.actor_id: only Alice's own bookings + payslips.
+        assert own_booking in booking_ids
+        assert other_booking not in booking_ids
+        assert own_payslip in payslip_ids
+        assert other_payslip not in payslip_ids
+
+    def _assert_bookings_and_tasks_scopes_are_isolated(
+        self, client: TestClient, *, tasks_pat: str, bookings_pat: str
+    ) -> None:
+        # A me.bookings:read PAT cannot reach /me/tasks, and a me.tasks:read
+        # PAT cannot reach /me/bookings — each me.* verb admits only its route.
+        for pat, path, want_scope in (
+            (bookings_pat, "me/tasks", "me.tasks:read"),
+            (tasks_pat, "me/bookings", "me.bookings:read"),
+        ):
+            r = client.get(f"/w/{_SLUG}/api/v1/{path}", headers=_bearer(pat))
+            assert r.status_code == 403, (path, r.text)
+            challenge = r.headers["WWW-Authenticate"]
+            assert 'error="insufficient_scope"' in challenge
+            assert f'scope="{want_scope}"' in challenge
+            body = r.json()
+            assert body["error"] == "insufficient_scope"
+            assert body["scope"] == want_scope
 
     def _assert_scope_exceeded_on_expenses(self, client: TestClient, pat: str) -> None:
         # A me.tasks:read PAT cannot reach the expenses surface at all. The

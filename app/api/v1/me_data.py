@@ -31,9 +31,15 @@ Every route here is:
 The handlers deliberately **reuse** the existing workspace surfaces
 rather than re-implement the queries:
 
-* tasks → :func:`app.api.v1.tasks.occurrences.list_tasks_route` with
-  ``assignee_user_id = ctx.actor_id`` (single-sources the task
-  projection + personal-task visibility gate + pagination);
+* tasks → :func:`app.api.v1.tasks.occurrences.list_tasks_response` with
+  ``assignee_user_id = ctx.actor_id`` plus the caller's own work-role ids
+  (single-sources the task projection + personal-task visibility gate +
+  pagination, and adds the §03 "unassigned tasks matching the subject's
+  ``user_work_role``" arm);
+* bookings + payslips → :func:`app.api.v1.bookings.list_booking_rows`
+  (``user_id = ctx.actor_id``) and
+  :meth:`app.adapters.db.payroll.repositories.SqlAlchemyPayslipReadRepository.list_payslips`
+  (``user_id = ctx.actor_id``);
 * expenses → :func:`app.api.v1.expenses.list_expense_claims_route`
   (``mine=True``) and :func:`app.api.v1.expenses.create_expense_claim_route`
   (create binds the claim to the caller's own engagement);
@@ -53,17 +59,24 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 from sqlalchemy.orm import Session
 
 from app.adapters.db.identity.models import User
+from app.adapters.db.payroll.repositories import SqlAlchemyPayslipReadRepository
 from app.adapters.db.workspace.repositories import SqlAlchemyMembershipRepository
 from app.api.deps import current_workspace_context, db_session
 from app.api.pagination import DEFAULT_LIMIT, LimitQuery, PageCursorQuery
 from app.api.v1._problem_json import IDENTITY_PROBLEM_RESPONSES
+from app.api.v1.bookings import (
+    BookingResponse,
+    booking_to_response,
+    list_booking_rows,
+)
 from app.api.v1.expenses import (
     ExpenseClaimListResponse,
     ExpenseClaimPayload,
     create_expense_claim_route,
     list_expense_claims_route,
 )
-from app.api.v1.tasks.occurrences import _OccurrenceState, list_tasks_route
+from app.api.v1.payroll import PayslipResponse, payslip_to_response
+from app.api.v1.tasks.occurrences import _OccurrenceState, list_tasks_response
 from app.api.v1.tasks.payloads import TaskListResponse
 from app.authz.dep import MeScope
 from app.domain.employees import (
@@ -78,6 +91,7 @@ from app.domain.expenses.claims import ExpenseClaimCreate
 from app.tenancy import WorkspaceContext
 
 __all__ = [
+    "MeBookingsResponse",
     "MeProfileUpdateRequest",
     "MeSelfProfileResponse",
     "build_me_data_router",
@@ -148,6 +162,25 @@ class MeProfileUpdateRequest(BaseModel):
         return self
 
 
+class MeBookingsResponse(BaseModel):
+    """The caller's own bookings and payslips (§03 ``me.bookings:read``).
+
+    §03 "Scopes" defines ``me.bookings:{read}`` as "the subject's own
+    bookings and payslips", so this one envelope carries both slices. Each
+    list reuses the workspace surface's wire shape verbatim
+    (:class:`~app.api.v1.bookings.BookingResponse` /
+    :class:`~app.api.v1.payroll.PayslipResponse`) rather than a bespoke
+    ``me`` projection — the fields a worker sees on their own rows are the
+    same either way, and single-sourcing the shape keeps the PAT surface
+    honest as those tables evolve. Both slices are self-keyed on
+    ``ctx.actor_id`` at query time, so a PAT can only ever read its own
+    subject's bookings / payslips.
+    """
+
+    bookings: list[BookingResponse]
+    payslips: list[PayslipResponse]
+
+
 def _user_to_me_profile(user: User) -> MeSelfProfileResponse:
     return MeSelfProfileResponse(
         id=user.id,
@@ -187,7 +220,7 @@ def build_me_data_router() -> APIRouter:
         "/tasks",
         response_model=TaskListResponse,
         operation_id="me.tasks.list",
-        summary="List tasks assigned to the caller (self-only)",
+        summary="List the caller's own + unassigned role-matching tasks (self-only)",
         dependencies=[Depends(MeScope("me.tasks:read"))],
         openapi_extra={"x-cli": {"group": "me", "verb": "tasks"}},
     )
@@ -198,21 +231,72 @@ def build_me_data_router() -> APIRouter:
         cursor: PageCursorQuery = None,
         limit: LimitQuery = DEFAULT_LIMIT,
     ) -> TaskListResponse:
-        """Tasks assigned to the caller's subject, newest-cursor paginated.
+        """The subject's own assigned tasks PLUS unassigned role-matching tasks.
 
-        Forces ``assignee_user_id = ctx.actor_id`` before delegating to
-        the shared workspace list route, so a PAT only ever sees its own
-        subject's tasks (the "unassigned tasks matching the subject's
-        ``user_work_role``" arm of §03 "me.tasks:read" is a follow-up —
-        see cd-fktzw notes / the reconciled spec).
+        §03 ``me.tasks:read`` is "tasks assigned to the token's subject,
+        plus unassigned tasks matching their ``user_work_role``". The
+        assigned arm is pinned to ``assignee_user_id = ctx.actor_id`` (the
+        structural self-key), and the unassigned arm is scoped to the
+        caller's **own** active work-role ids in this workspace — so a PAT
+        can never see another user's assigned tasks, only the shared pool
+        it is itself eligible for. Both arms flow through the single shared
+        :func:`app.api.v1.tasks.occurrences.list_tasks_response` query, which
+        also applies the §15 personal-task visibility gate and pagination.
         """
-        return list_tasks_route(
+        role_ids = [
+            row.work_role_id
+            for row in SqlAlchemyMembershipRepository(session).list_user_work_roles(
+                workspace_id=ctx.workspace_id,
+                user_id=ctx.actor_id,
+                active_only=True,
+            )
+        ]
+        return list_tasks_response(
             ctx,
             session,
             state=state,
             assignee_user_id=ctx.actor_id,
             cursor=cursor,
             limit=limit,
+            include_unassigned_role_ids=role_ids,
+        )
+
+    @router.get(
+        "/bookings",
+        response_model=MeBookingsResponse,
+        operation_id="me.bookings.list",
+        summary="List the caller's own bookings and payslips (self-only)",
+        dependencies=[Depends(MeScope("me.bookings:read"))],
+        openapi_extra={"x-cli": {"group": "me", "verb": "bookings"}},
+    )
+    def list_my_bookings(ctx: _Ctx, session: _Db) -> MeBookingsResponse:
+        """Own bookings + payslips, both self-keyed on ``ctx.actor_id``.
+
+        Reuses the workspace read layers directly — the booking query
+        (:func:`app.api.v1.bookings.list_booking_rows`) and the payslip
+        repository (:meth:`SqlAlchemyPayslipReadRepository.list_payslips`)
+        — each pinned to ``user_id = ctx.actor_id``. A PAT therefore only
+        ever reads its own subject's rows; there is no filter the caller
+        can pass to widen the query to another user.
+        """
+        booking_rows = list_booking_rows(
+            session,
+            ctx,
+            user_id=ctx.actor_id,
+            property_id=None,
+            from_=None,
+            to=None,
+            status=None,
+            pending_amend=None,
+        )
+        payslip_rows = SqlAlchemyPayslipReadRepository(session).list_payslips(
+            workspace_id=ctx.workspace_id,
+            user_id=ctx.actor_id,
+            pay_period_id=None,
+        )
+        return MeBookingsResponse(
+            bookings=[booking_to_response(row) for row in booking_rows],
+            payslips=[payslip_to_response(row) for row in payslip_rows],
         )
 
     @router.get(
