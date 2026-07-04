@@ -79,14 +79,18 @@ export function approvalRequestFromPayload(payload: ApprovalRequestPayload): App
   };
 }
 
-/** Fetch the pending-approval queue and project the rows destined for a
- *  single inline chat channel into the `AgentAction` card shape the chat
- *  surfaces render. Keyed by the stable approval id so decide buttons can
- *  post to `/approvals/{id}/{decision}` (§11 "Inline approval UX"). */
-export async function inlineApprovalsForChannel(
+/** Project the cached pending-approval list down to the rows destined for a
+ *  single inline chat channel, in the `AgentAction` card shape the chat
+ *  surfaces render. A pure derivation over the already-fetched
+ *  `ApprovalRequest[]` so the inline rails can share one cache blob with the
+ *  manager desk via TanStack `select` instead of registering a second queryFn
+ *  under the same key (cd-tifg4). Keyed by the stable approval id so decide
+ *  buttons can post to `/approvals/{id}/{decision}` (§11 "Inline approval
+ *  UX"). */
+export function projectInlineApprovals(
+  approvals: ApprovalRequest[],
   channel: InlineApprovalChannel,
-): Promise<AgentAction[]> {
-  const approvals = await fetchApprovals();
+): AgentAction[] {
   const cards: AgentAction[] = [];
   for (const approval of approvals) {
     if (approval.inline_channel !== channel) continue;

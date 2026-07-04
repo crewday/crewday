@@ -3,7 +3,11 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useLocation, useParams } from "react-router-dom";
 import { ChevronDown } from "lucide-react";
 import { fetchJson, toDisplayError } from "@/lib/api";
-import { inlineApprovalsForChannel, type InlineApprovalChannel } from "@/lib/approvals";
+import {
+  fetchApprovals,
+  projectInlineApprovals,
+  type InlineApprovalChannel,
+} from "@/lib/approvals";
 import { qk } from "@/lib/queryKeys";
 import { initialAgentCollapsed, persistAgentCollapsed } from "@/lib/preferences";
 import { useAgentActivity } from "@/lib/agentTyping";
@@ -70,9 +74,6 @@ export default function AgentSidebar({ agentRole: role }: AgentSidebarProps) {
   const messageUrl = isAdmin
     ? "/admin/api/v1/agent/message"
     : isManager ? "/api/v1/agent/manager/message" : "/api/v1/agent/employee/message";
-  const actionsUrl = isAdmin
-    ? "/admin/api/v1/agent/actions"
-    : "/api/v1/approvals";
   const decideUrlFor = (id: string, decision: "approve" | "deny") =>
     isAdmin
       ? `/admin/api/v1/agent/action/${id}/${decision}`
@@ -82,14 +83,25 @@ export default function AgentSidebar({ agentRole: role }: AgentSidebarProps) {
     queryKey: logKey,
     queryFn: () => fetchJson<AgentMessage[]>(logUrl),
   });
-  const actions = useQuery({
-    queryKey: actionsKey,
-    queryFn: (): Promise<AgentAction[]> =>
-      isAdmin
-        ? fetchJson<AgentAction[]>(actionsUrl)
-        : inlineApprovalsForChannel(inlineChannel),
-    enabled: showActions,
+  // Admin reads its own action queue under a dedicated key; managers/workers
+  // read the shared /approvals list. Both feed AgentAction[] cards, but the
+  // non-admin path caches the RAW ApprovalRequest[] under qk.approvals() (the
+  // same key + queryFn the manager desk uses) and derives this channel's cards
+  // via `select`, so the rail and the desk share one cache blob rather than
+  // registering divergent shapes under one key (cd-tifg4). Only the active
+  // role's query is enabled; the other stays idle.
+  const adminActions = useQuery({
+    queryKey: qk.adminAgentActions(),
+    queryFn: () => fetchJson<AgentAction[]>("/admin/api/v1/agent/actions"),
+    enabled: showActions && isAdmin,
   });
+  const inlineActions = useQuery({
+    queryKey: qk.approvals(),
+    queryFn: fetchApprovals,
+    select: (data): AgentAction[] => projectInlineApprovals(data, inlineChannel),
+    enabled: showActions && !isAdmin,
+  });
+  const actions = isAdmin ? adminActions : inlineActions;
 
   // §12 "Agent audit headers", every message carries the route the
   // user is on so the agent can resolve "this workspace" / "this

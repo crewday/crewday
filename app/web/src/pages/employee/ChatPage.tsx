@@ -4,7 +4,11 @@ import { Navigate } from "react-router-dom";
 import { activeWorkspaceGrantRole, useAuth } from "@/auth";
 import { useWorkspace } from "@/context/WorkspaceContext";
 import { fetchJson, toDisplayError } from "@/lib/api";
-import { inlineApprovalsForChannel, type InlineApprovalChannel } from "@/lib/approvals";
+import {
+  fetchApprovals,
+  projectInlineApprovals,
+  type InlineApprovalChannel,
+} from "@/lib/approvals";
 import { qk } from "@/lib/queryKeys";
 import { useAgentActivity } from "@/lib/agentTyping";
 import type { AgentAction, AgentMessage, AgentTurnScope } from "@/types/api";
@@ -68,9 +72,15 @@ export default function ChatPage() {
     enabled: Boolean(config),
   });
 
+  // §11 "Inline approval UX" — cache the raw approval list ONCE under
+  // qk.approvals() (the same key + queryFn the manager desk uses) and derive
+  // this channel's cards client-side via `select`, so the phone chat surface
+  // and the desk share one cache blob instead of clobbering each other with
+  // divergent shapes (cd-tifg4).
   const approvalsQuery = useQuery({
     queryKey: qk.approvals(),
-    queryFn: (): Promise<AgentAction[]> => inlineApprovalsForChannel(approvalChannel),
+    queryFn: fetchApprovals,
+    select: (data): AgentAction[] => projectInlineApprovals(data, approvalChannel),
     enabled: Boolean(config),
   });
 
