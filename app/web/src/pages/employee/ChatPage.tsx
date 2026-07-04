@@ -4,7 +4,7 @@ import { Navigate } from "react-router-dom";
 import { activeWorkspaceGrantRole, useAuth } from "@/auth";
 import { useWorkspace } from "@/context/WorkspaceContext";
 import { fetchJson, toDisplayError } from "@/lib/api";
-import { inlineApprovalsForChannel } from "@/lib/approvals";
+import { inlineApprovalsForChannel, type InlineApprovalChannel } from "@/lib/approvals";
 import { qk } from "@/lib/queryKeys";
 import { useAgentActivity } from "@/lib/agentTyping";
 import type { AgentAction, AgentMessage, AgentTurnScope } from "@/types/api";
@@ -54,12 +54,13 @@ export default function ChatPage() {
   const activeConfig = config ?? employeeChatConfig();
   const activity = useAgentActivity(activeConfig.scope);
   // §11 "Inline approval UX" — the phone /chat surface is the full-screen
-  // presentation of the role's rail. Only owner/manager sessions can read
-  // and decide approvals (`approvals.read` is owners/managers-only), so
-  // only the manager scope renders the `web_owner_sidebar` cards, mirroring
-  // the desktop AgentSidebar gate. Worker inline approvals are not wired on
-  // the read/decide side today (see handoff note).
-  const showApprovals = activeConfig.scope === "manager";
+  // presentation of the role's rail. The /approvals list is server-scoped
+  // to the caller (cd-uu806): whatever it returns is actionable, so the
+  // query is always enabled for an embedded chat agent. Managers read desk
+  // + own-conversation rows via `web_owner_sidebar`; workers read their own
+  // agent's inline cards via `web_worker_chat`.
+  const approvalChannel: InlineApprovalChannel =
+    activeConfig.scope === "manager" ? "web_owner_sidebar" : "web_worker_chat";
 
   const q = useQuery({
     queryKey: activeConfig.logKey,
@@ -69,8 +70,8 @@ export default function ChatPage() {
 
   const approvalsQuery = useQuery({
     queryKey: qk.approvals(),
-    queryFn: (): Promise<AgentAction[]> => inlineApprovalsForChannel("web_owner_sidebar"),
-    enabled: Boolean(config) && showApprovals,
+    queryFn: (): Promise<AgentAction[]> => inlineApprovalsForChannel(approvalChannel),
+    enabled: Boolean(config),
   });
 
   const send = useMutation({

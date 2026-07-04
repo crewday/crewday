@@ -3,7 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useLocation, useParams } from "react-router-dom";
 import { ChevronDown } from "lucide-react";
 import { fetchJson, toDisplayError } from "@/lib/api";
-import { inlineApprovalsForChannel } from "@/lib/approvals";
+import { inlineApprovalsForChannel, type InlineApprovalChannel } from "@/lib/approvals";
 import { qk } from "@/lib/queryKeys";
 import { initialAgentCollapsed, persistAgentCollapsed } from "@/lib/preferences";
 import { useAgentActivity } from "@/lib/agentTyping";
@@ -25,8 +25,10 @@ import type { AgentAction, AgentMessage, AgentTurnScope, Role } from "@/types/ap
 // Above 720px the rail renders inline (collapsed or expanded, see
 // `initialAgentCollapsed`). Below 720px the rail is hidden by CSS;
 // both shells route their bottom Chat tab to /chat instead. `role`
-// selects the per-role log/message endpoints and gates the
-// manager-only "Pending approvals" block.
+// selects the per-role log/message endpoints and the inline-approval
+// channel: admin reads its own action queue, managers/workers read the
+// server-scoped /approvals list (cd-uu806) — the manager rail via
+// `web_owner_sidebar`, the worker rail via `web_worker_chat`.
 interface AgentSidebarProps {
   agentRole: Role;
 }
@@ -41,14 +43,23 @@ export default function AgentSidebar({ agentRole: role }: AgentSidebarProps) {
 
   const isAdmin = role === "admin";
   const isManager = role === "manager";
-  const showActions = isManager || isAdmin;
+  const isEmployee = role === "employee";
+  // The /approvals list is server-scoped to the caller (cd-uu806):
+  // whatever it returns is actionable, so every agent surface but the
+  // read-only `client` role renders decide cards. Admin uses its own
+  // action queue; managers see their desk + own-conversation rows;
+  // workers see their own agent's inline cards.
+  const showActions = isAdmin || isManager || isEmployee;
+  const inlineChannel: InlineApprovalChannel = isManager
+    ? "web_owner_sidebar"
+    : "web_worker_chat";
   const typingScope: AgentTurnScope = isAdmin ? "admin" : isManager ? "manager" : "employee";
   const activity = useAgentActivity(typingScope);
 
   // Query keys and endpoints are scoped per role. The admin agent
   // lives under /admin/api/v1/... with its own log/actions. Workspace
   // chat logs live under /api/v1/agent/{manager|employee}/..., while
-  // manager approval cards come from the shared /approvals queue.
+  // manager/worker approval cards come from the shared /approvals queue.
   const logKey = isAdmin
     ? qk.adminAgentLog()
     : isManager ? qk.agentManagerLog() : qk.agentEmployeeLog();
@@ -76,7 +87,7 @@ export default function AgentSidebar({ agentRole: role }: AgentSidebarProps) {
     queryFn: (): Promise<AgentAction[]> =>
       isAdmin
         ? fetchJson<AgentAction[]>(actionsUrl)
-        : inlineApprovalsForChannel("web_owner_sidebar"),
+        : inlineApprovalsForChannel(inlineChannel),
     enabled: showActions,
   });
 

@@ -199,12 +199,18 @@ describe("<ChatPage>", () => {
     });
   });
 
-  it("does not fetch approvals for a worker session", async () => {
-    const requestedPaths = renderChat("worker");
+  it("fetches approvals for a worker session and wires the own-conversation decide card", async () => {
+    // The server scopes /approvals to the caller (cd-uu806): a worker fetch
+    // returns their own web_worker_chat rows, so the decide card renders and
+    // posts to the shared /approvals/{id}/{decision} contract.
+    const requestedPaths = renderChat("worker", { approvalChannel: "web_worker_chat" });
 
-    expect(await screen.findByText("Employee log")).toBeInTheDocument();
-    expect(requestedPaths.some((p) => p.endsWith("/api/v1/approvals"))).toBe(false);
-    expect(screen.queryByRole("button", { name: "Confirm" })).toBeNull();
+    fireEvent.click(await screen.findByRole("button", { name: "Confirm" }));
+
+    await waitFor(() => {
+      expect(requestedPaths).toContain("POST /w/ws_1/api/v1/approvals/appr_1/approve");
+    });
+    expect(requestedPaths.some((p) => p === "GET /w/ws_1/api/v1/approvals")).toBe(true);
   });
 
   it("shows a retryable error state when the chat log fails to load", async () => {

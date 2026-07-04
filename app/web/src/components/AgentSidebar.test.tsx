@@ -13,6 +13,14 @@ import {
 import { makeTestQueryClient, renderWithProviders } from "@/test/render";
 import { installFetchRouteHandlers } from "@/test/helpers";
 
+// The /approvals list is server-scoped (cd-uu806); every non-admin rail
+// now fetches it. Tests that only exercise the chat log script an empty
+// envelope so the actions query resolves to no cards instead of erroring.
+const EMPTY_APPROVALS = {
+  path: "/w/crewday/api/v1/approvals",
+  respond: { body: { data: [], next_cursor: null, has_more: false } },
+} as const;
+
 beforeEach(() => {
   __resetApiProvidersForTests();
   __resetQueryKeyGetterForTests();
@@ -43,6 +51,7 @@ describe("AgentSidebar", () => {
           ],
         },
       },
+      EMPTY_APPROVALS,
     ]);
 
     try {
@@ -219,6 +228,77 @@ describe("AgentSidebar", () => {
     }
   });
 
+  it("renders the worker rail's own-conversation approval cards", async () => {
+    // cd-uu806: the worker rail reads the same server-scoped /approvals
+    // list, filtered to its own web_worker_chat rows, and wires the decide
+    // buttons to /approvals/{id}/{decision}.
+    const env = installFetchRouteHandlers([
+      {
+        path: "/w/crewday/api/v1/agent/employee/log",
+        respond: { body: [] },
+      },
+      {
+        path: "/w/crewday/api/v1/approvals",
+        respond: {
+          body: {
+            data: [
+              {
+                id: "appr_w1",
+                workspace_id: "ws_1",
+                requester_actor_id: null,
+                for_user_id: "u_worker",
+                inline_channel: "web_worker_chat",
+                resolved_user_mode: "strict",
+                status: "pending",
+                decided_by: null,
+                decided_at: null,
+                decision_note_md: null,
+                expires_at: null,
+                created_at: "2026-05-10T10:00:00Z",
+                action_json: {
+                  tool_name: "stays.create",
+                  card_summary: "Log my cleaning at Oak House?",
+                  card_risk: "low",
+                },
+                result_json: null,
+              },
+            ],
+            next_cursor: null,
+            has_more: false,
+          },
+        },
+      },
+      {
+        path: "/w/crewday/api/v1/approvals/appr_w1/approve",
+        method: "POST",
+        respond: { body: { id: "appr_w1", status: "approved" } },
+      },
+    ]);
+
+    try {
+      renderWithProviders(
+        <MemoryRouter initialEntries={["/w/crewday/today"]}>
+          <AgentSidebar agentRole="employee" />
+        </MemoryRouter>,
+        { queryClient: makeTestQueryClient() },
+      );
+
+      fireEvent.click(await screen.findByRole("button", { name: "Confirm" }));
+
+      await waitFor(() => {
+        expect(
+          env.requests.some(
+            (request) =>
+              request.method === "POST" &&
+              request.path === "/w/crewday/api/v1/approvals/appr_w1/approve",
+          ),
+        ).toBe(true);
+      });
+    } finally {
+      env.restore();
+    }
+  });
+
   it("does not inject raw HTML from sidebar agent responses", async () => {
     const env = installFetchRouteHandlers([
       {
@@ -233,6 +313,7 @@ describe("AgentSidebar", () => {
           ],
         },
       },
+      EMPTY_APPROVALS,
     ]);
 
     try {
@@ -260,6 +341,7 @@ describe("AgentSidebar", () => {
         path: "/w/crewday/api/v1/agent/employee/log",
         respond: () => ({ body: messages }),
       },
+      EMPTY_APPROVALS,
       {
         path: "/w/crewday/api/v1/agent/employee/message",
         method: "POST",
@@ -323,6 +405,7 @@ describe("AgentSidebar", () => {
         path: "/w/crewday/api/v1/agent/employee/log",
         respond: { body: [] },
       },
+      EMPTY_APPROVALS,
       {
         path: "/w/crewday/api/v1/agent/employee/message",
         method: "POST",
@@ -674,6 +757,7 @@ describe("AgentSidebar", () => {
           body: [{ at: "2026-05-06T11:00:00Z", kind: "agent", body: "prior message" }],
         },
       },
+      EMPTY_APPROVALS,
       {
         path: "/w/crewday/api/v1/agent/employee/message",
         method: "POST",
