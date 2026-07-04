@@ -148,7 +148,11 @@ class Settings(BaseSettings):
     # --- API rate limiting (§12 "Rate limiting"; cd-uxdk) ---
     # ``memory`` is the single-worker/dev backend. Multi-process
     # deployments use ``postgres`` so bucket state is shared through the
-    # deployment-wide ``rate_limit_bucket`` table.
+    # deployment-wide ``rate_limit_bucket`` table. The same flag also
+    # routes the §15 abuse throttles (signup / recover / magic-link /
+    # passkey-login-begin) onto the shared ``throttle_window`` table so
+    # their per-deployment caps hold across every worker instead of being
+    # multiplied by the worker count (cd-0lnr9).
     rate_limit_backend: Literal["memory", "postgres"] = "memory"
     rate_limit_token_per_minute: int = Field(default=180, ge=1)
     rate_limit_personal_me_per_minute: int = Field(default=600, ge=1)

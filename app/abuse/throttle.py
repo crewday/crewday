@@ -2,9 +2,11 @@
 
 Two public surfaces:
 
-* :class:`ShieldStore` — thread-safe, in-memory sliding-window hit
-  counter. Keyed by ``(scope, bucket_key)`` tuples so one shared
-  store can serve any number of scopes without state bleed.
+* :class:`ShieldStore` — sliding-window hit counter over a pluggable
+  :class:`~app.abuse.window_store.WindowStore` backend (in-memory for
+  single-worker self-host, DB-backed for multi-worker deployments).
+  Keyed by ``(scope, bucket_key)`` tuples so one shared store can serve
+  any number of scopes without state bleed.
 * :func:`throttle` — decorator that consults a :class:`ShieldStore`
   before the wrapped function runs. Derives the bucket key from the
   request via a caller-supplied ``key_fn``, refuses the 11th (or
@@ -24,17 +26,18 @@ introduces that decorator and migrates the login-begin route onto
 it (cd-7huk). The rest of the per-feature buckets stay where they
 are until a full migration is budgeted.
 
-**Storage.** Single process memory. crew.day v1 runs one worker pool
-per deployment (§01 "One worker pool per process"), so an in-memory
-dict is correct for both semantics and audit trail. A
-:class:`threading.Lock` guards every dict mutation; critical
-sections are tiny (a deque append + trim) so contention is a non-
-issue at the deployment sizes we care about. Horizontal scaling —
-if it ever lands — moves this to a shared Redis-backed bucket.
+**Storage.** Delegated to :mod:`app.abuse.window_store`. Single-worker
+self-host keeps an in-memory dict of deques (dependency-free, no DB
+round-trip); a multi-worker deployment
+(``settings.rate_limit_backend == "postgres"``) shares the
+``throttle_window`` table so a per-deployment cap holds across every
+worker instead of being multiplied by the worker count. The backend is
+chosen with :func:`app.abuse.window_store.build_window_store`.
 
-**No persistence.** A process restart resets every bucket. That is a
-feature, not a bug, for a dev-scoped throttle: operators can clear
-the counters by bouncing the service.
+**No persistence (in-memory backend).** A process restart resets every
+bucket. That is a feature, not a bug, for a dev-scoped throttle:
+operators can clear the counters by bouncing the service. The shared
+DB backend outlives a restart, matching multi-worker expectations.
 
 See ``docs/specs/15-security-privacy.md`` §"Rate limiting and abuse
 controls" for the spec intent (10/min/IP login begin, 5/min/IP
@@ -43,8 +46,6 @@ magic-link send, etc.).
 
 from __future__ import annotations
 
-import threading
-from collections import defaultdict, deque
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from functools import wraps
@@ -52,38 +53,34 @@ from typing import TypeVar
 
 from fastapi import HTTPException, status
 
+from app.abuse.window_store import MemoryWindowStore, WindowCheck, WindowStore
 from app.util.clock import Clock, SystemClock
 
 __all__ = ["ShieldStore", "throttle"]
 
 
 class ShieldStore:
-    """Thread-safe sliding-window counter keyed by ``(scope, key)``.
+    """Scope-agnostic sliding-window counter over a pluggable backend.
 
-    Mirrors the concurrency shape of
-    :class:`app.auth._throttle.Throttle` (single :class:`threading.Lock`
-    guarding a dict of deques) but exposes a scope-agnostic surface:
-    callers hand in the scope + bucket key and the window, and the
-    store decides whether a new hit fits inside the rolling budget.
+    Callers hand in the scope + bucket key and the window, and the store
+    decides whether a new hit fits inside the rolling budget. The actual
+    hit lists live in an injected :class:`~app.abuse.window_store.WindowStore`:
+    :class:`~app.abuse.window_store.MemoryWindowStore` by default (the
+    dependency-free single-worker self-host path), or
+    :class:`~app.abuse.window_store.DbWindowStore` for a multi-worker
+    deployment where the counter must be shared across every worker.
+    Construct with ``ShieldStore(store=build_window_store(settings))`` to
+    pick the backend from config.
 
-    Threading: a process-wide lock guards every mutation. Critical
-    sections are a deque ``append`` plus a left-side trim — microseconds
-    of work, no I/O. A caller never holds the lock across an I/O call.
-
-    Not async-aware. The lock is a regular :class:`threading.Lock`,
-    not :class:`asyncio.Lock`; FastAPI runs sync handlers in a thread
-    pool, and the decorator on async handlers acquires the same lock
-    from the event-loop thread without yielding. Both paths are
-    correct because the critical section never awaits.
+    The public surface (``check_and_record`` returning a ``bool``,
+    ``clear``) is unchanged from the original in-memory store, so the
+    ``@throttle`` decorator and every existing caller keep working.
     """
 
-    __slots__ = ("_hits", "_lock")
+    __slots__ = ("_store",)
 
-    def __init__(self) -> None:
-        self._lock = threading.Lock()
-        # ``defaultdict(deque)`` gives us "new bucket on first touch"
-        # semantics without an explicit membership check per hit.
-        self._hits: dict[tuple[str, str], deque[datetime]] = defaultdict(deque)
+    def __init__(self, store: WindowStore | None = None) -> None:
+        self._store = store if store is not None else MemoryWindowStore()
 
     def check_and_record(
         self,
@@ -107,48 +104,31 @@ class ShieldStore:
         the original burst earned. An attacker who hits the cap and
         keeps pounding doesn't push the window forward.
         """
-        bucket_key = (scope, key)
-        with self._lock:
-            bucket = self._hits[bucket_key]
-            _evict_expired(bucket, now=now, window=window)
-            if len(bucket) >= limit:
-                return False
-            bucket.append(now)
-            return True
+        rejection = self._store.check_and_record_all(
+            [WindowCheck(scope=scope, key=key, limit=limit, window=window)],
+            now=now,
+        )
+        return rejection is None
 
     def clear(self) -> None:
         """Drop every bucket; used by tests that share the module store.
 
-        Production code never calls this — the process restart is the
-        reset semantics. Tests that share :data:`_DEFAULT_STORE` across
-        cases (rare: most pass ``store=`` explicitly) can drop the
-        state between cases without re-importing the module.
+        Production code never calls this — the process restart (or a
+        window roll on the shared backend) is the reset semantics. Tests
+        that share :data:`_DEFAULT_STORE` across cases (rare: most pass
+        ``store=`` explicitly) can drop the state between cases without
+        re-importing the module.
         """
-        with self._lock:
-            self._hits.clear()
+        self._store.clear()
 
 
-# Default shared store for decorator call sites that don't pass an
-# explicit ``store=``. The v1 deployment runs one worker pool per
-# process (§01 "One worker pool per process"), so a module-level
-# singleton gives every endpoint the same rolling-window state. Tests
-# construct their own :class:`ShieldStore` via the decorator's
+# Default store for decorator call sites that don't pass an explicit
+# ``store=``. In-memory: single-worker self-host and unit tests. The
+# multi-worker path injects a shared-backed :class:`ShieldStore` at the
+# call site (see :func:`app.api.v1.auth.passkey.build_login_router`).
+# Tests construct their own :class:`ShieldStore` via the decorator's
 # ``store=`` keyword so per-test state never bleeds across cases.
 _DEFAULT_STORE = ShieldStore()
-
-
-def _evict_expired(
-    bucket: deque[datetime], *, now: datetime, window: timedelta
-) -> None:
-    """Drop hits older than ``now - window`` from the left of ``bucket``.
-
-    Free function (not a method) because the eviction logic is useful
-    in tests and for :class:`ShieldStore`'s internal check path alike.
-    Mirrors :meth:`app.auth._throttle.Throttle._evict_expired`.
-    """
-    cutoff = now - window
-    while bucket and bucket[0] < cutoff:
-        bucket.popleft()
 
 
 # Generic return type for the wrapped handler. The decorator is shape-

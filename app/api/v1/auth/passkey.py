@@ -57,6 +57,7 @@ from sqlalchemy.orm import Session
 
 from app.abuse.throttle import ShieldStore
 from app.abuse.throttle import throttle as throttle_decorator
+from app.abuse.window_store import build_window_store
 from app.adapters.db.identity.models import PasskeyCredential
 from app.adapters.db.session import make_uow
 from app.api.deps import current_workspace_context, db_session
@@ -724,10 +725,15 @@ def build_login_router(
     login_pepper = derive_subkey(cfg.root_key, purpose=_PASSKEY_LOGIN_HKDF_PURPOSE)
 
     # Per-router shield store so two test-built routers don't share the
-    # sliding-window counter. Production constructs one router per
-    # process (§01 "One worker pool per process"), so a per-router
-    # default is exactly one process-wide store in practice.
-    shield = begin_shield if begin_shield is not None else ShieldStore()
+    # sliding-window counter. The backend is chosen from config
+    # (:func:`build_window_store`): in-memory for single-worker self-host,
+    # shared through the DB when ``rate_limit_backend == "postgres"`` so
+    # the per-IP login-begin cap holds across every worker (cd-0lnr9).
+    shield = (
+        begin_shield
+        if begin_shield is not None
+        else ShieldStore(store=build_window_store(cfg))
+    )
 
     # Tags: ``identity`` surfaces every identity-adjacent operation
     # under one OpenAPI section (spec §01 context map + §12 Auth);

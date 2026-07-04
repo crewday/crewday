@@ -22,6 +22,7 @@ from app.adapters.db.ops.models import (
     AdminAgentChatMessage,
     IdempotencyKey,
     RateLimitBucket,
+    ThrottleWindow,
     WorkerHeartbeat,
 )
 
@@ -30,5 +31,6 @@ __all__ = [
     "AdminAgentChatMessage",
     "IdempotencyKey",
     "RateLimitBucket",
+    "ThrottleWindow",
     "WorkerHeartbeat",
 ]

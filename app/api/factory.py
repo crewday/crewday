@@ -80,6 +80,7 @@ from sqlalchemy.orm import Session
 from starlette.middleware.cors import CORSMiddleware
 
 from app.abuse.throttle import ShieldStore
+from app.abuse.window_store import build_window_store
 from app.adapters.db.session import make_uow
 from app.adapters.llm.fake import FakeLLMClient
 from app.adapters.llm.openrouter import (
@@ -473,14 +474,16 @@ def _wire_services(
 ) -> tuple[Mailer | None, Throttle, Capabilities]:
     """Instantiate process-wide services and stash them on ``app.state``.
 
-    The throttle is always constructed (it's pure in-memory state).
+    The throttle's rolling-window counters are shared across workers
+    through the DB when ``settings.rate_limit_backend == "postgres"``
+    (cd-0lnr9); single-worker self-host keeps them in process memory.
     The mailer resolves SMTP settings at send time so deployment_setting
     writes can enable or rotate SMTP without rebuilding the app. Missing
     SMTP config fails at the Mailer port when a route actually sends.
     Capabilities is probed without a DB session; the mutable subset is
     refreshed on app startup via :func:`_refresh_capabilities_for_lifespan`.
     """
-    throttle = Throttle()
+    throttle = Throttle(window_store=build_window_store(settings))
     capabilities = probe_capabilities(settings)
     mailer = _build_mailer(settings)
     storage = _build_storage(settings)

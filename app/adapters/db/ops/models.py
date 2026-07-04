@@ -12,6 +12,9 @@ workspace schema:
   ``(token_id, key)``; a TTL sweep deletes rows older than 24 h.
 * :class:`RateLimitBucket` — token-bucket state for the API
   rate-limiter when multiple workers share a Postgres database.
+* :class:`ThrottleWindow` — sliding-window hit lists for the
+  deployment-wide abuse throttles (signup / recover / magic-link /
+  passkey-login-begin) when multiple workers share a Postgres database.
 
 **Not workspace-scoped.** These tables are deployment-wide: workers
 run once per process regardless of tenant count, idempotency rows must
@@ -51,6 +54,7 @@ __all__ = [
     "AdminAgentChatMessage",
     "IdempotencyKey",
     "RateLimitBucket",
+    "ThrottleWindow",
     "WorkerHeartbeat",
 ]
 
@@ -258,4 +262,33 @@ class RateLimitBucket(Base):
 
     bucket_key: Mapped[str] = mapped_column(String, primary_key=True)
     tokens: Mapped[float] = mapped_column(Float, nullable=False)
+    updated_at_epoch: Mapped[float] = mapped_column(Float, nullable=False)
+
+
+class ThrottleWindow(Base):
+    """Persisted sliding-window hit list for a deployment-wide throttle bucket.
+
+    One row per ``(scope, bucket_key)`` bucket — the DB-backed sibling of
+    the in-memory deque in
+    :class:`app.abuse.window_store.MemoryWindowStore`. ``hits_json`` is the
+    list of hit timestamps (Unix epoch seconds) still inside the window;
+    ``updated_at_epoch`` records the last write so a future GC sweep can
+    drop cold buckets. Bucket keys are already privacy-preserving at the
+    caller boundary (peppered IP / email / credential hashes), so no PII
+    lands here.
+
+    Multi-worker deployments (``rate_limit_backend = "postgres"``) share
+    this table so the spec §15 per-deployment caps (e.g. ≤ 200 signup
+    starts / deployment / hour) hold across every worker instead of being
+    multiplied by the worker count. Single-worker self-host keeps the
+    in-memory deque and never touches this table.
+    """
+
+    __tablename__ = "throttle_window"
+
+    scope: Mapped[str] = mapped_column(String, primary_key=True)
+    bucket_key: Mapped[str] = mapped_column(String, primary_key=True)
+    # ``Any`` is the SQLAlchemy-typed ``JSON`` column; the window store
+    # narrows it to ``list[float]`` at the read boundary.
+    hits_json: Mapped[Any] = mapped_column(JSON, nullable=False)
     updated_at_epoch: Mapped[float] = mapped_column(Float, nullable=False)

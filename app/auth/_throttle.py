@@ -23,29 +23,34 @@ Three scoped buckets per caller:
   :mod:`app.auth.signup_abuse`; cd-7huk will absorb this alongside
   the magic-link buckets into the shared abuse throttle.
 
-Storage: single process memory. crew.day v1 runs one worker per
-deployment (§01 "One worker pool per process"), so an in-memory dict
-is correct for both semantics and audit trail. Horizontal scaling
-(if it ever lands) will move this to a shared Redis-backed bucket
-inside the cd-7huk rewrite.
+Storage: the rolling-window **hit counters** (magic-link request,
+signup-start, recover-start) delegate to an injected
+:class:`~app.abuse.window_store.WindowStore` — in-memory for
+single-worker self-host, DB-backed (``throttle_window``) when
+``settings.rate_limit_backend == "postgres"`` so the spec §15
+per-deployment caps (≤ 200 signup / recover starts / deployment / hour)
+hold across every worker instead of being multiplied by the worker
+count (cd-0lnr9). The **lockout** state (consume-fail, passkey-login-
+fail) still lives in this instance's dicts, guarded by a
+:class:`threading.Lock`; sharing those per-actor security floors across
+workers is tracked as a follow-up (they need a distinct expiry table,
+not a hit-count window).
 
-Concurrency: a :class:`threading.Lock` guards every dict mutation.
-The lock is process-wide but the critical sections are tiny — a list
-append + trim — so contention is a non-issue at the deployment sizes
-we care about.
-
-No persistence: a process restart resets every bucket. That's a
-feature, not a bug, for a dev-scoped throttle: operators can clear
-the counters by bouncing the service.
+No persistence (in-memory backend / lockouts): a process restart
+resets those buckets. That's a feature, not a bug, for a dev-scoped
+throttle: operators can clear the counters by bouncing the service.
+The shared DB counter backend outlives a restart, matching multi-worker
+expectations.
 """
 
 from __future__ import annotations
 
 import threading
 from collections import defaultdict, deque
-from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Final
+
+from app.abuse.window_store import MemoryWindowStore, WindowCheck, WindowStore
 
 __all__ = [
     "ConsumeLockout",
@@ -196,51 +201,24 @@ class RecoveryRateLimited(Exception):
         self.retry_after_seconds = retry_after_seconds
 
 
-def _signup_limit_for(scope: str) -> int:
-    """Return the limit for a signup-start scope (``"ip"``/``"email"``/``"global"``).
+# Scope names reported on a signup / recover rejection, indexed by the
+# order the buckets are evaluated (global first, then per-IP, then
+# per-email). Carried on the raised exception so audit rows record which
+# cap tripped.
+_SIGNUP_SCOPES: Final[tuple[str, ...]] = ("global", "ip", "email")
+_RECOVER_SCOPES: Final[tuple[str, ...]] = ("global", "ip", "email")
 
-    Centralised so the bucket-evaluation loop doesn't branch inline.
-    Unknown scopes raise :class:`ValueError` — this is a programming
-    error, not a runtime surprise.
+
+def _retry_after_seconds(oldest: datetime, window: timedelta, now: datetime) -> int:
+    """Seconds until ``oldest`` falls out of ``window``, clamped up to 1.
+
+    ``oldest`` is the oldest hit still inside the violating bucket; the
+    client should back off until it evicts. Zero-or-negative values are
+    clamped up to ``1`` so a ``Retry-After`` header never says "retry in
+    0 seconds", which some SPAs treat as "now".
     """
-    if scope == "ip":
-        return _SIGNUP_IP_LIMIT
-    if scope == "email":
-        return _SIGNUP_EMAIL_LIMIT
-    if scope == "global":
-        return _SIGNUP_GLOBAL_LIMIT
-    raise ValueError(f"unknown signup-start scope: {scope!r}")
-
-
-def _recover_limit_for(scope: str) -> int:
-    """Return the limit for a recover-start scope.
-
-    Sibling of :func:`_signup_limit_for`; kept as a separate helper
-    rather than folded into a ``(family, scope)`` two-key lookup
-    because the two flows pin their own spec citations and a future
-    tweak (e.g. tighter email cap for recovery) should land without
-    churning the signup surface.
-    """
-    if scope == "ip":
-        return _RECOVER_IP_LIMIT
-    if scope == "email":
-        return _RECOVER_EMAIL_LIMIT
-    if scope == "global":
-        return _RECOVER_GLOBAL_LIMIT
-    raise ValueError(f"unknown recover-start scope: {scope!r}")
-
-
-@dataclass(frozen=True, slots=True)
-class _BucketKey:
-    """``(scope, key)`` tuple that identifies a single bucket.
-
-    ``scope`` is one of ``"request:ip"``, ``"request:email"``, or
-    ``"consume_fail:ip"``; ``key`` is the IP (or email hash) string.
-    Frozen so it hashes under :class:`dict` / :class:`defaultdict`.
-    """
-
-    scope: str
-    key: str
+    expires_at = oldest + window
+    return max(int((expires_at - now).total_seconds()), 1)
 
 
 class Throttle:
@@ -255,20 +233,22 @@ class Throttle:
     __slots__ = (
         "_fail_locked_until",
         "_fails",
-        "_hits",
         "_lock",
         "_passkey_login_fails",
         "_passkey_login_locked_until",
+        "_window",
     )
 
-    def __init__(self) -> None:
+    def __init__(self, window_store: WindowStore | None = None) -> None:
         self._lock = threading.Lock()
-        # Fixed-window hits: {(scope, key): [hit_dt, ...]}. A deque
-        # keeps the append O(1) and the left-trim cheap.
-        self._hits: dict[_BucketKey, deque[datetime]] = defaultdict(deque)
-        # Per-IP failed-consume counters — same shape as ``_hits``
-        # but the reset trigger is different (§15: 3 fails within
-        # the window flips the lockout).
+        # Rolling-window hit counters (request / signup / recover) live
+        # in a pluggable backend so a multi-worker deployment can share
+        # them through the DB (cd-0lnr9). Defaults to the in-memory store
+        # for single-worker self-host and unit tests.
+        self._window = window_store if window_store is not None else MemoryWindowStore()
+        # Per-IP failed-consume counters — a rolling window like the
+        # shared hit counters, but the reset trigger is different (§15:
+        # 3 fails within the window flips the lockout) so it stays local.
         self._fails: dict[str, deque[datetime]] = defaultdict(deque)
         # IPs currently locked out (value is the moment the lockout
         # expires). Not a deque — single expiry per key.
@@ -298,14 +278,28 @@ class Throttle:
         a caller who stays under the budget learns nothing about
         whether their email exists.
         """
-        with self._lock:
-            if self._over_limit(_BucketKey("request:ip", ip), now):
-                raise RateLimited(f"per-IP request budget exceeded for {ip!r}")
-            if self._over_limit(_BucketKey("request:email", email_hash), now):
-                raise RateLimited("per-email request budget exceeded")
-            # Under budget — record both hits so future calls see them.
-            self._record_hit(_BucketKey("request:ip", ip), now)
-            self._record_hit(_BucketKey("request:email", email_hash), now)
+        rejection = self._window.check_and_record_all(
+            [
+                WindowCheck(
+                    scope="request:ip",
+                    key=ip,
+                    limit=_REQUEST_LIMIT,
+                    window=_REQUEST_WINDOW,
+                ),
+                WindowCheck(
+                    scope="request:email",
+                    key=email_hash,
+                    limit=_REQUEST_LIMIT,
+                    window=_REQUEST_WINDOW,
+                ),
+            ],
+            now=now,
+        )
+        if rejection is None:
+            return
+        if rejection.index == 0:
+            raise RateLimited(f"per-IP request budget exceeded for {ip!r}")
+        raise RateLimited("per-email request budget exceeded")
 
     # ------------------------------------------------------------------
     # Consume (/auth/magic/consume) lockout
@@ -387,48 +381,36 @@ class Throttle:
         the client's back-off matches the window tail exactly rather
         than always being the full hour.
         """
-        with self._lock:
-            for scope, bucket_key in (
-                ("global", _BucketKey("signup_start:global", _SIGNUP_GLOBAL_KEY)),
-                ("ip", _BucketKey("signup_start:ip", ip_hash)),
-                ("email", _BucketKey("signup_start:email", email_hash)),
-            ):
-                limit = _signup_limit_for(scope)
-                if self._over_signup_limit(bucket_key, now, limit=limit):
-                    retry_after = self._signup_retry_after_seconds(bucket_key, now)
-                    raise SignupRateLimited(
-                        scope=scope, retry_after_seconds=retry_after
-                    )
-            # Every bucket is under its cap — record the hit against all
-            # three so the next call sees it. The global bucket is
-            # advanced *after* per-IP/per-email so a failed per-IP
-            # check doesn't pollute the global counter.
-            self._record_hit(_BucketKey("signup_start:global", _SIGNUP_GLOBAL_KEY), now)
-            self._record_hit(_BucketKey("signup_start:ip", ip_hash), now)
-            self._record_hit(_BucketKey("signup_start:email", email_hash), now)
-
-    def _over_signup_limit(self, key: _BucketKey, now: datetime, *, limit: int) -> bool:
-        bucket = self._hits[key]
-        self._evict_expired(bucket, now, _SIGNUP_WINDOW)
-        return len(bucket) >= limit
-
-    def _signup_retry_after_seconds(self, key: _BucketKey, now: datetime) -> int:
-        """Return seconds until the oldest hit in ``key`` falls out of window.
-
-        Zero-or-negative values are clamped up to ``1`` so the
-        ``Retry-After`` header never tells the client "retry in
-        0 seconds", which some SPAs treat as "now".
-        """
-        bucket = self._hits[key]
-        if not bucket:
-            # Shouldn't happen on the refusal path (_over_signup_limit
-            # only returns True when bucket length >= limit), but the
-            # guard keeps the helper total so a future caller can't
-            # crash on an empty bucket.
-            return int(_SIGNUP_WINDOW.total_seconds())
-        expires_at = bucket[0] + _SIGNUP_WINDOW
-        seconds = int((expires_at - now).total_seconds())
-        return max(seconds, 1)
+        rejection = self._window.check_and_record_all(
+            [
+                WindowCheck(
+                    scope="signup_start:global",
+                    key=_SIGNUP_GLOBAL_KEY,
+                    limit=_SIGNUP_GLOBAL_LIMIT,
+                    window=_SIGNUP_WINDOW,
+                ),
+                WindowCheck(
+                    scope="signup_start:ip",
+                    key=ip_hash,
+                    limit=_SIGNUP_IP_LIMIT,
+                    window=_SIGNUP_WINDOW,
+                ),
+                WindowCheck(
+                    scope="signup_start:email",
+                    key=email_hash,
+                    limit=_SIGNUP_EMAIL_LIMIT,
+                    window=_SIGNUP_WINDOW,
+                ),
+            ],
+            now=now,
+        )
+        if rejection is not None:
+            raise SignupRateLimited(
+                scope=_SIGNUP_SCOPES[rejection.index],
+                retry_after_seconds=_retry_after_seconds(
+                    rejection.oldest_in_window, _SIGNUP_WINDOW, now
+                ),
+            )
 
     # ------------------------------------------------------------------
     # Recover-start (/api/v1/auth/recover/passkey/request) budget
@@ -454,52 +436,36 @@ class Throttle:
         the raised exception is computed from the oldest hit inside
         the violating bucket.
         """
-        with self._lock:
-            for scope, bucket_key in (
-                (
-                    "global",
-                    _BucketKey("recover_start:global", _RECOVER_GLOBAL_KEY),
+        rejection = self._window.check_and_record_all(
+            [
+                WindowCheck(
+                    scope="recover_start:global",
+                    key=_RECOVER_GLOBAL_KEY,
+                    limit=_RECOVER_GLOBAL_LIMIT,
+                    window=_RECOVER_WINDOW,
                 ),
-                ("ip", _BucketKey("recover_start:ip", ip_hash)),
-                ("email", _BucketKey("recover_start:email", email_hash)),
-            ):
-                limit = _recover_limit_for(scope)
-                if self._over_recover_limit(bucket_key, now, limit=limit):
-                    retry_after = self._recover_retry_after_seconds(bucket_key, now)
-                    raise RecoveryRateLimited(
-                        scope=scope, retry_after_seconds=retry_after
-                    )
-            # Every bucket is under its cap — record the hit against
-            # all three. Order mirrors signup: global last so a later
-            # per-IP refusal doesn't pollute the deployment-wide
-            # counter (actually we advance all three once all three
-            # passed, matching :meth:`check_signup_start`).
-            self._record_hit(
-                _BucketKey("recover_start:global", _RECOVER_GLOBAL_KEY), now
+                WindowCheck(
+                    scope="recover_start:ip",
+                    key=ip_hash,
+                    limit=_RECOVER_IP_LIMIT,
+                    window=_RECOVER_WINDOW,
+                ),
+                WindowCheck(
+                    scope="recover_start:email",
+                    key=email_hash,
+                    limit=_RECOVER_EMAIL_LIMIT,
+                    window=_RECOVER_WINDOW,
+                ),
+            ],
+            now=now,
+        )
+        if rejection is not None:
+            raise RecoveryRateLimited(
+                scope=_RECOVER_SCOPES[rejection.index],
+                retry_after_seconds=_retry_after_seconds(
+                    rejection.oldest_in_window, _RECOVER_WINDOW, now
+                ),
             )
-            self._record_hit(_BucketKey("recover_start:ip", ip_hash), now)
-            self._record_hit(_BucketKey("recover_start:email", email_hash), now)
-
-    def _over_recover_limit(
-        self, key: _BucketKey, now: datetime, *, limit: int
-    ) -> bool:
-        bucket = self._hits[key]
-        self._evict_expired(bucket, now, _RECOVER_WINDOW)
-        return len(bucket) >= limit
-
-    def _recover_retry_after_seconds(self, key: _BucketKey, now: datetime) -> int:
-        """Return seconds until the oldest hit in ``key`` falls out of window.
-
-        Sibling of :meth:`_signup_retry_after_seconds`. Zero-or-
-        negative values are clamped up to ``1`` so the ``Retry-After``
-        header never tells the client "retry in 0 seconds".
-        """
-        bucket = self._hits[key]
-        if not bucket:
-            return int(_RECOVER_WINDOW.total_seconds())
-        expires_at = bucket[0] + _RECOVER_WINDOW
-        seconds = int((expires_at - now).total_seconds())
-        return max(seconds, 1)
 
     # ------------------------------------------------------------------
     # Passkey-login (/auth/passkey/login/finish) lockout
@@ -604,14 +570,6 @@ class Throttle:
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
-
-    def _over_limit(self, key: _BucketKey, now: datetime) -> bool:
-        bucket = self._hits[key]
-        self._evict_expired(bucket, now, _REQUEST_WINDOW)
-        return len(bucket) >= _REQUEST_LIMIT
-
-    def _record_hit(self, key: _BucketKey, now: datetime) -> None:
-        self._hits[key].append(now)
 
     @staticmethod
     def _evict_expired(
