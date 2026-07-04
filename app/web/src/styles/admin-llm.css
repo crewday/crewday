@@ -592,7 +592,7 @@
 }
 .llm-prompt-drawer {
   position: fixed;
-  z-index: 60;
+  z-index: var(--z-overlay);
   top: 0; right: 0; bottom: 0; left: auto;
   margin: 0;
   padding: 0;

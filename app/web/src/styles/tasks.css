@@ -205,7 +205,7 @@
 .task-detail__meta { color: var(--ink-3); font-size: var(--text-body-sm); }
 
 .task-detail__sticky {
-  position: fixed; bottom: 70px; left: 0; right: 0; z-index: 10;
+  position: fixed; bottom: 70px; left: 0; right: 0; z-index: var(--z-page-actions);
   padding: var(--space-6) var(--space-9) var(--space-7);
   background: linear-gradient(180deg, transparent, var(--paper) 30%, var(--paper) 100%);
   display: flex; gap: var(--space-5);

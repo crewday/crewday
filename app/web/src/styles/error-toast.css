@@ -1,6 +1,6 @@
 .error-toast-viewport {
   position: fixed;
-  z-index: 90;
+  z-index: var(--z-toast);
   top: calc(16px + env(safe-area-inset-top));
   right: calc(16px + env(safe-area-inset-right));
   display: grid;

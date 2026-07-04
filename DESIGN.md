@@ -111,6 +111,25 @@ rounded:
   card: 10px
   modal: 14px
   pill: 999px
+# Descriptive z-index scale for app chrome. Each token equals the value
+# currently rendered at its site (value-preserving); some layers share a
+# number (55, 60) pending a future rationalization. See "Elevation & Depth".
+zindex:
+  page-actions: 10
+  composer: 15
+  float: 18
+  phone-dock: 19
+  phone-tabs: 20
+  dropdown: 30
+  sticky-header: 35
+  tooltip: 40
+  menu: 50
+  banner: 55
+  scrim: 55
+  overlay: 60
+  drawer: 61
+  floating-popover: 80
+  toast: 90
 components:
   button-primary:
     backgroundColor: "{colors.primary}"
@@ -365,6 +384,50 @@ together so cards lift without looking pasted on.
 
 Dark mode uses heavier shadows (full black) because warm shadows
 disappear on dark grounds — that mapping is already in `tokens.css`.
+
+### Z-index scale
+
+The `z=0..3` levels above name **elevation intent**. The numeric
+stacking of app chrome lives in a separate `--z-*` scale in
+`tokens.css` (mirrored in this file's frontmatter under `zindex`).
+Use a token for any fixed/sticky/absolute chrome that layers above
+page content; keep small within-component stacking (`0/1/2/4` inside
+one element's own stacking context, e.g. `.llm-graph__edges`) as
+literals.
+
+This scale is **descriptive, not prescriptive**. Each token equals the
+value already rendered at its site, so migrating the literals changed
+no element's relative stacking. Ordered bottom → top:
+
+- **`--z-page-actions` 10** — in-page fixed action bar (task detail).
+- **`--z-composer` 15** — fixed chat composer.
+- **`--z-float` 18** — floating badge / FAB above content.
+- **`--z-phone-dock` 19** — phone dock strip.
+- **`--z-phone-tabs` 20** — phone bottom tab bar.
+- **`--z-dropdown` 30** — in-flow field popovers / dropdowns.
+- **`--z-sticky-header` 35** — sticky page top bar.
+- **`--z-tooltip` 40** — collapsed-nav tooltip.
+- **`--z-menu` 50** — workspace-switcher / shell menu.
+- **`--z-banner` 55** — demo-mode banner.
+- **`--z-scrim` 55** — agent-sidebar backdrop.
+- **`--z-overlay` 60** — auth gate, prompt drawer, mobile nav drawer.
+- **`--z-drawer` 61** — inventory / scheduler day drawer (above scrim).
+- **`--z-floating-popover` 80** — fixed searchable-select popover that
+  must clear drawers.
+- **`--z-toast` 90** — toast viewport, top of the stack.
+
+**Shared values (collisions to resolve later).** Distinct layers still
+share a number, preserved from the current code:
+
+- **55** — `--z-banner` and `--z-scrim`.
+- **60** — `--z-overlay` covers the auth gate, the admin prompt drawer,
+  and the mobile nav drawer, which are three different overlays.
+
+**Rationalizing** the scale — reassigning these into cleanly separated
+bands (e.g. a real modal band above drawers, splitting scrim from
+banner) — changes relative stacking and is a **designer decision**, not
+a mechanical one. Do it deliberately per the conventions above (name
+the layer, justify the order), not by nudging a literal.
 
 ## Shapes
 

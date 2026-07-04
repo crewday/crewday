@@ -78,6 +78,31 @@
   --text-label-md:      14px;
   --text-label-sm:      12px;
   --text-mono-sm:       11px;
+
+  /* Z-index scale from DESIGN.md "Elevation & Depth". Theme-agnostic:
+     defined on :root so both themes inherit. DESCRIPTIVE of the current
+     app-chrome layering — each token equals the value already rendered
+     at its site, so relative stacking is unchanged. A future
+     rationalization (reassigning for cleaner separation) is a separate
+     designer decision; see DESIGN.md. Names are ordered bottom→top.
+     Local within-component stacking (0/1/2/4) stays literal.
+     Shared numeric layers (documented in DESIGN.md): 55 = banner + scrim;
+     60 = auth gate, prompt drawer, mobile nav drawer. */
+  --z-page-actions:      10;   /* in-page fixed action bar (task detail) */
+  --z-composer:          15;   /* fixed chat composer */
+  --z-float:             18;   /* floating badge / FAB above content */
+  --z-phone-dock:        19;   /* phone dock strip */
+  --z-phone-tabs:        20;   /* phone bottom tab bar */
+  --z-dropdown:          30;   /* in-flow field popovers / dropdowns */
+  --z-sticky-header:     35;   /* sticky page top bar */
+  --z-tooltip:           40;   /* collapsed-nav tooltip */
+  --z-menu:              50;   /* workspace-switcher / shell menu */
+  --z-banner:            55;   /* demo banner (shares 55 with scrim) */
+  --z-scrim:             55;   /* agent-sidebar scrim (shares 55 with banner) */
+  --z-overlay:           60;   /* auth gate, prompt drawer, mobile nav drawer */
+  --z-drawer:            61;   /* inventory / scheduler day drawer above scrim */
+  --z-floating-popover:  80;   /* fixed searchable-select popover above drawers */
+  --z-toast:             90;   /* toast viewport, top of the stack */
 }
 
 [data-theme="dark"] {

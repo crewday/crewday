@@ -13,7 +13,7 @@
 
 /* ── Demo mode banner ───────────────────────────────────────── */
 .demo-banner {
-  position: relative; z-index: 55;
+  position: relative; z-index: var(--z-banner);
   display: flex; align-items: center; justify-content: center;
   min-height: 32px; padding: var(--space-3) var(--space-8);
   background: var(--rust-soft); color: var(--ink);
@@ -88,7 +88,7 @@
    is not rendered there. No gradient fade — the bar is solid so body
    content does not bleed through beneath the icon row. */
 .phone__dock {
-  position: fixed; left: 0; right: 0; z-index: 19;
+  position: fixed; left: 0; right: 0; z-index: var(--z-phone-dock);
   bottom: calc(60px + env(safe-area-inset-bottom, 0px));
   display: flex;
   background: var(--card);
@@ -127,7 +127,7 @@
   text-align: center;
 }
 .offline-queue-badge--phone {
-  position: fixed; left: 12px; right: 12px; z-index: 18;
+  position: fixed; left: 12px; right: 12px; z-index: var(--z-float);
   bottom: calc(101px + env(safe-area-inset-bottom, 0px));
   box-shadow: var(--shadow);
 }
@@ -182,7 +182,7 @@
 }
 
 .phone__tabs {
-  position: fixed; bottom: 0; left: 0; right: 0; z-index: 20;
+  position: fixed; bottom: 0; left: 0; right: 0; z-index: var(--z-phone-tabs);
   display: grid; grid-template-columns: repeat(5, 1fr);
   background: var(--card); border-top: 1px solid var(--line);
   padding: 6px 0 max(6px, env(safe-area-inset-bottom));

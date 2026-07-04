@@ -8,7 +8,7 @@
 }
 .day-drawer {
   position: fixed;
-  z-index: 61;
+  z-index: var(--z-drawer);
   margin: 0;
   padding: 0;
   border: none;

@@ -44,16 +44,16 @@
     min-height: 0;
   }
   /* When the nav drawer is open, promote .desk's stacking context
-     above the shell controls (which also use z-index: 50) so the
-     drawer overlays it end-to-end. */
+     above the shell controls (which also use z-index: 50, --z-menu) so
+     the drawer overlays it end-to-end. */
   .desk[data-nav-open="true"] {
-    z-index: 60;
+    z-index: var(--z-overlay);
   }
 
   .desk__nav {
     position: fixed; top: 0; bottom: 0; left: 0;
     width: min(280px, 82vw);
-    z-index: 60;
+    z-index: var(--z-overlay);
     transform: translateX(-100%);
     /* `visibility: hidden` (with a transition-delay equal to the slide
        duration) takes the closed drawer off the focusable tree AND
@@ -99,7 +99,7 @@
      shells scroll `.desk__main`, which already sits below the banner
      — sticky there must be top: 0 or the header floats 42px down. */
   .page-topbar {
-    position: sticky; top: 0; z-index: 35;
+    position: sticky; top: 0; z-index: var(--z-sticky-header);
     display: flex; align-items: center;
     flex-wrap: nowrap; gap: var(--space-2);
     padding: env(safe-area-inset-top, 0px) 10px 0;

@@ -212,7 +212,7 @@
   background: var(--paper-2);
   border-top: 1px solid var(--line);
   display: flex; align-items: flex-end; gap: var(--space-4);
-  z-index: 15;
+  z-index: var(--z-composer);
 }
 .chat-composer__icon {
   flex: 0 0 auto;

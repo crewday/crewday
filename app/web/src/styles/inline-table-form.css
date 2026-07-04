@@ -564,7 +564,7 @@
 
 .inline-table-form__tag-popover {
   position: relative;
-  z-index: 30;
+  z-index: var(--z-dropdown);
 }
 
 .inline-table-form__tag-options {

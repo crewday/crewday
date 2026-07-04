@@ -235,7 +235,7 @@
 }
 
 .desk__scrim {
-  position: fixed; inset: 0; z-index: 55;
+  position: fixed; inset: 0; z-index: var(--z-scrim);
   background: rgba(31, 26, 20, 0.45);
   backdrop-filter: blur(2px);
   animation: scrim-in 160ms ease;

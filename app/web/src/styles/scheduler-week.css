@@ -389,7 +389,7 @@
   position: fixed;
   right: 16px;
   bottom: calc(108px + env(safe-area-inset-bottom, 0px));
-  z-index: 18;
+  z-index: var(--z-float);
   min-width: 44px;
   min-height: 44px;
   padding: 10px 16px;
