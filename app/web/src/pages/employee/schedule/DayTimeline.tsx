@@ -176,7 +176,7 @@ function DayTimelineBlocks({
                 on the block's top border, like a ledger tab glued to a
                 file folder. The block is the content; the label names
                 the "where" in italic serif. */}
-            <span className="schedule-day__block-prop">
+            <span className="schedule-day__block-prop truncate">
               {propertyName(c.propertyId, data)}
             </span>
             {height >= 44 && timeText && (

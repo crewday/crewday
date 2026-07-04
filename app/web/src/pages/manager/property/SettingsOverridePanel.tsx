@@ -8,7 +8,8 @@ import {
   type InlineTableColumn,
   type InlineTableRow,
 } from "@/components/InlineTableForm";
-import { ApiError, fetchJson } from "@/lib/api";
+import { fetchJson } from "@/lib/api";
+import { apiErrorMessage } from "@/lib/apiErrorMessage";
 import { qk } from "@/lib/queryKeys";
 import type { EntitySettingsPayload, Property, SettingDefinition } from "@/types/api";
 import { formatValue } from "./lib/propertyFormatters";
@@ -38,14 +39,6 @@ function hasPropertyScope(def: SettingDefinition): boolean {
 
 function hasPropertyOverride(overrides: Record<string, unknown>, key: string): boolean {
   return key in overrides && overrides[key] !== null;
-}
-
-function settingErrorMessage(error: unknown): string {
-  if (error instanceof ApiError) {
-    return error.userMessage ?? error.detail ?? error.message;
-  }
-  if (error instanceof Error && error.message) return error.message;
-  return "Setting could not be saved.";
 }
 
 function patchOverride(overrides: Record<string, unknown>, key: string, value: unknown): Record<string, unknown> {
@@ -234,7 +227,7 @@ export default function SettingsOverridePanel({
     onError: (error, variables) => {
       setRowErrors((current) => {
         const nextErrors = new Map(current);
-        nextErrors.set(variables.key, settingErrorMessage(error));
+        nextErrors.set(variables.key, apiErrorMessage(error, "Setting could not be saved."));
         return nextErrors;
       });
     },

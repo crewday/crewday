@@ -1425,8 +1425,8 @@ function ModelForm({
                 const pending = creatingProviderId === provider.id;
                 const providerCopy = (
                   <span className="llm-model-providers__provider">
-                    <span className="llm-model-providers__name">{provider.name}</span>
-                    <span className="llm-model-providers__meta">
+                    <span className="llm-model-providers__name truncate">{provider.name}</span>
+                    <span className="llm-model-providers__meta truncate">
                       {providerTypeLabel(provider.provider_type)}
                       {provider.is_enabled ? "" : " / disabled"}
                     </span>

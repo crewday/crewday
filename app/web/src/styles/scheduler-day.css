@@ -299,9 +299,6 @@
   font-weight: 500;
   line-height: 1;
   color: var(--ink);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
   pointer-events: none;
 }
 .schedule-day__block-time {
@@ -453,9 +450,6 @@
   font-family: "Inter Tight", sans-serif;
   font-weight: 500;
   font-size: 11.5px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 .schedule-day__chip--completed {
   opacity: 0.55;

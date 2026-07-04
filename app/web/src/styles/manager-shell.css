@@ -30,7 +30,7 @@
   font: inherit; font-size: 13px; font-weight: 600;
 }
 .ws-switcher__trigger:hover { background: var(--paper-3, var(--paper-2)); }
-.ws-switcher__name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ws-switcher__name { flex: 1; min-width: 0; }
 .ws-switcher__role {
   font-size: 10px; text-transform: uppercase; letter-spacing: 0.08em;
   color: var(--ink-3); font-weight: 500;
@@ -53,7 +53,7 @@
 .ws-switcher__opt:hover { background: var(--paper-2); }
 .ws-switcher__opt--active { background: var(--moss-soft); color: var(--moss); font-weight: 600; }
 .ws-switcher__opt--create { color: var(--moss); font-weight: 650; }
-.ws-switcher__opt-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ws-switcher__opt-name { flex: 1; min-width: 0; }
 .ws-switcher__opt-role {
   font-size: 10px; text-transform: uppercase; letter-spacing: 0.08em;
   color: var(--ink-3); font-weight: 500;
@@ -89,7 +89,6 @@
 .nav-link__icon svg { display: block; }
 .nav-link__label {
   display: block; min-width: 0;
-  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .nav-link__marker {
   position: absolute; left: 0; top: 50%;
@@ -135,11 +134,9 @@
 .desk__me-meta { min-width: 0; flex: 1 1 auto; }
 .desk__me-name {
   font-weight: 600; font-size: 13px;
-  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .desk__me-role {
   color: var(--ink-3); font-size: 12px;
-  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 
 /* When present, the me footer is pinned to the bottom. The

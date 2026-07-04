@@ -25,6 +25,8 @@ import {
 } from "@/components/recurrence";
 import type { Employee, Property, Schedule, TaskTemplate } from "@/types/api";
 import { type ListEnvelope } from "@/lib/listResponse";
+import { labeledFieldMessages } from "@/lib/apiErrorMessage";
+import { clearMapValue, setMapValue } from "@/lib/mapState";
 import PropertyTabs from "./property/PropertyTabs";
 
 interface SchedulesPayload {
@@ -143,9 +145,7 @@ function employeeOption(employee: Employee) {
 
 function scheduleErrorMessage(error: unknown, fallback: string): string {
   if (error instanceof ApiError) {
-    const fieldMessages = error.fieldErrors
-      .map((fieldError) => fieldError.msg?.trim())
-      .filter((msg): msg is string => Boolean(msg));
+    const fieldMessages = labeledFieldMessages(error);
     if (fieldMessages.length > 0) return fallback + " " + fieldMessages.join(" ");
     return error.detail ?? error.title ?? fallback;
   }
@@ -239,26 +239,6 @@ function scheduleActiveFrom(schedules: readonly Schedule[], row: InlineTableRow<
   const schedule = schedules.find((candidate) => candidate.id === row.id);
   if (schedule) return schedule.active_from;
   return row.draft.active_from || null;
-}
-
-function setMapValue<TValue>(
-  current: ReadonlyMap<string, TValue>,
-  key: string,
-  value: TValue,
-): ReadonlyMap<string, TValue> {
-  const next = new Map(current);
-  next.set(key, value);
-  return next;
-}
-
-function clearMapValue<TValue>(
-  current: ReadonlyMap<string, TValue>,
-  key: string,
-): ReadonlyMap<string, TValue> {
-  if (!current.has(key)) return current;
-  const next = new Map(current);
-  next.delete(key);
-  return next;
 }
 
 function rowForRouteProperty(

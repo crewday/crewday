@@ -135,8 +135,8 @@ export default function SideNav({
               : footer.initials}
           </span>
           <div className="desk__me-meta">
-            <div className="desk__me-name">{footer.name}</div>
-            <div className="desk__me-role">{footer.role}</div>
+            <div className="desk__me-name truncate">{footer.name}</div>
+            <div className="desk__me-role truncate">{footer.role}</div>
           </div>
         </div>
       )}
@@ -177,7 +177,7 @@ function NavItem({ to, matchPrefix, phoneHidden, icon, label, onClick }: NavItem
       <span className="nav-link__icon" aria-hidden="true">
         {icon ?? <NavFallbackGlyph label={label} />}
       </span>
-      <span className="nav-link__label">{label}</span>
+      <span className="nav-link__label truncate">{label}</span>
       <span className="nav-link__marker" aria-hidden="true" />
     </NavLink>
   );

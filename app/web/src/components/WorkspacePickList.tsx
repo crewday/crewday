@@ -42,7 +42,7 @@ export default function WorkspacePickList({
               <Building2 size={18} strokeWidth={1.6} />
             </span>
             <span className="workspace-pick-list__body">
-              <span className="workspace-pick-list__name">{workspace.workspace.name}</span>
+              <span className="workspace-pick-list__name truncate">{workspace.workspace.name}</span>
               <span className="workspace-pick-list__meta">
                 <span className="workspace-pick-list__slug">{slug}</span>
                 {role ? <span className="workspace-pick-list__role">{role}</span> : null}

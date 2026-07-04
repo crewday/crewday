@@ -14,6 +14,7 @@ import {
 import { Loading } from "@/components/common";
 import { fetchJson } from "@/lib/api";
 import { type ListEnvelope, unwrapList } from "@/lib/listResponse";
+import { clearMapValue, setMapValue } from "@/lib/mapState";
 import { qk } from "@/lib/queryKeys";
 import type { SearchableSelectOption } from "@/components/SearchableSelect";
 
@@ -653,24 +654,4 @@ function normalizeSavedAreaDrafts(
     next.set(areaId, draft);
   }
   return changed ? next : current;
-}
-
-function setMapValue<TValue>(
-  current: ReadonlyMap<string, TValue>,
-  key: string,
-  value: TValue,
-): ReadonlyMap<string, TValue> {
-  const next = new Map(current);
-  next.set(key, value);
-  return next;
-}
-
-function clearMapValue<TValue>(
-  current: ReadonlyMap<string, TValue>,
-  key: string,
-): ReadonlyMap<string, TValue> {
-  if (!current.has(key)) return current;
-  const next = new Map(current);
-  next.delete(key);
-  return next;
 }

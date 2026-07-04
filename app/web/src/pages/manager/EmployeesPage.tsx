@@ -18,6 +18,8 @@ import {
   type InlineTableRow,
 } from "@/components/InlineTableForm";
 import { Avatar, Chip, Loading } from "@/components/common";
+import { fieldErrorId, fieldErrorsByLoc, labeledFieldMessages } from "@/lib/apiErrorMessage";
+import { clearMapValue, setMapValue } from "@/lib/mapState";
 import { usePatchReducer } from "@/lib/usePatchReducer";
 import { workspaceRouteForPathname } from "@/lib/workspaceRoutes";
 import type { Booking, Employee, Me, Property, WorkRole } from "@/types/api";
@@ -765,14 +767,7 @@ function InviteEmployeeAction() {
 
 function inviteEmployeeErrorMessage(error: unknown): string {
   if (error instanceof ApiError) {
-    const fieldMessages = error.fieldErrors
-      .map((fieldError) => {
-        const label = inviteFieldLabel(fieldError.loc);
-        const message = fieldError.msg?.trim();
-        if (!message) return null;
-        return label ? `${label}: ${message}` : message;
-      })
-      .filter((message): message is string => Boolean(message));
+    const fieldMessages = labeledFieldMessages(error, inviteFieldLabel);
     if (fieldMessages.length > 0) {
       return "Could not send invite. " + fieldMessages.join(" ");
     }
@@ -838,27 +833,7 @@ function clearPatchedWorkRoleFieldErrors(
 }
 
 function workRoleFieldErrorId(rowId: string, field: WorkRoleField): string {
-  return "work-role-" + rowId.replace(/[^a-zA-Z0-9_-]/g, "-") + "-" + field.replaceAll("_", "-") + "-error";
-}
-
-function setMapValue<TValue>(
-  current: ReadonlyMap<string, TValue>,
-  key: string,
-  value: TValue,
-): ReadonlyMap<string, TValue> {
-  const next = new Map(current);
-  next.set(key, value);
-  return next;
-}
-
-function clearMapValue<TValue>(
-  current: ReadonlyMap<string, TValue>,
-  key: string,
-): ReadonlyMap<string, TValue> {
-  if (!current.has(key)) return current;
-  const next = new Map(current);
-  next.delete(key);
-  return next;
+  return fieldErrorId("work-role", rowId, field);
 }
 
 function workRoleErrorMessage(
@@ -882,14 +857,7 @@ function workRoleErrorMessage(
 }
 
 function workRoleFieldErrors(error: unknown): Partial<Record<WorkRoleField, string>> {
-  if (!(error instanceof ApiError)) return {};
-  const errors: Partial<Record<WorkRoleField, string>> = {};
-  for (const fieldError of error.fieldErrors) {
-    const field = workRoleFieldFromLoc(fieldError.loc);
-    const message = fieldError.msg?.trim();
-    if (field && message) errors[field] = message;
-  }
-  return errors;
+  return fieldErrorsByLoc(error, workRoleFieldFromLoc);
 }
 
 function workRoleFieldFromLoc(loc: readonly (string | number)[] | undefined): WorkRoleField | null {

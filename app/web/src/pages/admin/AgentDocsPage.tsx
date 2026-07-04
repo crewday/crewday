@@ -13,7 +13,8 @@ import {
 import DeskPage from "@/components/DeskPage";
 import DateTime from "@/components/DateTime";
 import { Chip, Loading } from "@/components/common";
-import { ApiError, fetchJson } from "@/lib/api";
+import { fetchJson } from "@/lib/api";
+import { apiErrorMessage } from "@/lib/apiErrorMessage";
 import { qk } from "@/lib/queryKeys";
 import type { AgentDoc, AgentDocRevision, AgentDocSummary } from "@/types/api";
 
@@ -625,10 +626,3 @@ function tokenLabel(count: number | null | undefined): string {
   return `Approx. ${count.toLocaleString()} tokens`;
 }
 
-function apiErrorMessage(error: unknown, fallback: string): string {
-  if (error instanceof ApiError) {
-    return error.userMessage ?? error.detail ?? error.title ?? error.message;
-  }
-  if (error instanceof Error) return error.message;
-  return fallback;
-}

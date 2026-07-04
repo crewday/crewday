@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ApiError, fetchJson } from "@/lib/api";
+import { labeledFieldMessages } from "@/lib/apiErrorMessage";
 import { type ListEnvelope, unwrapList } from "@/lib/listResponse";
 import { qk } from "@/lib/queryKeys";
 import type { Me, Property, Task } from "@/types/api";
@@ -257,14 +258,7 @@ export default function NewTaskButton() {
 
 function taskCreateErrorMessage(error: unknown): string {
   if (error instanceof ApiError) {
-    const fieldMessages = error.fieldErrors
-      .map((fieldError) => {
-        const label = fieldErrorLabel(fieldError.loc);
-        const message = fieldError.msg?.trim();
-        if (!message) return null;
-        return label ? `${label}: ${message}` : message;
-      })
-      .filter((message): message is string => Boolean(message));
+    const fieldMessages = labeledFieldMessages(error, fieldErrorLabel);
     if (fieldMessages.length > 0) {
       return "Could not add task. " + fieldMessages.join(" ");
     }

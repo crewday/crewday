@@ -1,6 +1,7 @@
 import { useMemo, useState, type FormEvent } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ApiError, fetchJson } from "@/lib/api";
+import { labeledFieldMessages } from "@/lib/apiErrorMessage";
 import { qk } from "@/lib/queryKeys";
 import { useWorkspace } from "@/context/WorkspaceContext";
 import DeskPage from "@/components/DeskPage";
@@ -523,9 +524,7 @@ function compactRecord(values: Record<string, string>): Record<string, string> {
 
 function organizationCreateErrorMessage(error: unknown): string {
   if (error instanceof ApiError) {
-    const fieldMessages = error.fieldErrors
-      .map((fieldError) => fieldError.msg)
-      .filter((message): message is string => Boolean(message));
+    const fieldMessages = labeledFieldMessages(error);
     if (fieldMessages.length > 0) return fieldMessages.join(" ");
     return error.detail ?? error.title ?? error.message;
   }

@@ -382,9 +382,6 @@
 .icon-selector__selected-name,
 .icon-selector__choice-label {
   min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 .icon-selector__selected-name {
   flex: 1 1 auto;

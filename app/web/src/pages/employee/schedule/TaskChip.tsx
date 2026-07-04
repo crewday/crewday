@@ -51,7 +51,7 @@ export function TaskChipLink(props: TaskChipLinkProps) {
       onKeyDown={(e) => e.stopPropagation()}
     >
       <span className="schedule-day__chip-time">{timeOfTask(task.scheduled_start)}</span>
-      <span className="schedule-day__chip-title">{task.title}</span>
+      <span className="schedule-day__chip-title truncate">{task.title}</span>
     </Link>
   );
 }

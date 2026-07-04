@@ -160,7 +160,7 @@ export default function RecurrencePicker({
         onClick={openEditor}
       >
         <Repeat2 size={15} aria-hidden="true" />
-        <span className="recurrence-picker__trigger-text">{summary}</span>
+        <span className="recurrence-picker__trigger-text truncate">{summary}</span>
       </button>
 
       <FormModal

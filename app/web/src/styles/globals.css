@@ -42,6 +42,13 @@
 @import "./recurrence-picker.css";
 @import "./notifications.css";
 
+/* Single-line truncation shared by inline labels and table cells. */
+.truncate {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .panel--inset {
   background: var(--paper-2);
   border-color: var(--line-strong);

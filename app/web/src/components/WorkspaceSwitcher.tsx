@@ -78,7 +78,7 @@ export default function WorkspaceSwitcher() {
         aria-expanded={open}
         onClick={() => { setOpen((v) => !v); }}
       >
-        <span className="ws-switcher__name">{active.workspace.name}</span>
+        <span className="ws-switcher__name truncate">{active.workspace.name}</span>
         {active.grant_role && (
           <span className="ws-switcher__role">{ROLE_LABEL[active.grant_role] ?? active.grant_role}</span>
         )}
@@ -97,7 +97,7 @@ export default function WorkspaceSwitcher() {
                   className={"ws-switcher__opt" + (selected ? " ws-switcher__opt--active" : "")}
                   onClick={() => pick(w)}
                 >
-                  <span className="ws-switcher__opt-name">{w.workspace.name}</span>
+                  <span className="ws-switcher__opt-name truncate">{w.workspace.name}</span>
                   {w.grant_role && (
                     <span className="ws-switcher__opt-role">{ROLE_LABEL[w.grant_role] ?? w.grant_role}</span>
                   )}
@@ -115,7 +115,7 @@ export default function WorkspaceSwitcher() {
               onClick={createWorkspace}
             >
               <Plus size={14} aria-hidden="true" className="ws-switcher__opt-check" />
-              <span className="ws-switcher__opt-name">New workspace</span>
+              <span className="ws-switcher__opt-name truncate">New workspace</span>
             </button>
           </li>
         </ul>

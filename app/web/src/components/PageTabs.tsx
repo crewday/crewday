@@ -74,7 +74,7 @@ export default function PageTabs(props: PageTabsProps) {
       <nav className={className} aria-label={props.ariaLabel}>
         {props.tabs.map((tab) => {
           const tabClass =
-            "page-tabs__tab" +
+            "page-tabs__tab truncate" +
             (tab.key === props.activeKey ? " page-tabs__tab--active" : "") +
             (tab.disabled ? " page-tabs__tab--disabled" : "");
           if (tab.disabled) {
@@ -179,7 +179,7 @@ function InPlacePageTabs(props: InPlacePageTabsProps & { className: string }) {
             }}
             type="button"
             className={
-              "page-tabs__tab" +
+              "page-tabs__tab truncate" +
               (active ? " page-tabs__tab--active" : "") +
               (tab.disabled ? " page-tabs__tab--disabled" : "")
             }

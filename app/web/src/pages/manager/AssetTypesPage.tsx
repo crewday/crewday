@@ -16,6 +16,8 @@ import { Chip, Loading } from "@/components/common";
 import { useWorkspace } from "@/context/WorkspaceContext";
 import { ApiError, fetchJson } from "@/lib/api";
 import { qk } from "@/lib/queryKeys";
+import { fieldErrorId, fieldErrorsByLoc } from "@/lib/apiErrorMessage";
+import { clearMapValue, setMapValue } from "@/lib/mapState";
 import { usePatchReducer } from "@/lib/usePatchReducer";
 import type { AssetCategory, AssetType, DefaultAssetAction, Me, ResolvedPermission } from "@/types/api";
 
@@ -723,38 +725,11 @@ function clearPatchedAssetTypeFieldErrors(
 }
 
 function assetTypeFieldErrorId(rowId: string, field: AssetTypeField): string {
-  return "asset-type-" + rowId.replace(/[^a-zA-Z0-9_-]/g, "-") + "-" + field.replaceAll("_", "-") + "-error";
-}
-
-function setMapValue<TValue>(
-  current: ReadonlyMap<string, TValue>,
-  key: string,
-  value: TValue,
-): ReadonlyMap<string, TValue> {
-  const next = new Map(current);
-  next.set(key, value);
-  return next;
-}
-
-function clearMapValue<TValue>(
-  current: ReadonlyMap<string, TValue>,
-  key: string,
-): ReadonlyMap<string, TValue> {
-  if (!current.has(key)) return current;
-  const next = new Map(current);
-  next.delete(key);
-  return next;
+  return fieldErrorId("asset-type", rowId, field);
 }
 
 function assetTypeFieldErrors(error: unknown): AssetTypeFieldErrors {
-  if (!(error instanceof ApiError)) return {};
-  const errors: AssetTypeFieldErrors = {};
-  for (const fieldError of error.fieldErrors) {
-    const field = assetTypeFieldFromLoc(fieldError.loc);
-    const message = fieldError.msg?.trim();
-    if (field && message) errors[field] = message;
-  }
-  return errors;
+  return fieldErrorsByLoc(error, assetTypeFieldFromLoc);
 }
 
 function assetTypeFieldFromLoc(loc: readonly (string | number)[] | undefined): AssetTypeField | null {

@@ -141,7 +141,7 @@ export default function CapabilityChain(props: CapabilityChainProps) {
                   )}`}
                 >
                   <span className="llm-graph-chain__pm-summary">
-                    <span className="llm-graph-chain__pm-model">
+                    <span className="llm-graph-chain__pm-model truncate">
                       {model?.display_name ?? "(missing model)"}
                     </span>
                     {assignmentThinkingLevel ? (

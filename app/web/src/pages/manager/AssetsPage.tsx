@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useLocation, useParams, useSearchParams } from "react-router-dom";
 import { PackageSearch, SearchX } from "lucide-react";
 import { ApiError, fetchJson, resolveApiPath } from "@/lib/api";
+import { labeledFieldMessages } from "@/lib/apiErrorMessage";
 import { formatDecimal } from "@/lib/numberFormat";
 import { qk } from "@/lib/queryKeys";
 import AutoGrowTextarea from "@/components/AutoGrowTextarea";
@@ -958,14 +959,7 @@ function buildAssetCreateBody(input: {
 
 function assetCreateErrorMessage(error: unknown): string {
   if (error instanceof ApiError) {
-    const fieldMessages = error.fieldErrors
-      .map((fieldError) => {
-        const label = assetFieldLabel(fieldError.loc);
-        const message = fieldError.msg?.trim();
-        if (!message) return null;
-        return label ? `${label}: ${message}` : message;
-      })
-      .filter((message): message is string => Boolean(message));
+    const fieldMessages = labeledFieldMessages(error, assetFieldLabel);
     if (fieldMessages.length > 0) {
       return "Could not create asset. " + fieldMessages.join(" ");
     }

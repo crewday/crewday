@@ -95,7 +95,6 @@
 }
 .workspace-pick-list__name {
   font-weight: 650; font-size: 14.5px;
-  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .workspace-pick-list__meta {
   display: flex; align-items: center; flex-wrap: wrap;

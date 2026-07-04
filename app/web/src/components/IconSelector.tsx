@@ -168,7 +168,7 @@ export default function IconSelector({
           <span className="icon-selector__selected-mark">
             {selectedName ? <AssetIcon name={selectedName} size={18} /> : <X size={16} aria-hidden="true" />}
           </span>
-          {showSelectedLabel ? <strong className="icon-selector__selected-name">{selectedLabel}</strong> : null}
+          {showSelectedLabel ? <strong className="icon-selector__selected-name truncate">{selectedLabel}</strong> : null}
           <Pencil className="icon-selector__selected-edit" size={16} aria-hidden="true" />
         </button>
         {hasUnknownValue ? (
@@ -208,7 +208,7 @@ export default function IconSelector({
                   <span className="icon-selector__choice-mark">
                     <X size={16} aria-hidden="true" />
                   </span>
-                  <span className="icon-selector__choice-label">No icon</span>
+                  <span className="icon-selector__choice-label truncate">No icon</span>
                   {!selectedName ? <Check className="icon-selector__choice-check" size={14} aria-hidden="true" /> : null}
                 </button>
               ) : null}
@@ -228,7 +228,7 @@ export default function IconSelector({
                     <span className="icon-selector__choice-mark">
                       <AssetIcon name={option.name} size={16} />
                     </span>
-                    <span className="icon-selector__choice-label">{option.label}</span>
+                    <span className="icon-selector__choice-label truncate">{option.label}</span>
                     {selected ? <Check className="icon-selector__choice-check" size={14} aria-hidden="true" /> : null}
                   </button>
                 );
