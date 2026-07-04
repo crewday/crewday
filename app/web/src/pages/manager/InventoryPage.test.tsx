@@ -451,7 +451,7 @@ describe("<InventoryPage>", () => {
 
   it("keeps structured form controls aligned to DESIGN.md tokens", () => {
     expect(formsCss).toMatch(
-      /\.field input, \.field textarea, \.field select,[\s\S]*border: 1px solid var\(--line-strong\);[\s\S]*border-radius: 6px;/m,
+      /\.field input, \.field textarea, \.field select,[\s\S]*border: 1px solid var\(--line-strong\);[\s\S]*border-radius: var\(--radius-control\);/m,
     );
     expect(formsCss).not.toMatch(
       /\.field input:focus, \.field textarea:focus, \.field select:focus,/,

@@ -354,6 +354,10 @@ describe("<SchedulerPage>", () => {
   });
 
   it("preserves the viewport when prepending after the initial settle window", async () => {
+    // Drive the 200ms post-fetch settle window (see useInfiniteAgenda)
+    // on virtual time so the prepend fires past settle deterministically
+    // — a real-time sleep races the settle timer under full-suite load.
+    vi.useFakeTimers({ shouldAdvanceTime: true });
     const fake = installFetch();
     let scrollHeight = 1_000;
     const scrollHeightSpy = vi
@@ -364,7 +368,7 @@ describe("<SchedulerPage>", () => {
 
       await screen.findByText("Alex Rivera");
       await act(async () => {
-        await new Promise((resolve) => window.setTimeout(resolve, 400));
+        await vi.advanceTimersByTimeAsync(400);
       });
 
       scrollHeight = 1_000;
@@ -382,6 +386,7 @@ describe("<SchedulerPage>", () => {
     } finally {
       scrollHeightSpy.mockRestore();
       fake.restore();
+      vi.useRealTimers();
     }
   });
 

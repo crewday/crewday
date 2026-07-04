@@ -136,12 +136,10 @@ describe("<AgentDocsPage>", () => {
       });
       const body = screen.getByLabelText("Body for manager-playbook");
       fireEvent.change(body, { target: { value: updatedBody } });
-      fireEvent.click(within(screen.getByRole("group", { name: "Roles for manager-playbook" })).getByRole("button", {
-        name: "Employee",
-      }));
-      fireEvent.click(within(screen.getByRole("group", { name: "Roles for manager-playbook" })).getByRole("button", {
-        name: "Admin",
-      }));
+      const roles = screen.getByRole("group", { name: "Roles for manager-playbook" });
+      fireEvent.focus(within(roles).getByRole("combobox", { name: "Roles for manager-playbook input" }));
+      fireEvent.mouseDown(within(roles).getByRole("option", { name: "Employee" }));
+      fireEvent.click(within(roles).getByRole("button", { name: "Remove Admin" }));
       fireEvent.change(screen.getByLabelText("Change note for manager-playbook"), {
         target: { value: "Clarify escalation" },
       });
@@ -207,8 +205,9 @@ describe("<AgentDocsPage>", () => {
 
       fireEvent.change(screen.getByLabelText("Body for manager-playbook"), { target: { value: updatedBody } });
       const roles = screen.getByRole("group", { name: "Roles for manager-playbook" });
-      fireEvent.click(within(roles).getByRole("button", { name: "Employee" }));
-      fireEvent.click(within(roles).getByRole("button", { name: "Admin" }));
+      fireEvent.focus(within(roles).getByRole("combobox", { name: "Roles for manager-playbook input" }));
+      fireEvent.mouseDown(within(roles).getByRole("option", { name: "Employee" }));
+      fireEvent.click(within(roles).getByRole("button", { name: "Remove Admin" }));
 
       currentSummary = { ...currentSummary, roles: ["admin"], version: 4 };
       await queryClient.invalidateQueries({ queryKey: qk.adminAgentDocs() });
@@ -247,8 +246,8 @@ describe("<AgentDocsPage>", () => {
 
       fireEvent.change(screen.getByLabelText("Body for manager-playbook"), { target: { value: "Back in scope." } });
       const roles = screen.getByRole("group", { name: "Roles for manager-playbook" });
-      fireEvent.click(within(roles).getByRole("button", { name: "Manager" }));
-      fireEvent.click(within(roles).getByRole("button", { name: "Admin" }));
+      fireEvent.click(within(roles).getByRole("button", { name: "Remove Manager" }));
+      fireEvent.click(within(roles).getByRole("button", { name: "Remove Admin" }));
       fireEvent.click(screen.getByRole("button", { name: "Save" }));
 
       expect(await screen.findByText("Pick at least one role before saving.")).toBeInTheDocument();

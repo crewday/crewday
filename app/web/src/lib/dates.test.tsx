@@ -108,6 +108,7 @@ describe("date-time formatting", () => {
   it("falls back instead of throwing for invalid Intl options", () => {
     expect(
       formatDateTimeDisplay("2026-07-07T12:00:00.000Z", {
+        now,
         locale: "not_a_locale",
         timeZone: "No/Such_Zone",
       }),
