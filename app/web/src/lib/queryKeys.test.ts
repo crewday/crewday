@@ -1,3 +1,4 @@
+import { readdirSync, readFileSync } from "node:fs";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { QueryClient } from "@tanstack/react-query";
 import {
@@ -91,6 +92,56 @@ describe("qk — workspace prefix", () => {
     // invariant the factory exists to enforce.
     expect(acmeTasks[1]).toBe("acme");
     expect(otherTasks[1]).toBe("other");
+  });
+});
+
+describe("qk — permission-resolver placeholder", () => {
+  it("keeps the disabled-query placeholder under the workspace prefix (cd-qb3zi)", () => {
+    registerQueryKeyWorkspaceGetter(() => "acme");
+    // The placeholder is used only while the resolver query is DISABLED
+    // (user id / scope id not resolved yet). It must still carry the
+    // `["w", slug]` prefix like every other key so a disabled query can
+    // never collide across tenants (§14). The `"pending"` segment sits
+    // where a real verdict holds a user id, so the two can't collide.
+    expect(qk.permissionResolvedPending("assets.manage_types", "workspace")).toEqual([
+      "w",
+      "acme",
+      "permissions",
+      "resolved",
+      "pending",
+      "assets.manage_types",
+      "workspace",
+    ]);
+    // It falls under `permissionResolvedPrefix()` so an SSE resolver
+    // invalidation reaches it too (harmless — it never caches a value).
+    expect(
+      qk.permissionResolvedPending("nav", "workspace").slice(0, qk.permissionResolvedPrefix().length),
+    ).toEqual(qk.permissionResolvedPrefix());
+  });
+
+  it("has no source file emitting a raw bare-array permission key (regression guard)", () => {
+    // Every TanStack Query key must go through `qk.*` so it starts with
+    // `["w", slug, ...]` (§14:788-792). Four call sites used to emit a
+    // raw `["permission", "unresolved", ...]` placeholder that bypassed
+    // the workspace prefix. This fails loudly if any come back.
+    // Vitest roots at `app/web` (config location), so `src` sits under cwd.
+    const srcDir = `${process.cwd()}/src`;
+    const offenders: string[] = [];
+    const rawPermissionKey = /\[\s*"permission"/;
+    const walk = (dir: string): void => {
+      for (const entry of readdirSync(dir, { withFileTypes: true })) {
+        const full = `${dir}/${entry.name}`;
+        if (entry.isDirectory()) {
+          walk(full);
+        } else if (/\.tsx?$/.test(entry.name) && !/\.test\.tsx?$/.test(entry.name)) {
+          if (rawPermissionKey.test(readFileSync(full, "utf8"))) {
+            offenders.push(full);
+          }
+        }
+      }
+    };
+    walk(srcDir);
+    expect(offenders).toEqual([]);
   });
 });
 

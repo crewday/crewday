@@ -290,7 +290,7 @@ export default function PropertiesPage() {
     queryKey:
       currentUserId && activeWsId
         ? qk.permissionResolved(currentUserId, "properties.create", "workspace", activeWsId)
-        : ["permission", "unresolved", "properties.create", "workspace"],
+        : qk.permissionResolvedPending("properties.create", "workspace"),
     enabled: Boolean(currentUserId && activeWsId),
     queryFn: () => fetchCreatePropertyPermission(activeWsId ?? ""),
     retry: false,

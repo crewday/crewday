@@ -220,6 +220,17 @@ export const qk = {
   // change can flip any verdict, so narrow-key invalidation would
   // miss inheritance ripples.
   permissionResolvedPrefix: () => [...ws(), "permissions", "resolved"] as const,
+  // Placeholder key for a permission-resolver query that is DISABLED
+  // because the user id or scope id has not resolved yet (login race,
+  // no active workspace). It is never fetched — call sites set
+  // `enabled: false` exactly when they use it — but it still carries
+  // the `["w", slug]` prefix (§14) so a disabled query can't collide
+  // across tenants, mirroring how `qk.user("")` namespaces the no-id
+  // case. Sits under `permissionResolvedPrefix()`; the `"pending"`
+  // discriminator cannot collide with a real verdict, whose matching
+  // slot holds a user id.
+  permissionResolvedPending: (label: string, scopeKind: string) =>
+    [...ws(), "permissions", "resolved", "pending", label, scopeKind] as const,
   chatChannels: () => [...ws(), "chat", "channels"] as const,
   chatChannelProviders: () => [...ws(), "chat", "channels", "providers"] as const,
   agentPrefs: (scope: "workspace" | "property" | "me", id?: string) =>

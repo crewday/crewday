@@ -29,7 +29,7 @@ export function RequirePermission({
     queryKey:
       userId && resolvedScopeId
         ? qk.permissionResolved(userId, actionKey, scopeKind, resolvedScopeId)
-        : ["permission", "unresolved", actionKey, scopeKind],
+        : qk.permissionResolvedPending(actionKey, scopeKind),
     enabled: Boolean(userId && resolvedScopeId),
     queryFn: () => {
       const params = new URLSearchParams({

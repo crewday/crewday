@@ -187,7 +187,7 @@ export default function AssetTypesPage() {
     queryKey:
       currentUserId && activeWsId
         ? qk.permissionResolved(currentUserId, "assets.manage_types", "workspace", activeWsId)
-        : ["permission", "unresolved", "assets.manage_types", "workspace"],
+        : qk.permissionResolvedPending("assets.manage_types", "workspace"),
     enabled: Boolean(currentUserId && activeWsId),
     queryFn: () => fetchManageTypesPermission(activeWsId ?? ""),
     retry: false,

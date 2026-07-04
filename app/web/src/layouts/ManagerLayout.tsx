@@ -276,7 +276,7 @@ export default function ManagerLayout() {
   const permissionQ = useQuery({
     queryKey: permissionUserId && permissionScopeId
       ? [...qk.permissionResolvedPrefix(), "nav", permissionUserId, permissionScopeId, actionKeys.join("|")]
-      : ["permission", "unresolved", "nav", "workspace"],
+      : qk.permissionResolvedPending("nav", "workspace"),
     enabled: Boolean(permissionUserId && permissionScopeId),
     queryFn: ({ signal }) => resolveAllowedNavActions(actionKeys, permissionScopeId ?? "", signal),
     retry: false,
