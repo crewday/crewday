@@ -172,6 +172,19 @@ TLS: Caddy auto-provisions Let's Encrypt certs for `crew.day` and
 `www.crew.day`. No wildcard needed; each surface provisions its
 own.
 
+On the shared dev / maintainer host, Caddy runs plain-HTTP behind an
+**external** Traefik proxy that terminates TLS. The site router's
+`tls.certresolver` label is parameterized as `CREWDAY_TRAEFIK_CERTRESOLVER`
+(default `letsencrypt`, so `dev.crew.day` and prod are unchanged). The
+resolver itself is **not** defined in this repo — it lives in the shared
+Traefik static config (`certificatesResolvers` in the external
+`traefik.yml`). A `.localhost` self-host that cannot obtain a public ACME
+cert must (a) define a suitable resolver there — e.g. an internal /
+self-signed resolver or Traefik's default TLS store — and (b) point
+`CREWDAY_TRAEFIK_CERTRESOLVER` at that resolver's name. Leave the default
+in place for any host that has real DNS and can complete an ACME
+challenge.
+
 HSTS is `max-age=63072000` (2 years) — same as the app §15. The
 preload list decision rides on the app's, not re-litigated here.
 

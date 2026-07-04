@@ -78,6 +78,22 @@ external `traefik-proxy` network and registers `dev.crew.day` with the
 `badger@file` middleware. Pangolin needs a matching `dev.crew.day`
 resource. The app dev stack lives separately at `dev-app.crew.day`.
 
+Traefik environment overrides for the router labels:
+
+- `CREWDAY_TRAEFIK_CERTRESOLVER` — cert resolver name for the site
+  router's `tls.certresolver` label. Defaults to `letsencrypt`, which
+  matches the shared dev (`dev.crew.day`) and production deployments.
+  Override it only when the external Traefik static config defines a
+  different resolver — e.g. a `.localhost` self-host that can't obtain a
+  public ACME cert. The resolver name must exist in the **external**
+  shared Traefik static config (`certificatesResolvers` in `traefik.yml`);
+  this compose file only references it by name (see the deploy spec's
+  "DNS and TLS" note).
+- `CREWDAY_TRAEFIK_MIDDLEWARES` — extra middleware chain appended after
+  the site's built-in HSTS middleware (e.g. `badger@file` for the
+  Pangolin-fronted shared dev host). Empty by default, so no extra
+  middleware is attached.
+
 ## Local web hot reload
 
 Use the dev override when editing `site/web` source files:

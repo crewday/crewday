@@ -46,7 +46,7 @@ services:
       - "traefik.docker.network=traefik-proxy"
       - "traefik.http.routers.crewday-dev-site.rule=Host(`${CREWDAY_DEV_SITE_HOST:-crewday-site.localhost}`)"
       - "traefik.http.routers.crewday-dev-site.entrypoints=websecure"
-      - "traefik.http.routers.crewday-dev-site.tls.certresolver=letsencrypt"
+      - "traefik.http.routers.crewday-dev-site.tls.certresolver=${CREWDAY_TRAEFIK_CERTRESOLVER:-letsencrypt}"
       # HSTS belongs on the TLS-terminating layer, not the plain-HTTP Caddy backend.
       - "traefik.http.middlewares.crewday-dev-site-hsts.headers.stsSeconds=63072000"
       - "traefik.http.middlewares.crewday-dev-site-hsts.headers.stsIncludeSubdomains=true"
