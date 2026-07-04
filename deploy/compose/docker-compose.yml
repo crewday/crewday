@@ -37,7 +37,7 @@ x-app-build: &app-build
 
 services:
   caddy:
-    image: caddy:2-alpine
+    image: caddy:2-alpine@sha256:5f5c8640aae01df9654968d946d8f1a56c497f1dd5c5cda4cf95ab7c14d58648
     restart: unless-stopped
     ports:
       - "${CREWDAY_CADDY_BIND:-127.0.0.1}:${CREWDAY_CADDY_HTTP_PORT:-8180}:80"
@@ -105,7 +105,7 @@ services:
       - crewday
 
   postgres:
-    image: postgres:15-alpine
+    image: postgres:15-alpine@sha256:cd17e2ac98240fce1541ad2a803b34009b4eea5aec8a832363cdc7eca62e722e
     restart: unless-stopped
     environment:
       POSTGRES_USER: crewday
@@ -122,7 +122,7 @@ services:
       - crewday
 
   minio:
-    image: minio/minio:latest
+    image: minio/minio:latest@sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e
     command: server /data --console-address ":9001"
     restart: unless-stopped
     environment:
