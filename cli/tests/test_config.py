@@ -7,6 +7,7 @@ import pathlib
 import stat
 import tomllib
 
+import pytest
 from click.testing import CliRunner
 from crewday import _config
 from crewday._globals import CrewdayContext
@@ -15,7 +16,7 @@ from crewday._main import _register_config_commands_once, config_group, root
 
 def _use_tmp_config(
     tmp_path: pathlib.Path,
-    monkeypatch,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> pathlib.Path:
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
     return tmp_path / "crewday" / "profiles.toml"
@@ -23,7 +24,7 @@ def _use_tmp_config(
 
 def test_config_path_honours_xdg_config_home(
     tmp_path: pathlib.Path,
-    monkeypatch,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     config_path = _use_tmp_config(tmp_path, monkeypatch)
     assert _config.config_path() == config_path
@@ -31,7 +32,7 @@ def test_config_path_honours_xdg_config_home(
 
 def test_toml_round_trip_uses_deterministic_field_order(
     tmp_path: pathlib.Path,
-    monkeypatch,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     config_path = _use_tmp_config(tmp_path, monkeypatch)
     cfg = _config.Config(
@@ -75,7 +76,7 @@ def test_toml_round_trip_uses_deterministic_field_order(
 
 def test_save_forces_0600_permissions(
     tmp_path: pathlib.Path,
-    monkeypatch,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     config_path = _use_tmp_config(tmp_path, monkeypatch)
     config_path.parent.mkdir(parents=True)
@@ -100,7 +101,7 @@ def test_save_forces_0600_permissions(
 
 def test_active_precedence_and_env_token_resolution(
     tmp_path: pathlib.Path,
-    monkeypatch,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _use_tmp_config(tmp_path, monkeypatch)
     _config.save(
@@ -138,7 +139,7 @@ def test_active_precedence_and_env_token_resolution(
 
 def test_atomic_write_leaves_no_temp_file(
     tmp_path: pathlib.Path,
-    monkeypatch,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     config_path = _use_tmp_config(tmp_path, monkeypatch)
 
@@ -161,7 +162,7 @@ def test_atomic_write_leaves_no_temp_file(
 
 def test_config_commands_show_list_use_and_rm(
     tmp_path: pathlib.Path,
-    monkeypatch,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     config_path = _use_tmp_config(tmp_path, monkeypatch)
     _config.save(
@@ -217,7 +218,7 @@ def test_config_commands_show_list_use_and_rm(
 
 def test_config_show_does_not_resolve_env_token(
     tmp_path: pathlib.Path,
-    monkeypatch,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _use_tmp_config(tmp_path, monkeypatch)
     monkeypatch.setenv("CREWDAY_TOKEN_PROD", "resolved-secret-5678")
@@ -251,7 +252,7 @@ def test_config_show_does_not_resolve_env_token(
 
 def test_config_list_ignores_missing_env_profile(
     tmp_path: pathlib.Path,
-    monkeypatch,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _use_tmp_config(tmp_path, monkeypatch)
     _config.save(

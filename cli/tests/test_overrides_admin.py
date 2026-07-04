@@ -9,6 +9,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from types import SimpleNamespace
 
+import click
 import pytest
 from click.testing import CliRunner
 from crewday._overrides import admin
@@ -190,7 +191,7 @@ def test_admin_workspace_import_rejects_target_for_create_new(
         admin.rotate_session_secret,
     ],
 )
-def test_secret_rotation_commands_refuse_argv_secret(command: object) -> None:
+def test_secret_rotation_commands_refuse_argv_secret(command: click.Command) -> None:
     result = CliRunner().invoke(command, ["--new", "secret-on-argv"])
 
     assert result.exit_code == 2
@@ -207,7 +208,7 @@ def test_secret_rotation_commands_refuse_argv_secret(command: object) -> None:
         (admin.rotate_session_secret, "--new-key-file"),
     ],
 )
-def test_secret_rotation_help_renders(command: object, expected: str) -> None:
+def test_secret_rotation_help_renders(command: click.Command, expected: str) -> None:
     result = CliRunner().invoke(command, ["--help"])
 
     assert result.exit_code == 0
@@ -322,7 +323,8 @@ def _patch_worker_reset_clock(
 
 def _audit_count(engine: Engine) -> int:
     with engine.connect() as conn:
-        return conn.execute(text("SELECT COUNT(*) FROM audit_log")).scalar_one()
+        count = conn.execute(text("SELECT COUNT(*) FROM audit_log")).scalar_one()
+    return int(count)
 
 
 def test_admin_worker_reset_job_real_helper_reports_no_row(
