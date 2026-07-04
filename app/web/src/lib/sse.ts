@@ -35,8 +35,12 @@ import type {
   AgentMessage,
   AgentTurnScope,
   AssetAction,
+  User,
 } from "@/types/api";
+import { fetchJson } from "./api";
 import { qk } from "./queryKeys";
+import { takeSupersededCompletion } from "./recentCompletions";
+import { publishGlobalStatusToast } from "./statusToastBus";
 
 // ---------------------------------------------------------------------------
 // Event kinds + frame envelope
@@ -372,6 +376,18 @@ interface TaskRefPayload {
   task_id: string;
 }
 
+/**
+ * `task.completed` frame. The canonical `TaskCompleted` event
+ * (`app/events/types.py`) carries `{task_id, completed_by}` — the user
+ * id of whoever most recently completed the occurrence. `completed_by`
+ * drives the §06 last-write-wins supersession toast: if this tab
+ * recently completed the same occurrence and `completed_by` is now a
+ * different user, the current user's completion was superseded.
+ */
+interface TaskCompletedPayload extends TaskRefPayload {
+  completed_by?: string;
+}
+
 interface PropertyClosurePayload {
   property_id: string;
 }
@@ -471,6 +487,43 @@ function invalidate(qc: QueryClient, queryKey: readonly unknown[]): void {
   // invalidation"). Explicit here so the intent is visible at every
   // call site rather than relying on the v5 default.
   qc.invalidateQueries({ queryKey, refetchType: "active" });
+}
+
+/**
+ * Resolve a workspace member's display name for the supersession toast.
+ * Prefers the `qk.user(id)` cache (populated by the sidebar footer and
+ * other member lookups); falls back to fetching `/users/{id}` through
+ * the same query key so the row lands in cache for later reads. Returns
+ * `null` when the name can't be resolved (fetch failure / absent name),
+ * so the caller can fall back to generic copy.
+ */
+async function resolveDisplayName(qc: QueryClient, userId: string): Promise<string | null> {
+  const cached = qc.getQueryData<{ user: User }>(qk.user(userId));
+  if (cached?.user.display_name) return cached.user.display_name;
+  try {
+    const res = await qc.fetchQuery({
+      queryKey: qk.user(userId),
+      queryFn: () => fetchJson<{ user: User }>("/api/v1/users/" + userId),
+    });
+    return res.user.display_name || null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Publish the §14 "Completed by <name>" info toast after another user
+ * superseded the current user's completion. Name resolution is async;
+ * a missing name degrades to generic copy rather than dropping the
+ * signal.
+ */
+function notifyCompletionSuperseded(qc: QueryClient, completedBy: string): void {
+  void resolveDisplayName(qc, completedBy).then((name) => {
+    publishGlobalStatusToast({
+      message: name ? `Completed by ${name}` : "Completed by another teammate",
+      tone: "info",
+    });
+  });
 }
 
 function employeeLeavesFamilyKey(): readonly unknown[] {
@@ -675,7 +728,15 @@ export const INVALIDATIONS: Record<EventKind, InvalidationHandler> = {
   },
 
   "task.completed": (event, qc) => {
-    const payload = event.data as unknown as TaskRefPayload;
+    const payload = event.data as unknown as TaskCompletedPayload;
+    // §06 last-write-wins: if this tab recently completed this
+    // occurrence and another user has now re-completed it, surface the
+    // "Completed by <name>" info toast (§14 "Optimistic mutations").
+    // Own-completion echoes (`completed_by` == who this tab recorded)
+    // do not toast.
+    if (payload.completed_by && takeSupersededCompletion(payload.task_id, payload.completed_by)) {
+      notifyCompletionSuperseded(qc, payload.completed_by);
+    }
     // Same posture as `task.updated`: the canonical `TaskCompleted`
     // event publishes `{task_id, completed_by}` only; subscribers
     // re-fetch via REST. Invalidate the per-row detail key alongside

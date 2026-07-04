@@ -1,0 +1,74 @@
+/* Status / info toasts (§14 "Completed by <name>"). Shares the
+   viewport chrome of the error toast but reads with the sky "info"
+   tone (DESIGN.md — Sky = info) rather than the rust error accent. */
+
+.status-toast-viewport {
+  position: fixed;
+  z-index: var(--z-toast);
+  top: calc(16px + env(safe-area-inset-top));
+  right: calc(16px + env(safe-area-inset-right));
+  display: grid;
+  gap: var(--space-5);
+  width: min(420px, calc(100vw - 32px));
+  pointer-events: none;
+}
+
+.status-toast {
+  pointer-events: auto;
+  color: var(--ink);
+  background:
+    linear-gradient(90deg, var(--sky-soft), transparent 34%),
+    var(--card-raised);
+  border: 1px solid var(--line-strong);
+  border-left: 4px solid var(--sky);
+  border-radius: var(--radius-card);
+  box-shadow: var(--shadow-raised);
+  overflow: hidden;
+}
+
+.status-toast__head {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 38px;
+  align-items: center;
+  min-height: 54px;
+}
+
+.status-toast__message {
+  display: block;
+  min-width: 0;
+  padding: var(--space-6) var(--space-4) var(--space-6) var(--space-7);
+  overflow-wrap: anywhere;
+  color: var(--ink);
+  font-size: var(--text-label-md);
+  font-weight: 600;
+  line-height: 1.35;
+}
+
+.status-toast__close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 38px;
+  min-height: 38px;
+  margin: var(--space-4) var(--space-4) var(--space-4) 0;
+  color: var(--ink-2);
+  background: var(--paper-2);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-pill);
+  font: inherit;
+  cursor: pointer;
+}
+
+.status-toast__close:hover {
+  background: var(--paper-3);
+  color: var(--ink);
+}
+
+@media (max-width: 560px) {
+  .status-toast-viewport {
+    top: calc(10px + env(safe-area-inset-top));
+    right: 10px;
+    left: 10px;
+    width: auto;
+  }
+}

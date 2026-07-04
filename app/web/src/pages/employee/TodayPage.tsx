@@ -8,6 +8,7 @@ import {
   subscribeOfflineQueueReplay,
 } from "@/lib/offlineQueue";
 import { qk } from "@/lib/queryKeys";
+import { recordSelfCompletion } from "@/lib/recentCompletions";
 import { workspaceRouteForPathname } from "@/lib/workspaceRoutes";
 import { CalendarClock, Camera, CheckCircle, WifiOff } from "lucide-react";
 import { Chip, EmptyState, Loading, ProgressBar } from "@/components/common";
@@ -104,6 +105,12 @@ export default function TodayPage() {
     },
     onSuccess: (result) => {
       if (result.queued) return;
+      // §06 last-write-wins: remember this occurrence + who the server
+      // stamped as completer (the current caller), so a later
+      // `task.completed` SSE frame from a *different* user can surface
+      // the "Completed by <name>" info toast (§14). See
+      // `@/lib/recentCompletions` + the `task.completed` SSE handler.
+      recordSelfCompletion(result.payload.task_id, result.payload.completed_by_user_id);
       qc.invalidateQueries({ queryKey: qk.today() });
       qc.invalidateQueries({ queryKey: qk.task(result.payload.task_id) });
       qc.invalidateQueries({ queryKey: qk.tasks() });
