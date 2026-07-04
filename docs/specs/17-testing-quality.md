@@ -110,11 +110,30 @@ Four cases, each applied exhaustively to the relevant surface:
   bound to workspace `B` do not receive it. The test subscribes
   concurrently under both contexts and fails on any cross-delivery.
 - **(d) Repository parity.** For every workspace-scoped
-  repository method across every context, a parametrised case
-  asserts that a caller with `WorkspaceContext(workspace_id=A)`
-  cannot read, write, soft-delete, or restore a row with
-  `workspace_id=B`. Runs on both SQLite (app-filter only) and
-  Postgres (RLS + app-filter).
+  repository method across every context, a caller with
+  `WorkspaceContext(workspace_id=A)` must not be able to read,
+  write, soft-delete, or restore a row with `workspace_id=B`. This
+  is enforced at **two levels**, kept distinct so the guarantee is
+  not overread:
+  - **Execution** — a parametrised probe drives real SQL against
+    *every* registered workspace-scoped table: a no-context read
+    fails closed with `TenantFilterMissing`, and a read under
+    workspace `A` executes and returns only workspace-`A` rows.
+    Row-level and write-path isolation are proven on representative
+    tables (task templates; the booking amend/decline path). Runs on
+    both SQLite (app-filter only) and Postgres (RLS + app-filter).
+  - **Affirmation** — a `COVERED_METHODS` registry (in
+    `tests/tenant/test_repository_parity.py`) records every public
+    ctx-taking domain function and *affirms* it routes its DB access
+    through that filtered seam. The parity gate fails when a new such
+    function lands without a `COVERED_METHODS` entry or a justified
+    opt-out. This is a **membership catalogue, not a per-method
+    execution matrix**: invoking all ~250 methods cross-tenant would
+    require per-method row seeding and argument construction across
+    every FK graph, which is not tractable generically. The execution
+    layer above proves the seam those methods ride is fail-closed on
+    every table; the registry proves none of them silently bypasses
+    it (e.g. via a raw `session.execute(text(...))` path).
 
 The surface-parity CI gate expands the reverse check (§ "Quality
 gates") with three clauses:

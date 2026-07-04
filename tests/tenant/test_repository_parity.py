@@ -4,8 +4,28 @@ For every workspace-scoped repository method across every context,
 assert that a caller with ``WorkspaceContext(workspace_id=A)`` cannot
 read, write, soft-delete, or restore a row with ``workspace_id=B``.
 The SQLAlchemy ``do_orm_execute`` tenant filter is the enforcement
-seam; this test is the **exhaustive catalogue** that proves the seam
-covers every public domain-service entry point.
+seam. This module proves that seam at **two distinct levels** — keep
+them apart when reading the guarantee:
+
+* **Execution.** :class:`TestScopedTableSeamExecution` drives a real
+  query against *every* registered workspace-scoped table (not a
+  single exemplar): a no-context read fails closed with
+  :class:`TenantFilterMissing`, and a read under workspace ``A``
+  executes on the live dialect and returns only workspace-``A`` rows.
+  :class:`TestScopedRowIsolation` and
+  :class:`TestBookingWriteCrossTenant` add row-level and write-path
+  isolation proofs on representative tables. This is the layer that
+  actually *executes* SQL cross-tenant.
+* **Affirmation.** :data:`COVERED_METHODS` is a registry that
+  *affirms* every public ctx-taking domain function routes its DB
+  access through that filtered seam. It is a **membership catalogue,
+  not a per-method execution matrix** — the parity gate proves each
+  discovered method is accounted for (covered or opted out); the
+  execution layer above proves the seam those methods ride is
+  fail-closed on every scoped table. See
+  :class:`TestRepositoryParityGate` for the exact guarantee and its
+  boundary, so the registry is not overread as "every method was
+  invoked cross-tenant".
 
 The repository seam is still v1 — production code reads ORM models
 directly in domain services (:mod:`app.domain.tasks.templates`,
@@ -52,6 +72,7 @@ from sqlalchemy import select, text
 from sqlalchemy.orm import Session, sessionmaker
 
 import app.domain as domain_pkg
+from app.adapters.db.base import metadata
 from app.adapters.db.payroll.models import Booking
 from app.adapters.db.payroll.repositories import SqlAlchemyBookingWriteRepository
 from app.adapters.db.tasks.models import TaskTemplate
@@ -62,7 +83,10 @@ from app.tenancy import WorkspaceContext, registry, tenant_agnostic
 from app.tenancy.orm_filter import TenantFilterMissing
 from app.util.ulid import new_ulid
 from tests.tenant._optouts import REPOSITORY_METHOD_OPTOUTS
-from tests.tenant.conftest import TenantSeed
+from tests.tenant.conftest import (
+    _TENANT_REGISTRY_PACKAGES,
+    TenantSeed,
+)
 
 pytestmark = pytest.mark.integration
 
@@ -627,12 +651,169 @@ class TestBookingWriteCrossTenant:
 
 
 # ---------------------------------------------------------------------------
+# Scoped-table seam execution — real SQL over every registered table
+# ---------------------------------------------------------------------------
+
+
+def _all_scoped_tables() -> tuple[str, ...]:
+    """Return every registered workspace-scoped table name.
+
+    Populates the tenant registry by importing every
+    ``app.adapters.db.<context>`` package (each registers its scoped
+    tables as an import side effect) and snapshots
+    :func:`app.tenancy.registry.scoped_tables`. Reuses the same
+    package list the conftest rebuilds the registry from so the two
+    can't drift. Called at import time to feed the parametrisation.
+    """
+    for package_name in _TENANT_REGISTRY_PACKAGES:
+        importlib.import_module(package_name)
+    return tuple(sorted(registry.scoped_tables()))
+
+
+_SCOPED_TABLES: tuple[str, ...] = _all_scoped_tables()
+
+
+# Scoped tables the *context-scoped read* probe cannot yet drive
+# directly, each with a tracking task. The no-context fail-closed
+# probe still runs for these (they DO raise TenantFilterMissing) — only
+# the "read under ctx A executes cleanly" leg is a known xfail.
+_SEAM_EXECUTION_KNOWN_GAPS: dict[str, str] = {
+    # justification: cd-zzplt — ``chat_link_challenge`` is registered as
+    # a *plain* workspace-scoped table (``register(...)``) but the model
+    # has no ``workspace_id`` column (it reaches the boundary through
+    # ``binding_id -> chat_channel_binding.workspace_id``). The ORM
+    # filter therefore hits ``target.c.workspace_id`` -> AttributeError
+    # under any ctx. It still fails CLOSED (crash/raise, and the binding
+    # is workspace-resolved before the challenge lookup), so this is a
+    # mis-registration bug, NOT a cross-tenant read leak. The strict
+    # xfail flips to a hard failure the moment cd-zzplt lands and the
+    # table becomes ctx-scopable — delete this entry then.
+    "chat_link_challenge": "cd-zzplt",
+}
+
+
+def _ctx_read_params() -> list[object]:
+    """Parametrisation for the ctx-A read probe, xfail-marking known gaps."""
+    params: list[object] = []
+    for table_name in _SCOPED_TABLES:
+        task = _SEAM_EXECUTION_KNOWN_GAPS.get(table_name)
+        if task is None:
+            params.append(pytest.param(table_name))
+            continue
+        params.append(
+            pytest.param(
+                table_name,
+                marks=pytest.mark.xfail(
+                    raises=AttributeError,
+                    strict=True,
+                    reason=(
+                        f"{task}: {table_name} is mis-registered as a plain "
+                        "scoped table with no workspace_id column; the tenant "
+                        "filter cannot scope it under a ctx"
+                    ),
+                ),
+            )
+        )
+    return params
+
+
+class TestScopedTableSeamExecution:
+    """Real cross-tenant SQL over **every** registered scoped table.
+
+    This is the execution counterpart to :data:`COVERED_METHODS`. The
+    unit-level :mod:`tests.unit.test_tenancy_orm_filter` proves the
+    filter *mechanism* on synthetic ``foo`` tables;
+    :class:`TestScopedRowIsolation` proves row-hiding on one exemplar.
+    Neither exercises the real production tables the domain methods
+    actually query. This class closes that gap: for each of the
+    registered scoped tables it drives a live query on the current
+    dialect and asserts the seam holds — converting "the seam covers
+    these tables" from an argued invariant into an executed one.
+    """
+
+    @pytest.mark.parametrize("table_name", _SCOPED_TABLES)
+    def test_scoped_table_read_without_ctx_fails_closed(
+        self,
+        table_name: str,
+        tenant_session_factory: sessionmaker[Session],
+    ) -> None:
+        """Every scoped table's read raises before SQL leaves the process.
+
+        A ``SELECT`` against the table with no
+        :class:`WorkspaceContext` installed (and not inside
+        :func:`tenant_agnostic`) must raise
+        :class:`TenantFilterMissing` naming the offending table — the
+        fail-closed backstop every ``COVERED_METHODS`` entry leans on.
+        Runs for *all* scoped tables, including the ctx-read xfail gaps.
+        """
+        table = metadata.tables[table_name]
+        with (
+            tenant_session_factory() as session,
+            pytest.raises(TenantFilterMissing) as excinfo,
+        ):
+            session.execute(select(table)).all()
+        assert excinfo.value.table == table_name
+
+    @pytest.mark.parametrize("table_name", _ctx_read_params())
+    def test_scoped_table_read_under_ctx_a_returns_only_a_rows(
+        self,
+        table_name: str,
+        tenant_session_factory: sessionmaker[Session],
+        tenant_a: TenantSeed,
+        tenant_b: TenantSeed,
+    ) -> None:
+        """A read under ctx A executes and never yields a peer-workspace row.
+
+        Installs workspace ``A``'s context, runs ``SELECT * FROM
+        <table>`` on the live dialect (SQLite here, Postgres in CI),
+        and asserts every returned row carries ``workspace_id == A``.
+        For the colliding-seed tables (memberships, sessions, tokens)
+        this is a non-vacuous cross-tenant read: workspace ``B``'s rows
+        exist and must not surface. For empty tables it still proves
+        the ctx-scoped query *executes* against the real column set
+        rather than raising — the missing half of the affirmation.
+
+        Scope-through-join tables (``area`` / ``unit`` /
+        ``property_closure``) carry no ``workspace_id`` column of their
+        own; the filter scopes them through the junction, so we assert
+        only that the query executes (the returned rows have no
+        ``workspace_id`` to inspect directly).
+        """
+        from app.tenancy.current import reset_current, set_current
+
+        table = metadata.tables[table_name]
+        has_workspace_col = "workspace_id" in table.c
+        with tenant_session_factory() as session:
+            token = set_current(tenant_a.ctx)
+            try:
+                rows = session.execute(select(table)).all()
+            finally:
+                reset_current(token)
+        if not has_workspace_col:
+            return
+        offenders = [
+            row._mapping["workspace_id"]
+            for row in rows
+            if row._mapping["workspace_id"] != tenant_a.workspace_id
+        ]
+        assert not offenders, (
+            f"ctx-A read of {table_name!r} returned rows owned by a peer "
+            f"workspace: {sorted(set(offenders))!r} (expected only "
+            f"{tenant_a.workspace_id!r})"
+        )
+
+
+# ---------------------------------------------------------------------------
 # Parity gate
 # ---------------------------------------------------------------------------
 
 
 # Every domain-service method explicitly acknowledged as "covered by
-# the ORM-filter seam proven in :class:`TestScopedRowIsolation`". A
+# the ORM-filter seam" — the seam executed and proven fail-closed on
+# every scoped table by :class:`TestScopedTableSeamExecution` and
+# :class:`TestScopedRowIsolation`. This set AFFIRMS membership (the
+# method routes through that seam); it is not a per-method execution
+# matrix (see :class:`TestRepositoryParityGate`'s guarantee note). A
 # new ctx-taking method that isn't in this set AND isn't in
 # :data:`REPOSITORY_METHOD_OPTOUTS` fails
 # :meth:`TestRepositoryParityGate.test_every_method_covered_or_opted_out`.
@@ -1206,6 +1387,23 @@ class TestRepositoryParityGate:
     rubber-stamp it. The failing-gate message steers them to either
     extend :class:`TestScopedRowIsolation` with a method-specific
     case OR add a ``# justification:`` opt-out entry.
+
+    **What this gate does and does NOT prove — read before trusting
+    it.** It proves *membership*: every discovered ctx-taking domain
+    function appears in :data:`COVERED_METHODS` or
+    :data:`REPOSITORY_METHOD_OPTOUTS`, and neither set has drifted.
+    It does **not** invoke each of those ~250 methods cross-tenant —
+    doing so would need per-method row seeding across every table's FK
+    graph plus per-method argument construction, which is not tractable
+    generically. The *execution* proof lives in
+    :class:`TestScopedTableSeamExecution` (fail-closed + ctx-scoped
+    read on every registered scoped table),
+    :class:`TestScopedRowIsolation` (row-hiding on one exemplar read),
+    and :class:`TestBookingWriteCrossTenant` (a real write path). So
+    the honest guarantee is: *the enforcement seam is executed and
+    fail-closed on every scoped table, and every domain method is
+    affirmed to route through that seam* — not *every method was
+    individually driven cross-tenant*.
     """
 
     @pytest.mark.parametrize(
@@ -1384,4 +1582,5 @@ __all__ = [
     "TestPostgresRlsClearing",
     "TestRepositoryParityGate",
     "TestScopedRowIsolation",
+    "TestScopedTableSeamExecution",
 ]
