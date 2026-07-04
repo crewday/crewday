@@ -551,6 +551,7 @@ class ChatChannelBindingRepository(Protocol):
         *,
         challenge_id: str,
         binding_id: str,
+        workspace_id: str,
         code_hash: str,
         code_hash_params: str,
         sent_via: str,

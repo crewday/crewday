@@ -676,20 +676,12 @@ _SCOPED_TABLES: tuple[str, ...] = _all_scoped_tables()
 # Scoped tables the *context-scoped read* probe cannot yet drive
 # directly, each with a tracking task. The no-context fail-closed
 # probe still runs for these (they DO raise TenantFilterMissing) — only
-# the "read under ctx A executes cleanly" leg is a known xfail.
-_SEAM_EXECUTION_KNOWN_GAPS: dict[str, str] = {
-    # justification: cd-zzplt — ``chat_link_challenge`` is registered as
-    # a *plain* workspace-scoped table (``register(...)``) but the model
-    # has no ``workspace_id`` column (it reaches the boundary through
-    # ``binding_id -> chat_channel_binding.workspace_id``). The ORM
-    # filter therefore hits ``target.c.workspace_id`` -> AttributeError
-    # under any ctx. It still fails CLOSED (crash/raise, and the binding
-    # is workspace-resolved before the challenge lookup), so this is a
-    # mis-registration bug, NOT a cross-tenant read leak. The strict
-    # xfail flips to a hard failure the moment cd-zzplt lands and the
-    # table becomes ctx-scopable — delete this entry then.
-    "chat_link_challenge": "cd-zzplt",
-}
+# the "read under ctx A executes cleanly" leg is a known xfail. Empty
+# today: cd-zzplt landed ``chat_link_challenge``'s ``workspace_id``
+# column so every registered scoped table is now ctx-scopable. Add a
+# ``"<table>": "<task-id>"`` entry here (with a justification) if a
+# future table lands mis-registered.
+_SEAM_EXECUTION_KNOWN_GAPS: dict[str, str] = {}
 
 
 def _ctx_read_params() -> list[object]:

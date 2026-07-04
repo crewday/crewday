@@ -537,6 +537,7 @@ class SqlAlchemyChatChannelBindingRepository(ChatChannelBindingRepository):
         *,
         challenge_id: str,
         binding_id: str,
+        workspace_id: str,
         code_hash: str,
         code_hash_params: str,
         sent_via: str,
@@ -548,6 +549,7 @@ class SqlAlchemyChatChannelBindingRepository(ChatChannelBindingRepository):
             ChatLinkChallenge(
                 id=challenge_id,
                 binding_id=binding_id,
+                workspace_id=workspace_id,
                 code_hash=code_hash,
                 code_hash_params=code_hash_params,
                 sent_via=sent_via,

@@ -675,6 +675,11 @@ class ChatLinkChallenge(Base):
     __tablename__ = "chat_link_challenge"
 
     id: Mapped[str] = mapped_column(String, primary_key=True)
+    workspace_id: Mapped[str] = mapped_column(
+        String,
+        ForeignKey("workspace.id", ondelete="CASCADE"),
+        nullable=False,
+    )
     binding_id: Mapped[str] = mapped_column(
         String,
         ForeignKey("chat_channel_binding.id", ondelete="CASCADE"),

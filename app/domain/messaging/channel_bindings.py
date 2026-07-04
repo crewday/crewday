@@ -135,6 +135,7 @@ class ChatChannelBindingService:
             repo.insert_challenge(
                 challenge_id=new_ulid(clock=self._clock),
                 binding_id=binding_id,
+                workspace_id=self._ctx.workspace_id,
                 code_hash=_code_hash(binding_id, MOCK_LINK_CODE),
                 code_hash_params="sha256:mock",
                 sent_via="channel",

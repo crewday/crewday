@@ -153,6 +153,7 @@ challenge-response**:
    ```
    chat_link_challenge
    ├── id                ULID PK
+   ├── workspace_id      ULID FK → workspace.id (denormalised from the binding so the row is a plain workspace-scoped table for the ORM tenant filter)
    ├── binding_id        ULID FK → chat_channel_binding.id
    ├── code_hash         argon2id hash of a 6-digit code (Crockford base32 for Telegram)
    ├── code_hash_params  argon2id params (upgradeable)
