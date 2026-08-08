@@ -41,15 +41,26 @@ This repo recognizes the following optional, gitignored files:
 ```text
 .agents/local/AGENTS.local.md
 .agents/local/SETUP.local.md
+.env
+site/.env
 docker-compose.override.yml
 ```
 
-The recommended private layout is a companion repository with one subdirectory
-per public project, then a symlink from `.agents/local` to that project's
-private context directory. For this repo, the local path would be:
+The recommended private layout is a sibling companion repository with one
+subdirectory per public project, then a symlink from `.agents/local` to that
+project's private context directory. For this repo, the local path would be:
 
 ```text
-/home/ubuntu/git/dev-context/crewday
+../dev-context/crewday
+```
+
+From the repo root, link it with:
+
+```bash
+ln -s ../../dev-context/crewday .agents/local
+ln -s ../dev-context/crewday/crewday.env .env
+ln -s ../../dev-context/crewday/crewday.env site/.env
+ln -s ../dev-context/crewday/docker-compose.override.yml docker-compose.override.yml
 ```
 
 If your harness supports `@` file expansion, `AGENTS.md` points at
@@ -105,11 +116,11 @@ From the repo root:
 ./scripts/dev-stack-up.sh
 ```
 
-The wrapper runs the root dev compose file
-(`docker compose -f docker-compose.dev.yml up -d --build`), waits for
-`/readyz`, and reports migration, heartbeat, and root-key drift with a one-line
-remediation hint. The raw compose command still works when you intentionally
-want to skip the drift gate.
+The wrapper runs the root dev compose file and automatically appends the
+gitignored `docker-compose.override.yml` when it exists, waits for `/readyz`,
+and reports migration, heartbeat, and root-key drift with a one-line remediation
+hint. The raw compose command still works when you intentionally want to skip
+the drift gate.
 
 The dev stack defaults to the in-process fake LLM client. To smoke the real
 OpenRouter path locally, set `CREWDAY_LLM_PROVIDER=openrouter` and

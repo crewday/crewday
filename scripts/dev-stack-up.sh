@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Bring the dev compose stack up and verify it's actually serving.
 #
-# Wraps ``docker compose -f docker-compose.dev.yml up -d --build``,
+# Wraps ``docker compose -f docker-compose.dev.yml ... up -d --build``,
 # polls ``/readyz`` until the loopback API responds, and runs the
 # shared drift probe so migration / heartbeat / root-key issues
 # surface here instead of as a cryptic test failure later (cd-3yp9,
@@ -29,8 +29,21 @@ boot_interval="${READYZ_BOOT_INTERVAL:-2}"
 
 cd "$_repo_root" || exit 1
 
-printf '==> docker compose -f %s up -d --build\n' "$compose_file"
-if ! docker compose -f "$compose_file" up -d --build; then
+compose_args=()
+IFS=':' read -r -a compose_files <<< "$compose_file"
+for file in "${compose_files[@]}"; do
+  [[ -n "$file" ]] || continue
+  compose_args+=("-f" "$file")
+done
+
+if [[ -z "${COMPOSE_FILE:-}" && -f docker-compose.override.yml ]]; then
+  compose_args+=("-f" "docker-compose.override.yml")
+fi
+
+printf '==> docker compose'
+printf ' %q' "${compose_args[@]}" up -d --build
+printf '\n'
+if ! docker compose "${compose_args[@]}" up -d --build; then
   printf '\n!! compose up failed — see output above\n' >&2
   exit 1
 fi
@@ -53,8 +66,12 @@ done
 
 if [[ "$ready" != "1" ]]; then
   printf '\n!! %s/readyz never responded within %ss\n' "$base_url" "$boot_timeout" >&2
-  printf '   check: docker compose -f %s logs --tail=80 app-api\n' "$compose_file" >&2
-  printf '   fix:   docker compose -f %s restart app-api\n' "$compose_file" >&2
+  printf '   check: docker compose' >&2
+  printf ' %q' "${compose_args[@]}" logs --tail=80 app-api >&2
+  printf '\n' >&2
+  printf '   fix:   docker compose' >&2
+  printf ' %q' "${compose_args[@]}" restart app-api >&2
+  printf '\n' >&2
   exit 1
 fi
 
