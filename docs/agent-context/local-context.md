@@ -19,20 +19,25 @@ they exist:
 ```text
 .agents/local/AGENTS.local.md
 .agents/local/SETUP.local.md
+.env
+site/.env
 docker-compose.override.yml
 ```
 
-The recommended layout is a private companion repository with one directory per
-public project:
+The recommended layout is a sibling private companion repository with one
+directory per public project:
 
 ```text
-/home/ubuntu/git/dev-context/<project>/
+../dev-context/<project>/
 ```
 
 Then link a project into the public worktree:
 
 ```bash
-ln -s /home/ubuntu/git/dev-context/crewday .agents/local
+ln -s ../../dev-context/crewday .agents/local
+ln -s ../dev-context/crewday/crewday.env .env
+ln -s ../../dev-context/crewday/crewday.env site/.env
+ln -s ../dev-context/crewday/docker-compose.override.yml docker-compose.override.yml
 ```
 
 Harnesses that support `@` file expansion can inline
