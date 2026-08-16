@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
-# Run all quality gates (ruff format + ruff check + mypy + React Doctor
-# + pytest) at once with autofix where possible, then re-check to surface
-# what still needs manual attention. Pytest uses pytest-testmon by default
-# so tests whose executed code has not changed are deselected after the
-# cache is warm. The script uses ``--testmon-forceselect`` because the
+# Run all quality gates (ruff format + ruff check + mypy + frontend checks
+# + React Doctor + pytest) at once with autofix where possible, then re-check
+# to surface what still needs manual attention. Pytest uses pytest-testmon by
+# default so tests whose executed code has not changed are deselected after
+# the cache is warm. The script uses ``--testmon-forceselect`` because the
 # repo's pytest addopts include a marker selector.
 #
 # Sequence:
@@ -14,8 +14,9 @@
 #   5. bind-mount visibility (dev-stack containers can read source files)
 #   6. mypy app              (strict type check; CI parity)
 #   7. make openapi-agent-links
-#   8. scripts/react-doctor-gate.sh
-#   9. pytest --testmon-forceselect
+#   8. app/web typecheck + unit tests + production build
+#   9. scripts/react-doctor-gate.sh
+#  10. pytest --testmon-forceselect
 #
 # Exit 0 only when every gate is clean. Non-zero exit means there is
 # something the agent must fix by hand — the unfixable items are
@@ -74,6 +75,9 @@ ruff_fmt_status=0
 bind_mount_visibility_status=0
 mypy_status=0
 openapi_agent_links_status=0
+frontend_typecheck_status=0
+frontend_test_status=0
+frontend_build_status=0
 react_doctor_status=0
 pytest_status=0
 
@@ -232,6 +236,17 @@ uv run mypy app || mypy_status=$?
 section "openapi-agent-links"
 make openapi-agent-links || openapi_agent_links_status=$?
 
+section "app/web typecheck"
+npm --prefix app/web run typecheck || frontend_typecheck_status=$?
+
+if [[ "$test_mode" != "skip" ]]; then
+  section "app/web unit tests"
+  npm --prefix app/web test || frontend_test_status=$?
+fi
+
+section "app/web production build"
+npm --prefix app/web run build || frontend_build_status=$?
+
 section "react-doctor (active React surfaces)"
 ./scripts/react-doctor-gate.sh || react_doctor_status=$?
 
@@ -286,6 +301,26 @@ if [[ $openapi_agent_links_status -eq 0 ]]; then
   echo "openapi links:      ok"
 else
   echo "openapi links:      FAILED — fix x-agent-links issues printed above"
+  overall=1
+fi
+if [[ $frontend_typecheck_status -eq 0 ]]; then
+  echo "app/web typecheck:  ok"
+else
+  echo "app/web typecheck:  FAILED — fix the TypeScript errors printed above"
+  overall=1
+fi
+if [[ "$test_mode" == "skip" ]]; then
+  echo "app/web tests:      skipped"
+elif [[ $frontend_test_status -eq 0 ]]; then
+  echo "app/web tests:      ok"
+else
+  echo "app/web tests:      FAILED — fix the frontend test failures printed above"
+  overall=1
+fi
+if [[ $frontend_build_status -eq 0 ]]; then
+  echo "app/web build:      ok"
+else
+  echo "app/web build:      FAILED — fix the production build errors printed above"
   overall=1
 fi
 if [[ $react_doctor_status -eq 0 ]]; then

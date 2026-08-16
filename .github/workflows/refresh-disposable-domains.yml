@@ -63,7 +63,7 @@ jobs:
         with:
           python-version: "3.14"
       - name: Install deps
-        run: uv sync --group dev
+        run: uv sync --frozen --group dev
 
       - name: Fetch upstream blocklist (pinned SHA)
         run: |

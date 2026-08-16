@@ -4,12 +4,14 @@
 # docs/specs/01-architecture.md §"Enforcement"). The e2e job is cd-asvl
 # (spec: docs/specs/17-testing-quality.md §"End-to-end").
 #
-# Ten jobs:
+# Jobs:
 #   * lint         — ruff check + ruff format --check
 #   * type         — mypy --strict on app/ (extends to cli/ via cd-j202
 #                    once that tree exists)
 #   * react-doctor — React Doctor score 100 / zero diagnostics for active
 #                    React surfaces (app/web + site/web; mocks excluded).
+#   * app-web      — locked install, TypeScript check, frontend unit tests,
+#                    and the production SPA build.
 #   * i18n-keys    — committed gettext catalogs and SPA JSON bundles
 #                    match the extracted source keys.
 #   * openapi      — ``docs/api/openapi.json`` matches the live FastAPI
@@ -85,7 +87,7 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
       - name: Install deps
-        run: uv sync --group dev
+        run: uv sync --frozen --group dev
       - name: ruff check
         run: uv run ruff check .
       - name: ruff format --check
@@ -107,7 +109,7 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
       - name: Install deps
-        run: uv sync --group dev
+        run: uv sync --frozen --group dev
       # cd-j202 will extend this to `uv run mypy app cli` once the CLI
       # tree exists. Until then mypy only sweeps app/.
       - name: mypy --strict app
@@ -130,6 +132,24 @@ jobs:
         run: npm --prefix site/web ci
       - name: React Doctor
         run: ./scripts/react-doctor-gate.sh
+
+  app-web:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: app/web/package-lock.json
+      - name: Install app web deps from lockfile
+        run: npm --prefix app/web ci --no-audit --no-fund --min-release-age=7
+      - name: Typecheck app web
+        run: npm --prefix app/web run typecheck
+      - name: Test app web
+        run: npm --prefix app/web test
+      - name: Build app web
+        run: npm --prefix app/web run build
 
   csp-inlines:
     # Built SPA must carry no un-nonced inline <script>/<style> (cd-wv2v,
@@ -178,7 +198,7 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
       - name: Install deps
-        run: uv sync --group dev
+        run: uv sync --frozen --group dev
       - name: i18n catalog freshness
         run: make i18n-check
 
@@ -202,7 +222,7 @@ jobs:
         with:
           python-version: "3.14"
       - name: Install deps
-        run: uv sync --group dev
+        run: uv sync --frozen --group dev
       - name: openapi schema freshness
         run: make openapi-check
 
@@ -218,7 +238,7 @@ jobs:
         with:
           python-version: "3.14"
       - name: Install deps
-        run: uv sync --group dev
+        run: uv sync --frozen --group dev
       - name: CLI parity
         run: uv run python scripts/cli_parity_check.py
 
@@ -234,7 +254,7 @@ jobs:
         with:
           python-version: "3.14"
       - name: Install deps
-        run: uv sync --group dev
+        run: uv sync --frozen --group dev
       - name: OpenAPI agent links
         run: make openapi-agent-links
 
@@ -253,7 +273,7 @@ jobs:
         with:
           python-version: "3.14"
       - name: Install deps
-        run: uv sync --group dev
+        run: uv sync --frozen --group dev
       - name: lint-imports
         # import-linter discovers its config from pyproject.toml
         # ([tool.importlinter]).
@@ -289,7 +309,7 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
       - name: Install deps
-        run: uv sync --group dev
+        run: uv sync --frozen --group dev
       - name: pytest (unit + api + property + llm, SQLite)
         run: uv run pytest tests/unit tests/api tests/property tests/llm -x -q
 
@@ -310,7 +330,7 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
       - name: Install deps
-        run: uv sync --group dev
+        run: uv sync --frozen --group dev
       - name: Select backend (sqlite)
         if: matrix.database == 'sqlite'
         # tests/integration/conftest.py defaults to SQLite when
@@ -357,7 +377,7 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
       - name: Install deps
-        run: uv sync --group dev
+        run: uv sync --frozen --group dev
       - name: Select backend (sqlite)
         if: matrix.database == 'sqlite'
         run: echo "CREWDAY_TEST_DB=sqlite" >> "$GITHUB_ENV"
@@ -394,7 +414,7 @@ jobs:
         with:
           python-version: "3.14"
       - name: Install deps
-        run: uv sync --group dev
+        run: uv sync --frozen --group dev
       - name: pytest (coverage floor, SQLite)
         run: uv run pytest tests/unit tests/api tests/property tests/llm tests/integration --cov=app --cov-report=term-missing
 
@@ -431,7 +451,7 @@ jobs:
         with:
           python-version: "3.14"
       - name: Install deps
-        run: uv sync --group dev
+        run: uv sync --frozen --group dev
       - name: schemathesis (contract sweep)
         # The runner script handles uvicorn lifecycle, seed helper,
         # token mint, and tear-down. ``make schemathesis`` is the
@@ -458,7 +478,7 @@ jobs:
         with:
           python-version: "3.14"
       - name: Install deps
-        run: uv sync --group dev
+        run: uv sync --frozen --group dev
       - name: Cache Playwright browsers
         # Browser binaries (~250 MB for Chromium + WebKit) live under
         # ``~/.cache/ms-playwright`` and only change when the

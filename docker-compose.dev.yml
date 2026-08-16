@@ -172,11 +172,10 @@ services:
     container_name: crewday-web-dev
     restart: unless-stopped
     working_dir: /web
-    # ``--no-package-lock`` keeps the host's ``package-lock.json`` from
-    # being rewritten by the container-side install. Without it every
-    # ``docker compose up`` mutates the lockfile (the bind-mount is
-    # read-write) so every restart shows up as uncommitted churn.
-    command: sh -lc "npm install --no-audit --no-fund --no-package-lock --min-release-age=7 && npm run dev -- --host 0.0.0.0"
+    # ``npm ci`` uses the committed lockfile and does not rewrite it. This
+    # keeps local development and the e2e stack on the dependency tree that
+    # CI reviews.
+    command: sh -lc "npm ci --no-audit --no-fund --min-release-age=7 && npm run dev -- --host 0.0.0.0"
     environment:
       # The browser never talks to Vite directly anymore (FastAPI is
       # the front door), so Vite's ``server.proxy`` config is
@@ -188,6 +187,9 @@ services:
       VITE_CREWDAY_PUBLIC_SITE_URL: "${CREWDAY_PUBLIC_SITE_URL:-http://127.0.0.1:${SITE_HTTP_PORT:-18080}}"
     volumes:
       - ./app/web:/web
+      # Keep Alpine-native optional packages and container ownership out of
+      # the host dependency tree. The source bind still provides package-lock.json.
+      - crewday-web-node-modules:/web/node_modules
     expose:
       - "5173"
     networks:
@@ -227,3 +229,6 @@ volumes:
   # ``docker compose down`` but is wiped with ``docker compose down
   # -v`` when the operator wants a clean slate.
   crewday-app-data:
+  # Container-only npm tree for web-dev. The app source and lockfile stay
+  # bind-mounted from the repository.
+  crewday-web-node-modules:
