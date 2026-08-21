@@ -94,6 +94,19 @@ These rules intentionally mirror the high-signal parts of the
 Karpathy-style guidance: surface uncertainty, keep changes small, avoid
 speculation, and make success verifiable.
 
+## Shared OpenDLE code
+
+Before adding backend behavior, check `../opendle-lib` and the sibling
+projects. If the behavior has credible reuse in more than one OpenDLE project,
+put the framework-neutral code and its tests in `../opendle-lib`, then use the
+direct Git `main` dependency here. Keep Crewday rules, models, routes, and
+framework adapters local. Do not copy shared code between projects. One tested
+implementation makes fixes and security updates apply to all consumers.
+
+Before adding a reusable frontend component, token, or interaction pattern,
+check `../opendle-ui` and put the shared item there first. Keep only
+Crewday-specific views, copy, data, and host composition here.
+
 ## Partner in thought
 
 The user expects pushback, not compliance. Flag before acting when:
