@@ -1,0 +1,3 @@
+{
+  "supportEntry": ["scripts/*.ts", "tests/*.test.mjs"]
+}
