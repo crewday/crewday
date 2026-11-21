@@ -17,6 +17,7 @@
 #   8. app/web typecheck + unit tests + production build
 #   9. scripts/react-doctor-gate.sh
 #  10. pytest --testmon-forceselect
+#  11. fallow and jscpd report for the changed files (never fails)
 #
 # Exit 0 only when every gate is clean. Non-zero exit means there is
 # something the agent must fix by hand — the unfixable items are
@@ -264,6 +265,27 @@ case "$test_mode" in
     echo "skipped (--skip-tests)"
     ;;
 esac
+
+# Report fallow findings and copied code in the changed files. This report does not fail the check.
+report_code_findings() {
+  local dir
+  if command -v fallow >/dev/null; then
+    for dir in app/web site/web; do
+      (cd "$dir" && FALLOW_UPDATE_CHECK=off fallow review --brief) || true
+    done
+  else
+    echo "fallow is not installed: no fallow report."
+  fi
+  if command -v jscpd >/dev/null; then
+    jscpd --changed --baseline "$(git rev-parse --git-dir)/jscpd-baseline.json" \
+      --reporters ai --no-colors app cli site || true
+  else
+    echo "jscpd is not installed: no duplicate report."
+  fi
+}
+
+section "fallow and jscpd (report only)"
+report_code_findings
 
 section "summary"
 overall=0

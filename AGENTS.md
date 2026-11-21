@@ -271,10 +271,9 @@ update in your wrap-up.
   prints exactly what still needs a manual fix. Use it instead of
   running the individual `uv run ruff …` / `uv run mypy …` commands by
   hand.
-- **Fallow.** Before each commit that changes JS or TS code, run
-  `fallow audit` in `app/web` and in `site/web`. It must pass.
-- **jscpd.** After a large change, run `jscpd --silent app cli site`.
-  Merge the duplicates that the change adds. Do not make jscpd a gate.
+  The script also reports fallow findings and jscpd clones for the
+  changed files. Fix the findings that your change adds when the fix
+  makes the code simpler.
 - **Python env sync.** If a Python gate fails during import or pytest
   config loading because a dependency or pytest plugin from
   `pyproject.toml` is missing, run `uv sync --all-groups` from the repo
