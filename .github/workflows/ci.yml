@@ -31,8 +31,8 @@
 #   * unit         — pytest tests/unit tests/api tests/property tests/llm
 #                    on SQLite only (the default).
 #   * integration  — pytest tests/integration on both SQLite (default)
-#                    and Postgres 18 via testcontainers (cd-rhaj). The
-#                    PG shard spins up a disposable postgres:18-alpine
+#                    and Postgres 19 via testcontainers (cd-rhaj). The
+#                    PG shard spins up a disposable postgres:19-alpine
 #                    container inside the test process; no workflow-
 #                    level services block is needed because the runner
 #                    (ubuntu-latest) ships Docker preinstalled.
@@ -339,7 +339,7 @@ jobs:
         run: echo "CREWDAY_TEST_DB=sqlite" >> "$GITHUB_ENV"
       - name: Select backend (postgres)
         if: matrix.database == 'postgres'
-        # testcontainers starts its own postgres:18-alpine container
+        # testcontainers starts its own postgres:19-alpine container
         # inside the pytest process (cd-rhaj). The ubuntu-latest
         # runner has the Docker engine preinstalled, so no
         # services: block is needed — this shard stays aligned with
@@ -357,7 +357,7 @@ jobs:
     # repository / HTTP / event / worker surface-parity gates live here:
     # a new workspace-scoped surface added without a case or an explicit
     # opt-out fails the gate. Runs on both SQLite (app-filter only) and
-    # Postgres 18 via testcontainers (RLS + app-filter), matching the
+    # Postgres 19 via testcontainers (RLS + app-filter), matching the
     # ``integration`` job's backend selection — the suite re-exports
     # tests/integration's engine / db_url / migrate_once fixtures, which
     # honour ``CREWDAY_TEST_DB``.

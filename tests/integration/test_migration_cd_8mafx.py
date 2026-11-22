@@ -100,7 +100,7 @@ class TestCd8mafxMigration:
         except ImportError as exc:  # pragma: no cover - dep is in dev group
             pytest.skip(f"testcontainers not installed: {exc}")
 
-        pg_cm = PostgresContainer("postgres:18-alpine", driver="psycopg")
+        pg_cm = PostgresContainer("postgres:19-alpine", driver="psycopg")
         try:
             pg_cm.__enter__()
         except Exception as exc:

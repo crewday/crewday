@@ -13,7 +13,7 @@ Per ``docs/specs/17-testing-quality.md`` §"Integration":
       ``sqlite`` (default) returns a per-session temp-file SQLite
       URL. ``postgres`` spins up a session-scoped
       :class:`testcontainers.postgres.PostgresContainer` (image
-      ``postgres:18-alpine``) and returns its connection URL, with
+      ``postgres:19-alpine``) and returns its connection URL, with
       the ``psycopg2`` driver prefix rewritten to ``psycopg`` (v3,
       which is what this project pins — see
       ``app/adapters/db/session.py::normalise_sync_url``).
@@ -244,7 +244,7 @@ def db_url(tmp_path_factory: pytest.TempPathFactory, worker_id: str) -> Iterator
       gets its own file (``test-<worker_id>.db``) so parallel workers
       don't stomp on a shared SQLite file (locks + corruption).
     * ``postgres``: a session-scoped :class:`PostgresContainer`
-      (``postgres:18-alpine``). The container is torn down at
+      (``postgres:19-alpine``). The container is torn down at
       session end. Under xdist each worker stands up its own
       container — testcontainers picks a free host port per
       container, so there's no collision. We pass
@@ -289,7 +289,7 @@ def db_url(tmp_path_factory: pytest.TempPathFactory, worker_id: str) -> Iterator
         # through ``normalise_sync_url`` is belt-and-braces — it's a
         # no-op on a ``+psycopg`` URL but keeps parity with the
         # production URL-normalisation path.
-        with PostgresContainer("postgres:18-alpine", driver="psycopg") as container:
+        with PostgresContainer("postgres:19-alpine", driver="psycopg") as container:
             yield normalise_sync_url(container.get_connection_url())
         return
 

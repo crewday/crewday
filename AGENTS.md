@@ -369,7 +369,7 @@ Plain text to the user; CLI handles styling.
   (no parens). It is **valid syntax** here — do not "fix" it back to
   the parenthesized form. Agents have repeatedly mis-corrected this;
   if you see it in the codebase, leave it alone.
-- **SQLite default; Postgres 18+ supported** — CI runs both. Use
+- **SQLite default; Postgres 19+ supported** — CI runs both. Use
   portable SQL or SQLAlchemy idioms.
 - **React frontend.** `app/web/` is the production Vite + React +
   TypeScript strict SPA served by FastAPI from `app/web/dist`.
