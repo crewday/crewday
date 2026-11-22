@@ -266,7 +266,7 @@ services:
     networks: [crewday]
 
   db:
-    image: postgres:15-alpine
+    image: postgres:18-alpine
     restart: unless-stopped
     environment:
       POSTGRES_USER: crewday
@@ -278,7 +278,7 @@ services:
       timeout: 5s
       retries: 20
     volumes:
-      - db-data:/var/lib/postgresql/data
+      - db-data:/var/lib/postgresql
     networks: [crewday]
 
   minio:
@@ -302,6 +302,10 @@ volumes:
 networks:
   crewday:
 ```
+
+Existing PostgreSQL 15 installations need a logical backup and restore into
+a separate PostgreSQL 18 volume. Stop the app and worker for the final backup.
+Keep the old volume until the new instance passes its checks.
 
 ### Caddyfile
 
@@ -523,7 +527,7 @@ layer by RLS (§15). Payments are **not** in scope for v1
                     |
        +------------+-----------+
        |            |           |
-  Postgres 15     S3 / MinIO   OpenRouter
+  Postgres 18     S3 / MinIO   OpenRouter
   (RLS on        (per-WS path) (budgeted per WS)
   every table)
 ```
@@ -569,7 +573,7 @@ layer by RLS (§15). Payments are **not** in scope for v1
   every worker. SQLite keeps the single-process/dev behavior and the
   router's 30 s TTL remains the fallback if a direct DB edit bypasses
   the bus.
-- **Postgres 15+ recommended** for the threat profile (untrusted
+- **Postgres 18+ recommended** for the threat profile (untrusted
   tenants) because it activates `features.rls` (§01) as defence-
   in-depth. The app runs equally on SQLite; the choice is about
   isolation depth and concurrent-write scalability, not about
@@ -619,13 +623,13 @@ services:
     depends_on: [db]
 
   db:
-    image: postgres:15
+    image: postgres:18
     restart: unless-stopped
     environment:
       POSTGRES_USER: "crewday"
       POSTGRES_PASSWORD: "${PG_PASS}"
       POSTGRES_DB: "crewday"
-    volumes: ["./pgdata:/var/lib/postgresql/data"]
+    volumes: ["./pgdata:/var/lib/postgresql"]
 ```
 
 ### Caddyfile

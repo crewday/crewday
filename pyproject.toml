@@ -199,7 +199,7 @@ dev = [
     "locust",
     "factory-boy",
     "hypothesis",
-    # Spin up a real Postgres 15 per integration-test session (cd-rhaj).
+    # Spin up a real Postgres 18 per integration-test session (cd-rhaj).
     # The sqlite shard never touches this package, but it's cheap to
     # install in dev and keeps the PG shard hermetic: no need for a
     # services: postgres block in CI — testcontainers handles container

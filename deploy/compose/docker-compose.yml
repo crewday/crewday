@@ -105,7 +105,7 @@ services:
       - crewday
 
   postgres:
-    image: postgres:15-alpine@sha256:cd17e2ac98240fce1541ad2a803b34009b4eea5aec8a832363cdc7eca62e722e
+    image: postgres:18.7-alpine@sha256:0115267ab5a509022df9319c77be365cef335adb71556c75f60f5360ee247e71
     restart: unless-stopped
     environment:
       POSTGRES_USER: crewday
@@ -117,7 +117,7 @@ services:
       timeout: 5s
       retries: 20
     volumes:
-      - postgres-data:/var/lib/postgresql/data
+      - postgres-data:/var/lib/postgresql
     networks:
       - crewday
 

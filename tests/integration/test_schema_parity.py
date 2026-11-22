@@ -220,7 +220,7 @@ def test_schema_fingerprint_matches_on_sqlite_and_pg(
     """Migrations must produce the same structural schema on both backends.
 
     Runs ``alembic upgrade head`` against a fresh SQLite file and a
-    freshly-spun-up ``postgres:15-alpine`` testcontainer, computes a
+    freshly-spun-up ``postgres:18-alpine`` testcontainer, computes a
     dialect-agnostic fingerprint of each, and asserts they agree on
     tables, columns, PK/FK/unique membership, and index columns.
     Types are intentionally NOT compared — a migration is portable
@@ -251,7 +251,7 @@ def test_schema_fingerprint_matches_on_sqlite_and_pg(
             # this repo installs) instead of the testcontainers
             # default of psycopg2 — no post-hoc string substitution
             # needed. See ``tests/integration/conftest.py::db_url``.
-            pg_cm = PostgresContainer("postgres:15-alpine", driver="psycopg")
+            pg_cm = PostgresContainer("postgres:18-alpine", driver="psycopg")
             pg_cm.__enter__()
         except Exception as exc:
             # Narrow: we only catch startup failures (Docker missing,

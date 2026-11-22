@@ -223,7 +223,7 @@ the driver sees tomorrow's airport run; the head of house sees everything.
   the production React SPA (`app/web/`).
 - **Stack.** FastAPI + React (Vite, TypeScript strict) + hand-rolled CSS
   design system. No Tailwind, no Alpine, no Vue. SQLite default,
-  Postgres 15+ supported. See §01.
+  Postgres 18+ supported. See §01.
 - **Hosting.** The binary/image must run on a $5/month VPS with 1 vCPU
   and 1 GB RAM for a 5-employee workspace without swapping. Compose
   deployments assume 2 vCPU / 2 GB.

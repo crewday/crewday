@@ -24,7 +24,7 @@ stack:
   under `app/` — `domain/` (pure), `ports/` + `adapters/` (boundaries),
   `services/`, `api/` + `http/` (REST, spec 12), `auth/` `authz/`
   `security/` `tenancy/` (specs 03, 15).
-- **Persistence**: SQLAlchemy + Alembic; SQLite default, Postgres 15+
+- **Persistence**: SQLAlchemy + Alembic; SQLite default, Postgres 18+
   supported (CI runs both). DB concretions live in
   `app/adapters/db/`; migrations in `migrations/`.
 - **App frontend**: `app/web/` — Vite + React + TypeScript strict SPA,
